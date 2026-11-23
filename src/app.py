@@ -265,6 +265,12 @@ def work(t):
 def step(t, line):
     w = work(t)
     line = line.strip()
+    if line:
+        try:      # nhật ký có giờ cho từng bước (dùng khi xuất log)
+            with open(tdir(t) / "timeline.log", "a", encoding="utf-8") as f:
+                f.write(f"{now()}\t{line[:500]}\n")
+        except Exception:
+            pass
     if w is not None and line:
         w["steps"].append(line[:300])
         w["steps"] = w["steps"][-400:]
@@ -1054,6 +1060,8 @@ class H(BaseHTTPRequestHandler):
             return ai_login(d["ai"], switch=bool(d.get("switch")))
         if path == "/api/ai/cancel" and d.get("ai") in AIS:
             return ai_cancel(d["ai"])
+        if path == "/api/export-log":
+            return export_log()
         if path == "/api/update":
             return update_now()
         if path == "/api/pick":
@@ -1130,6 +1138,47 @@ def shutdown():
 
 
 UPDATED = {"pending": None, "done": ""}
+
+
+def export_log():
+    """Gom log của mọi task vào 1 file zip trong thư mục kết quả (không kèm file đầu vào/đầu ra)."""
+    import zipfile
+    if not CFG.get("output") or not Path(CFG["output"]).is_dir():
+        return {"error": "Chưa chọn thư mục nhận kết quả"}
+    name = "AI-Orchestrator-log-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + ".zip"
+    dst = Path(CFG["output"]) / name
+    fmt = lambda s: f"{int(s) // 60}m{int(s) % 60:02d}s"
+    lines = [f"# AI Orchestrator log — v{RELEASE} ({VERSION}) — {now()}", "",
+             "AI: " + ", ".join(f"{k}={'ok' if v.get('ok') else 'chưa'}" for k, v in CFG["ais"].items()), ""]
+    with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
+        for t in sorted(TASKS.values(), key=lambda x: x["created"], reverse=True):
+            d = tdir(t)
+            lines += [f"## {t['title']}  [{t['id']}]  — {t['status']}", f"Tạo: {t['created']}  Thư mục: {t.get('folder', '')}", ""]
+            det = task_detail(t)
+            for m in det["messages"]:
+                if m["role"] == "user":
+                    lines.append(f"- {m.get('time', '')}  BẠN: {m['text'][:200].replace(chr(10), ' ')}")
+                elif m["role"] == "work":
+                    dur = (m.get("ended_ts") or time.time()) - m.get("started_ts", time.time())
+                    lines.append(f"- {m.get('started', '')}  LƯỢT LÀM: {fmt(dur)} — {m.get('status')} — {len(m.get('steps', []))} bước")
+                    for s in m.get("subtasks", []):
+                        lines.append(f"    - sub-task {s['id']}: {s['worker'] or '?'} {s['model']}  lần {s['attempt']}  "
+                                     f"{fmt(s['seconds']) if s.get('seconds') is not None else '?'}  {s['status']}  {s['error']}")
+                else:
+                    lines.append(f"- {m.get('time', '')}  CLAUDE ({m.get('kind') or 'trả lời'}): {m['text'][:200].replace(chr(10), ' ')}")
+            lines.append("")
+            for f in [d / "task.json", d / "timeline.log", d / "run.log", d / "tasks" / "plan.json", d / "CLAUDE.md"]:
+                if f.is_file():
+                    z.write(f, f"{t['id']}/{f.name}")
+            for f in list((d / "tasks").glob("*.md")) + [x for x in (d / "work").glob("*/v*/*")
+                                                           if x.name in ("status.json", "worker.log", "TASK.md", "result.md")]:
+                if f.is_file():
+                    z.write(f, f"{t['id']}/{f.relative_to(d).as_posix()}")
+        if (HOME / "install.log").is_file():
+            z.write(HOME / "install.log", "install.log")
+        z.writestr("summary.md", "\n".join(lines))
+    open_path(CFG["output"])
+    return {"ok": True, "msg": "Đã lưu " + name + " trong thư mục kết quả"}
 
 
 def busy_tasks():
