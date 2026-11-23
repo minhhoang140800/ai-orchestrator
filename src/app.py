@@ -879,7 +879,7 @@ class HiddenTerm:
                 importlib.invalidate_caches()
                 sys.path.append(site.getusersitepackages())
                 from winpty import PtyProcess
-            self.p = PtyProcess.spawn(subprocess.list2cmdline(args), cwd=cwd, dimensions=(50, 500))
+            self.p = PtyProcess.spawn([str(x) for x in args], cwd=cwd, dimensions=(50, 500))
             self.pid = self.p.pid
             self._read = lambda: self.p.read(4096)
             self._write = self.p.write
