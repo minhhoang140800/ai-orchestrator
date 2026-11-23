@@ -114,7 +114,6 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
       <span style="flex:1"></span>
       <button class="ghost icon" id="btnOut" title="Mở thư mục kết quả" aria-label="Mở thư mục kết quả"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
       <button class="ghost icon" id="btnSet" title="Cài đặt" aria-label="Cài đặt"><svg class="i" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></button>
-      <button class="ghost icon" id="btnQuit" title="Tắt" aria-label="Tắt"><svg class="i" viewBox="0 0 24 24"><path d="M18.4 6.6a9 9 0 1 1-12.8 0M12 2v10"/></svg></button>
     </div>
   </aside>
   <main id="main"></main>
@@ -197,7 +196,7 @@ async function refresh() {
   renderSide();
   if (sel && !S.tasks.find((t) => t.id === sel)) sel = "";
   if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
-  if ($("ov").classList.contains("show") && tab === "acc") renderSettings();
+  if ($("ov").classList.contains("show") && tab === "acc" && !document.activeElement?.id?.startsWith("code_")) renderSettings();
   if (!firstRun && (!S.output || !S.ais.claude.ok)) { firstRun = true; openSettings(S.ais.claude.ok ? "setup" : "acc"); }
 }
 async function loadTask() {
@@ -277,7 +276,7 @@ function workBlock(m, i) {
   const label = live ? `<span class="spin"></span>Đang làm · <span data-timer="${m.started_ts}">${clock(el)}</span>`
     : { done: `Đã làm trong ${dur(el)}`, interrupted: `Dừng để nhận tin mới · ${dur(el)}`, paused: `Tạm dừng sau ${dur(el)}`, cancelled: `Đã hủy sau ${dur(el)}`, failed: `Lỗi sau ${dur(el)}` }[m.status] || dur(el);
   const nsub = m.subtasks.length ? ` · ${m.subtasks.length} sub-task` : "";
-  const steps = m.steps.slice(live ? -8 : -40);
+  const steps = m.steps;
   const subs = m.subtasks.length ? `<div class="subs">${m.subtasks.map((s) => `<div class="sub" title="${esc(s.error)}"><span class="id">${esc(s.id)}</span><span class="tt">${esc(s.title || "—")}</span>
       <span class="chip">${WN[s.worker] || s.worker || "…"}${s.model ? " · " + esc(s.model) : ""}${s.attempt > 1 ? " · lần " + s.attempt : ""}</span>
       <span class="pill ${s.status}">${s.status === "running" ? "Đang làm" : ST[s.status] || s.status}</span></div>`).join("")}</div>` : "";
@@ -343,7 +342,7 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file]");
+  const el = e.target.closest("[data-sel],[data-act],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-code]");
   if (!el) return;
   const d = el.dataset;
   if (d.sel) { sel = d.sel; sessionStorage.setItem("sel", sel); T = null; files = []; renderSide(); await loadTask(); }
@@ -359,18 +358,13 @@ document.addEventListener("click", async (e) => {
   }
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
   else if (d.tab) { collect(); tab = d.tab; renderSettings(); }
+  else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; const r = await api("/api/ai/code", { ai: d.code, code: v }); toast(r.error || "Đã gửi mã, đang kiểm tra…"); }
   else if (d.login) { await api("/api/ai/login", { ai: d.login }); S.ais[d.login].pending = "login"; renderSettings(); }
   else if (d.test) { S.ais[d.test].pending = true; renderSettings(); await api("/api/ai/test", { ai: d.test }); S = await api("/api/state"); renderSettings(); renderSide(); }
 });
 $("btnNew").onclick = () => { sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
 $("btnSet").onclick = () => openSettings("acc");
 $("btnOut").onclick = () => (S.output ? api("/api/open-output", {}) : openSettings("setup"));
-$("btnQuit").onclick = async () => {
-  if (!confirm("Tắt AI Orchestrator? Task đang làm sẽ tự chạy tiếp khi mở lại.")) return;
-  await api("/api/quit", {}); clearInterval(timer);
-  document.body.innerHTML = '<p style="font:16px system-ui;padding:40px">Đã tắt. Bấm đúp file cài AI-Orchestrator (.bat) để mở lại.</p>';
-};
-
 /* ---------------- settings ---------------- */
 function openSettings(t) { tab = t; form = { output: S.output, instructions: S.instructions }; renderSettings(); $("ov").classList.add("show"); }
 function collect() { if (form && $("fIns")) form.instructions = $("fIns").value; }
@@ -380,9 +374,10 @@ function renderSettings() {
   if (tab === "acc") {
     h = Object.entries(S.ais).map(([k, a]) => {
       const st = !a.installed ? `<small class="bad">Chưa cài — bấm đúp lại file cài AI-Orchestrator (.bat)</small>`
-        : a.pending === "login" ? `<small>Đang chờ đăng nhập… Copy link trong cửa sổ: giữ <b>Shift</b> + kéo chuột để bôi đen, chuột phải để copy. Hoặc giữ <b>Ctrl</b> + bấm vào link để mở.</small>` : a.pending ? `<small>Đang kiểm tra…</small>` : a.ok ? `<small>Sẵn sàng</small>` : a.ok === false ? `<small class="bad">Chưa đăng nhập${a.msg ? " · " + esc(a.msg) : ""}</small>` : `<small>Chưa đăng nhập</small>`;
+        : a.code ? `<small>Đã mở trang đăng nhập Google trên trình duyệt. Đăng nhập xong, dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`
+        : a.pending === "login" ? `<small>Đang chờ đăng nhập…</small>` : a.pending ? `<small>Đang kiểm tra…</small>` : a.ok ? `<small>Sẵn sàng</small>` : a.ok === false ? `<small class="bad">Chưa đăng nhập${a.msg ? " · " + esc(a.msg) : ""}</small>` : `<small>Chưa đăng nhập</small>`;
       return `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${a.ok && a.email ? " - " + esc(a.email) : ""}${st}</span>
-        <button class="ghost icon" data-test="${k}" title="Kiểm tra lại" aria-label="Kiểm tra lại" ${a.installed && !a.pending ? "" : "disabled"}>${I.refresh}</button>
+        <button class="ghost icon" data-test="${k}" title="Kiểm tra lại" aria-label="Kiểm tra lại" ${a.installed ? "" : "disabled"}>${I.refresh}</button>
         <button data-login="${k}" ${a.installed && !a.pending ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button></div>`;
     }).join("");
   } else {
@@ -404,6 +399,7 @@ function renderSettings() {
 function closeSettings() { $("ov").classList.remove("show"); refresh(); }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("ov").classList.contains("show")) closeSettings(); });
 
+addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
 refresh();
 const timer = setInterval(() => { if (!$("ov").classList.contains("show") || tab === "acc") refresh(); }, 2000);
 </script>

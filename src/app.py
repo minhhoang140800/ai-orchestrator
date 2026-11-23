@@ -47,9 +47,11 @@ NO_WINDOW = 0x08000000 if IS_WIN else 0
 MAX_RUNNING = 2
 PING = "Reply with the single word PONG and nothing else."
 
+CODEX_SANDBOX = (["--sandbox", "workspace-write", "-c", 'windows.sandbox="unelevated"'] if IS_WIN
+                 else ["--sandbox", "workspace-write"])
 AIS = {
     "claude": {"bin": "claude", "login": ["auth", "login"], "test": ["-p", PING]},
-    "codex": {"bin": "codex", "login": ["login"], "test": ["exec", "--skip-git-repo-check", PING]},
+    "codex": {"bin": "codex", "login": ["login"], "test": ["exec", "--skip-git-repo-check", *CODEX_SANDBOX, PING]},
     "gemini": {"bin": "agy", "login": [], "test": ["-p", PING]},
 }
 ICON_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="13" fill="#E8EFF2"/><g stroke="#035A3D" stroke-width="2.8"><path d="M32 34.5V14.8M32 34.5 13.7 47.3M32 34.5l18.3 12.8"/></g><g fill="#035A3D"><circle cx="32" cy="34.5" r="8.8"/><circle cx="32" cy="14.8" r="5.1"/><circle cx="13.7" cy="47.3" r="4.9"/><circle cx="50.3" cy="47.3" r="4.9"/></g></svg>'
@@ -177,6 +179,7 @@ def load_cfg():
     c.setdefault("ais", {})
     for a in c["ais"].values():
         a.pop("pending", None)
+        a.pop("code", None)
     return c
 
 
@@ -242,7 +245,7 @@ def step(t, line):
     line = line.strip()
     if w is not None and line:
         w["steps"].append(line[:300])
-        w["steps"] = w["steps"][-60:]
+        w["steps"] = w["steps"][-400:]
 
 
 def end_work(t, status):
@@ -589,6 +592,7 @@ def act(tid, action, text="", files=None):
     files = [f for f in (files or []) if (tdir(t) / "input" / f).exists()]
     text = (text or "").strip()
     with _tlock:
+        t.pop("auto_paused", None)
         if action == "pause" and s == "running":
             t["_pause"] = True
             kill_tree(PROCS.get(tid))
@@ -725,6 +729,53 @@ def ai_state():
     return {k: {"installed": bool(find_bin(v["bin"])), **CFG["ais"].get(k, {})} for k, v in AIS.items()}
 
 
+def cred_mark(ai):
+    """Dấu hiệu đã đăng nhập xong (không tốn hạn mức): thời điểm sửa file đăng nhập."""
+    home = Path.home()
+    files = {"claude": [home / ".claude.json", home / ".claude" / ".credentials.json"],
+             "codex": [Path(os.environ.get("CODEX_HOME") or home / ".codex") / "auth.json"],
+             "gemini": [home / ".gemini" / "google_accounts.json", home / ".gemini" / "oauth_creds.json",
+                        home / ".gemini" / "antigravity-cli"]}[ai]
+    return max((f.stat().st_mtime for f in files if f.exists()), default=0)
+
+
+LOGINS = {}   # ai -> {"proc": Popen, "url": str}
+URL_RE = re.compile(r"https://\S+")
+
+
+def gemini_web_login(exe, d):
+    """Chạy agy không cửa sổ, bắt link đăng nhập, mở trên trình duyệt; mã xác nhận nhập trên trang web.
+    Trả về True nếu bắt được link; False -> dùng cửa sổ như cũ."""
+    try:
+        p = subprocess.Popen([exe], cwd=str(d), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                             creationflags=NO_WINDOW, env=dict(os.environ, NO_BROWSER="true"))
+    except Exception:
+        return False
+    found = {}
+
+    def reader():
+        buf = ""
+        for ch in iter(lambda: p.stdout.read(1), ""):
+            buf = (buf + ch)[-4000:]
+            if "url" not in found and ch in " \n\r\x1b":
+                clean = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", buf).replace("\n", "").replace("\r", "")
+                m = URL_RE.search(clean)
+                if m and ("accounts.google" in m.group(0) or "oauth" in m.group(0)):
+                    found["url"] = m.group(0).rstrip(".,)")
+
+    threading.Thread(target=reader, daemon=True).start()
+    t0 = time.time()
+    while time.time() - t0 < 15 and "url" not in found and p.poll() is None:
+        time.sleep(0.3)
+    if "url" not in found:
+        kill_tree(p)
+        return False
+    LOGINS["gemini"] = {"proc": p, "url": found["url"]}
+    webbrowser.open(found["url"])
+    return True
+
+
 def ai_login(ai):
     exe = find_bin(AIS[ai]["bin"])
     if not exe:
@@ -732,37 +783,60 @@ def ai_login(ai):
     d = DATA / ".login"
     d.mkdir(parents=True, exist_ok=True)
     CFG["ais"].setdefault(ai, {})["pending"] = "login"
+    before = cred_mark(ai)
 
     def run():
+        args = [exe, *AIS[ai]["login"]]
         try:
-            wt = shutil.which("wt") if IS_WIN else None
-            if wt:
-                # Windows Terminal: bôi đen/copy link được (giữ Shift khi kéo chuột), Ctrl+click mở link
-                flag = d / f"{ai}.done"
-                flag.unlink(missing_ok=True)
-                script = d / f"login_{ai}.cmd"
-                script.write_text("@echo off\r\n" + subprocess.list2cmdline([exe, *AIS[ai]["login"]])
-                                  + f'\r\ntype nul > "{flag}"\r\n', encoding="utf-8")
-                subprocess.Popen([wt, "-w", "new", "--title", "AI Orchestrator - Dang nhap", "-d", str(d),
-                                  "cmd.exe", "/c", str(script)], creationflags=NO_WINDOW)
-                t0 = time.time()
-                while not flag.exists() and time.time() - t0 < 900:
-                    time.sleep(2)
-            elif IS_WIN:   # cửa sổ đăng nhập hiện lên trước; đóng xong thì tự kiểm tra
-                subprocess.run(["cmd.exe", "/c", "start", "/wait", "AI Orchestrator - Dang nhap", exe,
-                                *AIS[ai]["login"]], cwd=str(d), creationflags=NO_WINDOW)
+            if ai == "gemini" and gemini_web_login(exe, d):
+                CFG["ais"][ai]["code"] = True          # trang web hiện ô dán mã
+            elif IS_WIN:
+                wt = shutil.which("wt")
+                if wt:
+                    subprocess.Popen([wt, "-w", "new", "--title", "AI Orchestrator - Dang nhap", "-d", str(d), *args],
+                                     creationflags=NO_WINDOW)
+                else:
+                    subprocess.Popen(["cmd.exe", "/c", "start", "AI Orchestrator - Dang nhap", *args],
+                                     cwd=str(d), creationflags=NO_WINDOW)
             else:
-                subprocess.run([exe, *AIS[ai]["login"]], cwd=str(d), stdin=subprocess.DEVNULL,
-                               capture_output=True, timeout=300)
+                subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
+        # Chờ đăng nhập xong: file đăng nhập thay đổi; kiểm tra định kỳ; tối đa 10 phút
+        t0, last_test = time.time(), time.time()
+        while time.time() - t0 < 600:
+            time.sleep(3)
+            if cred_mark(ai) > before:
+                time.sleep(2)
+                break
+            lg = LOGINS.get(ai)
+            if lg and lg["proc"].poll() is not None:
+                break
+            if time.time() - last_test > 30:
+                last_test = time.time()
+                if ai_test(ai, keep_pending=True).get("ok"):
+                    break
+        lg = LOGINS.pop(ai, None)
+        if lg:
+            kill_tree(lg["proc"])
+        CFG["ais"].get(ai, {}).pop("code", None)
         ai_test(ai)
 
     threading.Thread(target=run, daemon=True).start()
     return {"ok": True}
 
 
-def ai_test(ai):
+def ai_code(ai, code):
+    lg = LOGINS.get(ai)
+    if not lg or lg["proc"].poll() is not None or not code.strip():
+        return {"error": "Phiên đăng nhập đã hết, bấm Đăng nhập lại"}
+    lg["proc"].stdin.write(code.strip() + "\n")
+    lg["proc"].stdin.flush()
+    return {"ok": True}
+
+
+def ai_test(ai, keep_pending=False):
     exe = find_bin(AIS[ai]["bin"])
     if not exe:
         res = {"ok": False, "msg": "Chưa cài"}
@@ -780,6 +854,8 @@ def ai_test(ai):
         except Exception as e:
             res = {"ok": False, "msg": str(e)}
     res["at"] = now()
+    if keep_pending and not res.get("ok"):
+        return res                     # đang chờ đăng nhập: chưa xong thì giữ trạng thái chờ
     if res.get("ok"):
         res["email"] = ai_email(ai)
     CFG["ais"][ai] = res
@@ -868,6 +944,7 @@ class H(BaseHTTPRequestHandler):
         if not self.authed():
             return self.send(403, {"error": "forbidden"})
         if u.path == "/api/state":
+            page_seen()
             with _tlock:
                 ts = [{k: t.get(k) for k in ("id", "title", "status", "created")}
                       for t in TASKS.values() if t["status"] != "draft"]
@@ -883,6 +960,9 @@ class H(BaseHTTPRequestHandler):
         self.send(404, {"error": "not found"})
 
     def do_POST(self):
+        if urlparse(self.path).path == "/api/bye" and self.ok_host():   # tab đóng (sendBeacon)
+            LAST_SEEN["bye"] = time.time()
+            return self.send(200, {"ok": True})
         if not self.authed():
             return self.send(403, {"error": "forbidden"})
         u = urlparse(self.path)
@@ -919,6 +999,8 @@ class H(BaseHTTPRequestHandler):
     def route(self, path, d):
         if path == "/api/ai/login" and d.get("ai") in AIS:
             return ai_login(d["ai"])
+        if path == "/api/ai/code" and d.get("ai") in AIS:
+            return ai_code(d["ai"], str(d.get("code", "")))
         if path == "/api/ai/test" and d.get("ai") in AIS:
             return ai_test(d["ai"])
         if path == "/api/pick":
@@ -949,6 +1031,41 @@ class H(BaseHTTPRequestHandler):
             threading.Thread(target=shutdown, daemon=True).start()
             return {"ok": True}
         return {"error": "bad request"}
+
+
+LAST_SEEN = {"t": time.time(), "bye": 0.0}
+
+
+def page_watch():
+    """Không còn tab nào mở (đóng tab) -> tạm dừng task đang làm; mở lại trang -> tự chạy tiếp."""
+    while True:
+        time.sleep(5)
+        idle = time.time() - LAST_SEEN["t"]
+        closed = LAST_SEEN["bye"] > LAST_SEEN["t"] and time.time() - LAST_SEEN["bye"] > 15
+        if closed or idle > 180:
+            with _tlock:
+                for t in TASKS.values():
+                    if t["status"] in ("running", "queued") and not t.get("auto_paused"):
+                        t["auto_paused"] = True
+                        if t["status"] == "running":
+                            t["_pause"] = True
+                            kill_tree(PROCS.get(t["id"]))
+                        else:
+                            t["status"] = "paused"
+                            tsave(t)
+
+
+def page_seen():
+    LAST_SEEN["t"] = time.time()
+    with _tlock:
+        for t in TASKS.values():
+            if t.get("auto_paused") and t["status"] == "paused":
+                t.pop("auto_paused", None)
+                t["status"] = "queued"
+                t.setdefault("next", {"kind": "resume"})
+                tsave(t)
+            elif t.get("auto_paused") and t["status"] != "running":
+                t.pop("auto_paused", None)
 
 
 def shutdown():
@@ -1046,6 +1163,7 @@ def serve(background=False):
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=check_untested, daemon=True).start()
     threading.Thread(target=check_update, daemon=True).start()
+    threading.Thread(target=page_watch, daemon=True).start()
     if not background and not os.environ.get("AIO_NO_BROWSER"):
         webbrowser.open(url)
     print("AI Orchestrator:", url, flush=True)
@@ -1101,7 +1219,7 @@ def cmd_worker(argv):
             prompt = ("Thực hiện đúng yêu cầu trong TASK.md ở thư mục hiện tại. "
                       f"File đầu vào (chỉ đọc): {proj / 'input'}. Ghi mọi file kết quả vào thư mục hiện tại. "
                       "Cuối cùng liệt kê file đã tạo và cách đã kiểm tra.")
-            cmd = [exe, "exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "-C", str(v),
+            cmd = [exe, "exec", "--skip-git-repo-check", *CODEX_SANDBOX, "-C", str(v),
                    "--output-last-message", str(v / "result.md")]
             if a.model:
                 cmd += ["-m", a.model]
