@@ -172,6 +172,10 @@ main{background:var(--bg)}
 #toast{border-radius:10px;background:#303030;padding:12px 18px}
 .dot.ok,.sd.done{background:var(--ok)}.sd.running,.sd.queued{background:var(--acc)}
 ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#c4c7c5;border-radius:10px;border:2px solid transparent;background-clip:content-box}::-webkit-scrollbar-thumb:hover{background:#9aa0a6;background-clip:content-box;border:2px solid transparent}
+.atts{align-items:flex-end;gap:8px}
+.pv{position:relative;display:inline-block;line-height:0}.pv img{width:72px;height:72px;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:#fff}
+.pv button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;padding:0;border-radius:50%;border:0;background:#303030;color:#fff;font-size:13px;line-height:20px}
+#modeSel{border:0;background:transparent;border-radius:999px;padding:6px 10px;font:inherit;color:var(--mute);cursor:pointer}#modeSel:hover{background:rgba(31,31,31,.08)}
 </style>
 </head>
 <body>
@@ -308,6 +312,7 @@ function composer(id, ph) {
   return `<div class="comp" id="${id}"><div class="atts" id="atts"></div>
     <textarea id="txt" placeholder="${ph}" aria-label="Tin nhắn"></textarea>
     <div class="bar"><button class="ghost icon" id="bFile" title="Đính kèm file" aria-label="Đính kèm file">${I.attach}</button>
+      ${id === "homeComp" ? `<select id="modeSel" title="Chế độ làm việc" aria-label="Chế độ làm việc"><option value="fast">Nhanh</option><option value="balanced">Cân bằng</option><option value="saver">Tiết kiệm</option></select>` : ""}
       <span style="flex:1"></span><span class="hint" id="cHint"></span>
       <button class="pri icon" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
@@ -334,13 +339,21 @@ function bindComposer(onSend) {
     });
     renderAtts();
   });
+  if ($("modeSel")) { $("modeSel").value = localStorage.getItem("mode") || "balanced"; $("modeSel").onchange = (e) => localStorage.setItem("mode", e.target.value); }
+  let lastChk = 0;      // kiểm tra đăng nhập chỉ khi đang soạn prompt (tối đa 1 lần/phút)
+  const chk = () => { if (Date.now() - lastChk > 60000) { lastChk = Date.now(); api("/api/ai/refresh", {}).then(() => setTimeout(kick, 2500)); } };
+  ta.addEventListener("focus", chk); ta.addEventListener("input", chk);
   renderAtts();
 }
 function fit(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.6) + "px"; }
 addEventListener("resize", () => $("txt") && fit($("txt")));
+const _purl = new WeakMap();
+function purl(f) { if (!_purl.has(f)) _purl.set(f, URL.createObjectURL(f)); return _purl.get(f); }
 function renderAtts() {
   const a = $("atts"); if (!a) return;
-  a.innerHTML = files.map((f, i) => `<span class="a">${f.type?.startsWith("image/") ? `<img src="${URL.createObjectURL(f)}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;margin-right:4px">` : "📎 "}<span>${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
+  a.innerHTML = files.map((f, i) => f.type?.startsWith("image/")
+    ? `<span class="pv" title="${esc(f.name)}"><img src="${purl(f)}" alt="${esc(f.name)}"><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`
+    : `<span class="a"><span>📎 ${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
   a.style.display = files.length ? "flex" : "none";
 }
 $("fileIn").onchange = (e) => { files.push(...e.target.files); e.target.value = ""; renderAtts(); };
@@ -389,7 +402,7 @@ async function sendNew() {
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   busy(true);
   try {
-    const r = await api("/api/task/new", { text }); if (r.error) throw new Error(r.error);
+    const r = await api("/api/task/new", { text, mode: $("modeSel")?.value || "balanced" }); if (r.error) throw new Error(r.error);
     const names = [];
     for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(r.id, f)); }
     const s = await api("/api/task/submit", { id: r.id, files: names }); if (s.error) throw new Error(s.error);
@@ -451,7 +464,7 @@ function renderTask() {
     bindComposer(sendMore);
   }
   $("thead").innerHTML = `<span class="pill ${t.status}">${ST[t.status]}</span>
-      <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1><button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
+      <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1>${t.mode && t.mode !== "balanced" ? `<span class="chip">${t.mode === "fast" ? "Nhanh" : "Tiết kiệm"}</span>` : ""}<button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
       <span class="grow"></span>${acts.join("")}`;
   $("decbar").innerHTML = decHtml(t);
   $("thread").innerHTML = body + queued;
@@ -515,7 +528,7 @@ $("btnNew").onclick = () => { view = ""; sel = ""; sessionStorage.removeItem("se
 $("btnSet").onclick = () => openSettings();
 $("btnOut").onclick = () => (S.output ? api("/api/open-output", {}) : openSettings());
 /* ---------------- settings ---------------- */
-function openSettings() { form = { output: S.output }; renderSettings(); $("ov").classList.add("show"); kick(); }
+function openSettings() { form = { output: S.output }; renderSettings(); $("ov").classList.add("show"); api("/api/ai/refresh", {}); kick(); }
 let chain = false, tried = new Set();
 function autoLogin() {      // tự mở lần lượt trang đăng nhập của các AI chưa đăng nhập
   if (!chain || Object.values(S.ais).some((a) => a.pending)) return;
@@ -536,6 +549,7 @@ function renderSettings() {
   const acc = Object.entries(S.ais).map(([k, a]) => `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${accState(k, a)}</span>
       ${a.pending ? `<button data-cancel="${k}">Hủy</button>` : `<button class="${a.ok ? "" : "pri"}" data-login="${k}" data-switch="${a.ok ? 1 : ""}" ${a.installed ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button>`}</div>`).join("");
   $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI</span>${acc}</div>
+    <div class="f"><span class="k">Máy này</span><div class="path" style="white-space:normal">${S.machine.cpu} luồng CPU · ${S.machine.ram} GB RAM → chạy cùng lúc tối đa <b>${S.machine.max}</b> task (tự tính)</div></div>
     <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>`;
   $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><button id="mLog" title="Lưu file log (.zip) vào thư mục kết quả">Export log</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
   $("mLog").onclick = async () => { const r = await api("/api/export-log", {}); toast(r.error || r.msg); };

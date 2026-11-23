@@ -44,8 +44,33 @@ def app_url(port=None):
     return f"http://{HOSTNAME}{'' if port == 80 else ':' + str(port)}/"
 IS_WIN = os.name == "nt"
 NO_WINDOW = 0x08000000 if IS_WIN else 0
-LOW_SPEC = (os.cpu_count() or 4) <= 4          # máy yếu (vd i3 2 nhân 4 luồng)
-MAX_RUNNING = 1 if LOW_SPEC else 2
+def machine():
+    """Số luồng CPU và RAM (GB) của máy."""
+    cpu, ram = os.cpu_count() or 2, 8.0
+    try:
+        if IS_WIN:
+            import ctypes
+
+            class MS(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong)] + [
+                    (n, ctypes.c_ulonglong) for n in ("ullTotalPhys", "ullAvailPhys", "ullTotalPageFile", "ullAvailPageFile",
+                                                      "ullTotalVirtual", "ullAvailVirtual", "ullAvailExtendedVirtual")]
+            m = MS()
+            m.dwLength = ctypes.sizeof(MS)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+            ram = m.ullTotalPhys / 2 ** 30
+        else:
+            ram = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2 ** 30
+    except Exception:
+        pass
+    return cpu, round(ram, 1)
+
+
+CPU, RAM_GB = machine()
+# mỗi task đang chạy cần khoảng 4 luồng + 4 GB (Claude Code + worker); tối thiểu 1, tối đa 4
+MAX_RUNNING = max(1, min(4, CPU // 4, int(RAM_GB // 4)))
+LOW_SPEC = MAX_RUNNING == 1
+MODES = {"fast": "Nhanh", "balanced": "Cân bằng", "saver": "Tiết kiệm"}
 BELOW_NORMAL = 0x00004000 if IS_WIN else 0     # ưu tiên thấp: máy vẫn mượt khi AI đang chạy
 PING = "Reply with the single word PONG and nothing else."
 
@@ -357,8 +382,22 @@ def subtasks(t):
     return out
 
 
+MODE_RULES = {
+    "fast": """- Ưu tiên THỜI GIAN. Chạy song song tối đa {n} worker/sub-agent cho các phần độc lập.
+- Dùng model mạnh ngay từ đầu để ít phải sửa. Giám khảo: chấm 1 lần ở cuối, chỉ chấm lại phần đã sửa.""",
+    "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song tối đa {n} worker/sub-agent cho phần độc lập; tuần tự khi phụ thuộc.
+- Model nhỏ/nhanh cho việc đơn giản; model mạnh cho việc khó. Nâng model khi kết quả không đạt, hạ khi việc lặp lại.""",
+    "saver": """- Ưu tiên TIẾT KIỆM HẠN MỨC. Làm tuần tự, 1 worker tại một thời điểm. Việc nào tự làm được bằng lệnh/script thì không gọi AI.
+- Dùng model nhỏ nhất đủ làm được việc cho worker và sub-agent (--model); chỉ nâng khi đã thất bại 1 lần.
+- Giám khảo: dùng model nhỏ, chỉ chấm sản phẩm cuối, tối đa 1 vòng sửa. Không làm thêm ngoài yêu cầu.""",
+}
+
+
 def write_claude_md(t):
     py, app = py_console(), str(APP)
+    mode = t.get("mode") if t.get("mode") in MODES else "balanced"
+    mode_name = MODES[mode]
+    mode_rules = MODE_RULES[mode].format(n="1 (máy cấu hình thấp)" if LOW_SPEC else str(min(3, MAX_RUNNING + 1)))
     on = [w for w in ("codex", "gemini") if find_bin(AIS[w]["bin"]) and CFG["ais"].get(w, {}).get("ok") is not False]
     desc = {"codex": "codex — ChatGPT/Codex: code, CSV/Excel, script, tạo ảnh ($imagegen)",
             "gemini": "gemini — Gemini/Antigravity: research, tổng hợp, phân tích, ý tưởng (chỉ trả văn bản)"}
@@ -409,10 +448,8 @@ Tạo bằng codex ($imagegen) hoặc cách khác có sẵn. Chỉ khi không th
 OUTPUT/prompts/, rồi hỏi người dùng (question.md): "Dán prompt trong <đường dẫn> vào ChatGPT, lưu ảnh vào OUTPUT/images/
 rồi trả lời 'xong'". Khi được trả lời: check + chấm độc lập như trên.
 
-## Tối ưu chất lượng, thời gian, hạn mức
-- Model nhỏ/nhanh cho việc đơn giản; model mạnh cho việc khó. Áp dụng cho subagent và worker (--model).
-  Nâng model khi kết quả không đạt, hạ khi việc lặp lại.
-- {"Máy này cấu hình thấp: chỉ chạy 1 worker/sub-agent tại một thời điểm, không chạy song song." if LOW_SPEC else "Song song sub-task độc lập; tuần tự khi phụ thuộc."}
+## Chế độ làm việc người dùng chọn cho task này: {mode_name}
+{mode_rules}
 - Worker status "limit": chuyển worker khác hoặc tự làm nếu đảm bảo chất lượng; nếu không, hỏi người dùng.
 
 ## Nghiệm thu
@@ -512,6 +549,8 @@ def start_run(t):
     args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
             "--permission-mode", "acceptEdits",
             "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite"]
+    if t.get("mode") == "saver":
+        args += ["--model", "sonnet"]
     if t.get("session_started"):
         args += ["--resume", t["session"]]
     else:
@@ -736,14 +775,15 @@ def open_task_file(tid, rel):
     return {"ok": True}
 
 
-def new_task(text):
+def new_task(text, mode="balanced"):
     if not text.strip():
         return {"error": "Chưa nhập yêu cầu"}
     tid = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
     while tid in TASKS:
         tid += "b"
     t = {"id": tid, "title": re.sub(r"\s+", " ", text.strip())[:50], "text": text.strip(),
-         "status": "draft", "created": now(), "created_ts": time.time(), "messages": []}
+         "status": "draft", "created": now(), "created_ts": time.time(), "messages": [],
+         "mode": mode if mode in MODES else "balanced"}
     (tdir(t) / "input").mkdir(parents=True, exist_ok=True)
     with _tlock:
         TASKS[tid] = t
@@ -850,23 +890,26 @@ def ai_status(ai):
     return cur
 
 
-_status_at = {"t": time.time()}
+_status_at = {"t": 0.0}
 
 
-def status_loop():
-    """Cập nhật trạng thái Claude/ChatGPT định kỳ khi trang đang mở."""
-    while True:
-        # chỉ kiểm tra khi trang đang mở; thưa (5 phút) để không tốn máy — sau đăng nhập đã có kiểm tra riêng
-        if time.time() - LAST_SEEN["t"] < 60 and time.time() - _status_at["t"] > 300:
-            _status_at["t"] = time.time()
-            for ai in ("claude", "codex"):
-                if not CFG["ais"].get(ai, {}).get("pending"):
-                    with _status_lock:
-                        before = dict(CFG["ais"].get(ai, {}))
-                        ai_status(ai)
-                        if before != CFG["ais"].get(ai):
-                            save_cfg()
-        time.sleep(15)
+def refresh_status():
+    """Kiểm tra đăng nhập Claude/ChatGPT theo yêu cầu (khi đang soạn prompt hoặc mở Cài đặt); tối đa 1 lần/phút."""
+    if time.time() - _status_at["t"] < 60:
+        return {"ok": True}
+    _status_at["t"] = time.time()
+
+    def run():
+        for ai in ("claude", "codex"):
+            if not CFG["ais"].get(ai, {}).get("pending"):
+                with _status_lock:
+                    before = dict(CFG["ais"].get(ai, {}))
+                    ai_status(ai)
+                    if before != CFG["ais"].get(ai):
+                        save_cfg()
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True}
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\\\)|\x1b[=>()][0-9A-B]?")
@@ -1120,11 +1163,10 @@ def ai_code(ai, code):
 
 
 def check_startup():
+    """Mở app: chỉ kiểm tra AI nào chưa từng kiểm tra (lần đầu); còn lại dùng kết quả đã lưu."""
     for ai in ("claude", "codex"):
-        ai_status(ai)
-    g = CFG["ais"].setdefault("gemini", {})
-    if g.get("ok") and not gemini_has_cred():
-        g.update(ok=False, msg="")
+        if "ok" not in CFG["ais"].get(ai, {}):
+            ai_status(ai)
     save_cfg()
 
 
@@ -1136,7 +1178,7 @@ def ui_html():
 
 
 def task_detail(t):
-    d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished")}
+    d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished", "mode")}
     if t.get("need_login") and t["status"] == "queued":
         d["status"] = "login"
     msgs = [dict(m) for m in t.get("messages", [])]
@@ -1226,7 +1268,8 @@ class H(BaseHTTPRequestHandler):
             if upd:
                 save_cfg()
             return self.send(200, {"ais": ai_state(), "output": CFG["output"], "instructions": CFG["instructions"],
-                                   "tasks": ts, "version": VERSION, "release": RELEASE, "updated": upd})
+                                   "tasks": ts, "version": VERSION, "release": RELEASE, "updated": upd,
+                                   "machine": {"cpu": CPU, "ram": RAM_GB, "max": MAX_RUNNING}})
         if u.path == "/api/registry":
             return self.send(200, registry(force=q.get("force", [""])[0] == "1"))
         if u.path == "/api/task":
@@ -1280,6 +1323,8 @@ class H(BaseHTTPRequestHandler):
             return ai_cancel(d["ai"])
         if path == "/api/export-log":
             return export_log()
+        if path == "/api/ai/refresh":
+            return refresh_status()
         if path == "/api/update":
             return update_now()
         if path == "/api/pick":
@@ -1297,7 +1342,7 @@ class H(BaseHTTPRequestHandler):
                 open_path(CFG["output"])
             return {"ok": True}
         if path == "/api/task/new":
-            return new_task(d.get("text", ""))
+            return new_task(d.get("text", ""), d.get("mode", "balanced"))
         if path == "/api/task/submit":
             return submit_task(d.get("id", ""), d.get("files", []))
         if path == "/api/task/act":
@@ -1557,7 +1602,6 @@ def serve(background=False):
     load_tasks()
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=check_startup, daemon=True).start()
-    threading.Thread(target=status_loop, daemon=True).start()
     threading.Thread(target=check_update, daemon=True).start()
     threading.Thread(target=page_watch, daemon=True).start()
     if not background and not os.environ.get("AIO_NO_BROWSER"):
