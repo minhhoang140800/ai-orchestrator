@@ -85,6 +85,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .ov{position:fixed;inset:0;background:rgba(27,27,25,.35);display:none;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto;z-index:8}
 .ov.show{display:flex}
 .modal{width:100%;max-width:580px;background:var(--panel);border-radius:14px;border:1px solid var(--line);display:flex;flex-direction:column;max-height:88vh}
+#mUpd{display:inline-flex;align-items:center;gap:6px;line-height:1}#mUpd svg{width:15px;height:15px}
 .mhead{padding:16px 20px 0;font-weight:650;font-size:16px}.tabs{display:flex;gap:2px;padding:12px 12px 0;border-bottom:1px solid var(--line)}
 .tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:8px 12px;color:var(--mute)}
 .tabs button.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:600}
@@ -113,7 +114,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
       <div class="ais" id="aiDots"></div>
       <span style="flex:1"></span>
       <button class="ghost icon" id="btnOut" title="Mở thư mục kết quả" aria-label="Mở thư mục kết quả"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
-      <button class="ghost icon" id="btnSet" title="Cài đặt" aria-label="Cài đặt"><svg class="i" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></button>
+      <button class="ghost icon" id="btnSet" title="Cài đặt" aria-label="Cài đặt"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
     </div>
   </aside>
   <main id="main"></main>
