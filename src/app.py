@@ -801,6 +801,11 @@ def task_detail(t):
             if s["ts"] >= m.get("started_ts", 0) - 1:
                 m["subtasks"].append(s)
                 break
+    for m in works:
+        if m.get("status") != "running":
+            for s in m["subtasks"]:
+                if s["status"] == "running":
+                    s["status"] = "stopped"
     if t["status"] == "running" and works:
         works[-1]["now_ts"] = time.time()
     d["messages"] = msgs
@@ -1067,6 +1072,7 @@ def cmd_worker(argv):
     v = out / f"v{n}"
     v.mkdir()
     st = {"worker": a.worker, "model": a.model, "out_dir": str(v)}
+    wjson(v / "status.json", {**st, "status": "running"})
     exe = find_bin("codex" if a.worker == "codex" else "agy")
     if not task.exists():
         st.update(status="failed", error=f"Không thấy {task}")

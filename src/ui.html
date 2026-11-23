@@ -66,9 +66,9 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .wbody{margin:6px 0 0 6px;padding-left:12px;border-left:2px solid var(--line);display:flex;flex-direction:column;gap:3px}
 .wstep{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.wstep.cur{color:var(--ink)}
 .subs{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin:8px 0 2px;color:var(--ink)}
-.sub{display:grid;grid-template-columns:44px 1fr auto auto;gap:10px;align-items:center;padding:7px 12px;font-size:13px}
+.sub{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:7px 12px;font-size:13px}
 .sub+.sub{border-top:1px solid var(--line)}
-.sub .id{color:var(--mute)}.sub .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub .id{color:var(--mute);min-width:36px;white-space:nowrap}.sub .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chip{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:0 8px;color:var(--mute);background:var(--panel);white-space:nowrap}
 .compwrap{padding:10px 22px 18px}
 .comp{max-width:780px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
@@ -131,7 +131,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const ST = { queued: "Chờ", running: "Đang làm", waiting: "Cần bạn", paused: "Tạm dừng", done: "Xong", failed: "Lỗi", cancelled: "Đã hủy", completed: "Đạt", limit: "Hết hạn mức", timeout: "Quá giờ" };
+const ST = { queued: "Chờ", running: "Đang làm", waiting: "Cần bạn", paused: "Tạm dừng", done: "Xong", failed: "Lỗi", cancelled: "Đã hủy", completed: "Đạt", limit: "Hết hạn mức", timeout: "Quá giờ", stopped: "Đã dừng" };
 const AIN = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini" };
 const WN = { codex: "ChatGPT", gemini: "Gemini" };
 const PH_NEW = "Giao việc đi, Claude chịu được";
