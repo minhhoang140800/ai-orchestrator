@@ -71,6 +71,19 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .sub+.sub{border-top:1px solid var(--line)}
 .sub .id{color:var(--mute);min-width:36px;white-space:nowrap}.sub .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chip{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:0 8px;color:var(--mute);background:var(--panel);white-space:nowrap}
+.lib{max-width:1000px;margin:0 auto;padding:16px 22px}
+.lib table{width:100%;border-collapse:collapse;font-size:13px;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.lib th{text-align:left;font-weight:600;color:var(--mute);font-size:12px;padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.lib td{padding:7px 12px;border-bottom:1px solid var(--line);white-space:nowrap}.lib tr:last-child td{border-bottom:0}
+.lib td.w{white-space:normal;overflow-wrap:anywhere;font-weight:500}.lib td.w2{max-width:220px;overflow:hidden;text-overflow:ellipsis;color:var(--mute)}
+.lib tr.click{cursor:pointer}.lib tr.click:hover td{background:var(--soft)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.seg button{border:0;border-radius:0}.seg button.on{background:var(--acc2);color:var(--acc);font-weight:600}
+#decbar:not(:empty){padding:8px 22px 0}#decbar .dec{max-width:780px;margin:0 auto;max-height:38vh;overflow:auto}
+.dec{border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:13px}
+.dec>button{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;text-align:left;font-weight:600;padding:8px 12px}
+.dec .g{padding:6px 12px 8px;border-top:1px solid var(--line)}.dec .g b{display:block;margin-bottom:3px}
+.dec .it{display:flex;gap:8px;padding:2px 0}.dec .tag{flex:none;font-size:11px;border-radius:99px;padding:0 7px;height:18px;line-height:18px;margin-top:2px}
+.dec .tag.decision{background:#e3f2ea;color:var(--ok)}.dec .tag.feedback{background:#fbf0de;color:var(--wait)}.dec .it.done span:last-child{color:var(--mute);text-decoration:line-through}
 .compwrap{padding:10px 22px 18px}
 .comp{max-width:780px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
 .comp.drag{box-shadow:0 0 0 2px var(--acc)}
@@ -109,6 +122,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
   <aside>
     <div class="brand"><img src="/icon.svg" alt="">AI Orchestrator<span class="ver" id="ver"></span></div>
     <button class="newtask" id="btnNew"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Task mới</button>
+    <button class="newtask ghost" id="btnLib" style="justify-content:flex-start;border-color:transparent"><svg class="i" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Lịch sử &amp; file</button>
     <div class="lbl">Task</div>
     <div class="tlist" id="tlist"></div>
     <div class="foot">
@@ -151,6 +165,7 @@ const I = {
   refresh: '<svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>',
 };
 let S = null, T = null, sel = sessionStorage.getItem("sel") || "", files = [], prev = {}, tab = "acc", form = null, firstRun = false;
+let view = "", lib = null, libTab = "tasks", libQ = "";
 let fetchedAt = 0, openW = new Set(), closedW = new Set(), renaming = false;
 
 async function api(path, body) {
@@ -197,7 +212,7 @@ async function refresh() {
   document.title = (w ? `(${w}) ` : "") + "AI Orchestrator";
   renderSide();
   if (sel && !S.tasks.find((t) => t.id === sel)) sel = "";
-  if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
+  if (view === "lib") { /* đang xem thư viện */ } else if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
   if ($("ov").classList.contains("show") && !$("mUpd")?.disabled && !(document.activeElement?.id || "").startsWith("code_") && !document.querySelector("[data-code]:disabled")) renderSettings();
   autoLogin();
   if (!firstRun) { firstRun = true; if (!S.output || !S.ais.claude.ok) { chain = true; openSettings(); } }
@@ -274,6 +289,37 @@ function renderAtts() {
 $("fileIn").onchange = (e) => { files.push(...e.target.files); e.target.value = ""; renderAtts(); };
 function busy(on, label) { const b = $("bSend"); if (!b) return; b.disabled = on; b.innerHTML = on ? `<span class="spin"></span>` : I.send; $("cHint").textContent = label || ""; }
 
+/* ---------------- lịch sử task + file kết quả ---------------- */
+const fsize = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
+async function openLib(force) {
+  view = "lib"; sel = ""; sessionStorage.removeItem("sel"); T = null; renderSide();
+  $("main").innerHTML = `<div class="thead"><h1>Lịch sử &amp; file</h1><span class="grow"></span>
+      <div class="seg"><button data-libtab="tasks">Task</button><button data-libtab="files">File kết quả</button></div>
+      <input type="text" id="libQ" placeholder="Tìm…" style="max-width:220px" value="${esc(libQ)}"><button class="ghost icon" id="libR" title="Quét lại">${I.refresh}</button></div>
+    <div class="scroll"><div class="lib" id="libBody"><div class="hint">Đang tải…</div></div></div>`;
+  $("libQ").oninput = (e) => { libQ = e.target.value; renderLib(); };
+  $("libR").onclick = () => openLib(true);
+  lib = await api("/api/registry" + (force ? "?force=1" : "")); renderLib();
+}
+function renderLib() {
+  if (view !== "lib" || !lib) return;
+  document.querySelectorAll("[data-libtab]").forEach((b) => b.classList.toggle("on", b.dataset.libtab === libTab));
+  const q = libQ.trim().toLowerCase(), hit = (s) => !q || s.toLowerCase().includes(q);
+  let h;
+  if (libTab === "tasks") {
+    const rows = lib.tasks.filter((t) => hit(t.title + " " + t.folder));
+    h = rows.length ? `<table><thead><tr><th>Task</th><th>Trạng thái</th><th>Ngày</th><th>Lượt</th><th>Thời gian làm</th><th>File</th></tr></thead><tbody>` +
+      rows.map((t) => `<tr data-sel="${t.id}" class="click"><td class="w">${esc(t.title)}</td><td><span class="pill ${t.status}">${ST[t.status] || t.status}</span></td><td>${esc(t.created)}</td><td>${t.turns}</td><td>${dur(t.seconds)}</td><td>${t.files}</td></tr>`).join("") + "</tbody></table>"
+      : `<div class="hint">Không có task</div>`;
+  } else {
+    const rows = lib.artifacts.filter((a) => hit(a.path + " " + a.title)).slice(0, 400);
+    h = rows.length ? `<table><thead><tr><th>File</th><th>Task</th><th>Loại</th><th>Dung lượng</th><th>Sửa lúc</th></tr></thead><tbody>` +
+      rows.map((a) => `<tr class="click" data-art="${esc(a.task)}" data-path="${esc(a.path)}" title="Mở ${esc(a.path)}"><td class="w">${esc(a.path)}</td><td class="w2">${esc(a.title)}</td><td>${esc(a.ext.toUpperCase())}</td><td>${fsize(a.size)}</td><td>${esc(a.mtime)}</td></tr>`).join("") + "</tbody></table>"
+      : `<div class="hint">Chưa có file kết quả</div>`;
+  }
+  $("libBody").innerHTML = h;
+}
+
 /* ---------------- home ---------------- */
 function renderHome() {
   T = null; lastSnap = "";
@@ -316,7 +362,15 @@ function attHtml(fs) {
   return (imgs.length ? `<div class="thumbs">${imgs.map((f) => `<a href="${src(f)}" target="_blank" title="${esc(f)}"><img src="${src(f)}" alt="${esc(f)}" loading="lazy"></a>`).join("")}</div>` : "") +
     (rest.length ? `<div class="att">📎 ${rest.map(esc).join(", ")}</div>` : "");
 }
+let decOpen = false;
+function decHtml(t) {
+  const gs = (t.decisions || []).filter((g) => g.items.length); if (!gs.length) return "";
+  const n = gs.reduce((s, g) => s + g.items.length, 0), open = gs.reduce((s, g) => s + g.items.filter((i) => i.type !== "decision" && i.status !== "done").length, 0);
+  return `<div class="dec"><button data-dec="1" class="whead ${decOpen ? "open" : ""}" style="color:var(--ink)">Feedback &amp; quyết định · ${n}${open ? ` · ${open} đang xử lý` : ""}${I.chev}</button>
+    ${decOpen ? gs.map((g) => `<div class="g"><b>${esc(g.group)}</b>${g.items.map((i) => `<div class="it ${i.type !== "decision" && i.status === "done" ? "done" : ""}"><span class="tag ${i.type === "decision" ? "decision" : "feedback"}">${i.type === "decision" ? "Đã chốt" : i.status === "done" ? "Đã sửa" : "Góp ý"}</span><span>${esc(i.text)}</span></div>`).join("")}</div>`).join("") : ""}</div>`;
+}
 function renderTask() {
+  if (view === "lib") return;
   const t = T, live = ["running", "queued", "login"].includes(t.status);
   const sc0 = document.querySelector(".scroll"), wasBottom = !sc0 || sc0.scrollHeight - sc0.scrollTop - sc0.clientHeight < 80;
   const acts = [];
@@ -334,7 +388,7 @@ function renderTask() {
   const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Claude chưa đăng nhập. Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>Đang chuẩn bị…</span></div>` : "";
   const comp = $("taskComp");
   if (!comp || comp.dataset.t !== t.id) {          // chỉ tạo ô nhập 1 lần cho mỗi task
-    $("main").innerHTML = `<div class="thead" id="thead"></div><div class="scroll"><div class="thread" id="thread"></div></div>
+    $("main").innerHTML = `<div class="thead" id="thead"></div><div id="decbar"></div><div class="scroll"><div class="thread" id="thread"></div></div>
       <div class="compwrap">${composer("taskComp", PH_MORE)}</div>`;
     $("taskComp").dataset.t = t.id;
     bindComposer(sendMore);
@@ -342,6 +396,7 @@ function renderTask() {
   $("thead").innerHTML = `<span class="pill ${t.status}">${ST[t.status]}</span>
       <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1><button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
       <span class="grow"></span>${acts.join("")}`;
+  $("decbar").innerHTML = decHtml(t);
   $("thread").innerHTML = body + queued;
   $("bRename").onclick = startRename;
   const sc = document.querySelector(".scroll"); if (wasBottom) sc.scrollTop = sc.scrollHeight;
@@ -366,7 +421,7 @@ async function sendMore() {
     const names = [];
     for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(T.id, f)); }
     const r = await api("/api/task/act", { id: T.id, action: "send", text, files: names }); if (r.error) throw new Error(r.error);
-    files = []; $("txt").value = ""; fit($("txt")); renderAtts(); busy(false); T = null; lastSnap = ""; await refresh();
+    files = []; $("txt").value = ""; fit($("txt")); renderAtts(); busy(false); T = null; lastSnap = ""; await refresh(); kick();
   } catch (e) { toast(e.message); busy(false); }
 }
 setInterval(() => {   // đồng hồ "Đang làm"
@@ -375,10 +430,13 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code]");
+  const el = e.target.closest("[data-sel],[data-act],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec]");
   if (!el) return;
   const d = el.dataset;
-  if (d.sel) { sel = d.sel; sessionStorage.setItem("sel", sel); T = null; lastSnap = ""; files = []; renderSide(); await loadTask(); }
+  if (d.libtab) { libTab = d.libtab; return renderLib(); }
+  if (d.art) { const r = await api("/api/task/file", { id: d.art, path: d.path }); if (r.error) toast(r.error); return; }
+  if (d.dec) { decOpen = !decOpen; return renderTask(); }
+  if (d.sel) { view = ""; sel = d.sel; sessionStorage.setItem("sel", sel); T = null; lastSnap = ""; files = []; renderSide(); await loadTask(); }
   else if (d.w) { const set = d.live === "1" ? closedW : openW; set.has(d.w) ? set.delete(d.w) : set.add(d.w); renderTask(); }
   else if (d.file) { const r = await api("/api/task/file", { id: T.id, path: d.file }); if (r.error) toast(r.error); }
   else if (d.act) {
@@ -395,11 +453,12 @@ document.addEventListener("click", async (e) => {
   else if (d.cancel) { await api("/api/ai/cancel", { ai: d.cancel }); }
   else if (d.login) { chain = false; S.ais[d.login].pending = "login"; renderSettings(); const r = await api("/api/ai/login", { ai: d.login, switch: !!d.switch }); if (r.error) toast(r.error); }
 });
-$("btnNew").onclick = () => { sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
+$("btnLib").onclick = () => openLib();
+$("btnNew").onclick = () => { view = ""; sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
 $("btnSet").onclick = () => openSettings();
 $("btnOut").onclick = () => (S.output ? api("/api/open-output", {}) : openSettings());
 /* ---------------- settings ---------------- */
-function openSettings() { form = { output: S.output }; renderSettings(); $("ov").classList.add("show"); }
+function openSettings() { form = { output: S.output }; renderSettings(); $("ov").classList.add("show"); kick(); }
 let chain = false, tried = new Set();
 function autoLogin() {      // tự mở lần lượt trang đăng nhập của các AI chưa đăng nhập
   if (!chain || Object.values(S.ais).some((a) => a.pending)) return;
@@ -432,12 +491,22 @@ function renderSettings() {
     renderSettings();
   };
 }
-function closeSettings() { $("ov").classList.remove("show"); chain = false; refresh(); }
+function closeSettings() { $("ov").classList.remove("show"); chain = false; kick(); }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("ov").classList.contains("show")) closeSettings(); });
 
 addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
 refresh();
-const timer = setInterval(refresh, 2000);
+// Cập nhật thưa khi không có gì chạy hoặc tab đang ẩn (nhẹ máy); nhanh khi có task đang làm
+let timer = 0;
+function nextDelay() {
+  const active = S && (S.tasks.some((t) => ["running", "queued", "login"].includes(t.status)) || Object.values(S.ais).some((a) => a.pending));
+  if (document.hidden) return 20000;
+  return active || $("ov").classList.contains("show") ? 2500 : 10000;
+}
+async function loop() { await refresh(); timer = setTimeout(loop, nextDelay()); }
+function kick() { clearTimeout(timer); timer = setTimeout(loop, 300); }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) kick(); });
+timer = setTimeout(loop, nextDelay());
 </script>
 </body>
 </html>
