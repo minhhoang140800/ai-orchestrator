@@ -953,7 +953,7 @@ class H(BaseHTTPRequestHandler):
     def send(self, code, body, ctype="application/json", headers=None):
         b = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code)
-        self.send_header("Content-Type", ctype + ("; charset=utf-8" if "svg" not in ctype else ""))
+        self.send_header("Content-Type", ctype + ("; charset=utf-8" if not ctype.startswith("image/") else ""))
         self.send_header("Content-Length", str(len(b)))
         self.send_header("Cache-Control", "no-store")
         for k, v in (headers or {}).items():
@@ -982,6 +982,15 @@ class H(BaseHTTPRequestHandler):
             if q.get("t"):
                 return self.send(302, b"", "text/plain", {"Location": "/"})
             return self.send(200, ui_html(), "text/html")
+        if u.path == "/api/input":        # ảnh người dùng đính kèm (thẻ <img> không gửi được header riêng)
+            t = TASKS.get(q.get("t", [""])[0])
+            name = Path(q.get("name", [""])[0]).name
+            ext = name.rsplit(".", 1)[-1].lower()
+            mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}.get(ext)
+            f = tdir(t) / "input" / name if t else None
+            if not mime or not f or not f.is_file():
+                return self.send(404, {"error": "not found"})
+            return self.send(200, f.read_bytes(), mime, {"X-Content-Type-Options": "nosniff"})
         if not self.authed():
             return self.send(403, {"error": "forbidden"})
         if u.path == "/api/state":
@@ -1123,6 +1132,11 @@ def shutdown():
 UPDATED = {"pending": None, "done": ""}
 
 
+def busy_tasks():
+    """Có task đang làm/chờ/tạm dừng tự động (đóng tab) -> không cập nhật."""
+    return any(t["status"] in ("running", "queued") or t.get("auto_paused") or t.get("_redirect") for t in TASKS.values())
+
+
 def fetch_update():
     """Tải bản mới từ GitHub (chỉ code, không có dữ liệu). Trả về số phiên bản mới, '' nếu đang mới nhất."""
     import hashlib
@@ -1148,7 +1162,7 @@ def update_now():
         return {"error": "Không kết nối được GitHub, thử lại sau"}
     if not new and not UPDATED["pending"]:
         return {"ok": True, "msg": f"Đang dùng bản mới nhất (v{RELEASE})"}
-    if any(t["status"] in ("running", "queued") for t in TASKS.values()):
+    if busy_tasks():
         return {"ok": True, "msg": f"Có bản v{UPDATED.get('release') or new}. Sẽ tự cập nhật khi các task làm xong."}
     threading.Thread(target=lambda: (time.sleep(0.5), apply_update()), daemon=True).start()
     return {"ok": True, "restart": True, "msg": "Đang cập nhật, trang sẽ tự tải lại…"}
@@ -1163,7 +1177,7 @@ def check_update():
         except Exception:
             pass
         for _ in range(15 * 60 // 10):            # kiểm tra lại mỗi 15 phút; áp dụng khi rảnh
-            if UPDATED["pending"] and not any(t["status"] in ("running", "queued") for t in TASKS.values()):
+            if UPDATED["pending"] and not busy_tasks():
                 apply_update()
             time.sleep(10)
 

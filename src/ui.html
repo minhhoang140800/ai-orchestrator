@@ -49,6 +49,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .thread{max-width:780px;margin:0 auto;padding:22px 22px 10px;display:flex;flex-direction:column;gap:16px}
 .msg{white-space:pre-wrap;overflow-wrap:anywhere}
 .msg.user{align-self:flex-end;background:var(--panel);border:1px solid var(--line);border-radius:16px 16px 4px 16px;padding:9px 13px;max-width:85%}
+.thumbs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.thumbs img{height:110px;max-width:220px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}
 .att{font-size:12px;color:var(--mute);margin-top:4px}
 .claude .txt{overflow-wrap:anywhere}.claude .txt p{margin:0 0 6px}.claude .txt ul{margin:0 0 6px;padding-left:20px}.claude .txt li{margin:2px 0}
 .claude .txt code{font:12.5px ui-monospace,Consolas,monospace;background:var(--soft);border-radius:4px;padding:1px 5px}
@@ -308,6 +309,13 @@ function workBlock(m, i) {
   return `<div class="work"><button class="whead ${open ? "open" : ""}" data-w="${key}" data-live="${live ? 1 : 0}">${label}${nsub}${I.chev}</button>
     ${open ? `<div class="wbody">${steps.map((s, j) => `<div class="wstep ${live && j === steps.length - 1 ? "cur" : ""}" title="${esc(s)}">${esc(s)}</div>`).join("") || "<div class='wstep'>Đang khởi động…</div>"}</div>` : ""}${subs}</div>`;
 }
+function attHtml(fs) {
+  if (!fs.length) return "";
+  const isImg = (f) => /\.(png|jpe?g|gif|webp)$/i.test(f), src = (f) => `/api/input?t=${T.id}&name=${encodeURIComponent(f)}`;
+  const imgs = fs.filter(isImg), rest = fs.filter((f) => !isImg(f));
+  return (imgs.length ? `<div class="thumbs">${imgs.map((f) => `<a href="${src(f)}" target="_blank" title="${esc(f)}"><img src="${src(f)}" alt="${esc(f)}" loading="lazy"></a>`).join("")}</div>` : "") +
+    (rest.length ? `<div class="att">📎 ${rest.map(esc).join(", ")}</div>` : "");
+}
 function renderTask() {
   const t = T, live = ["running", "queued", "login"].includes(t.status);
   const sc0 = document.querySelector(".scroll"), wasBottom = !sc0 || sc0.scrollHeight - sc0.scrollTop - sc0.clientHeight < 80;
@@ -317,7 +325,7 @@ function renderTask() {
   if (!["done", "cancelled"].includes(t.status)) acts.push(`<button data-act="cancel">Hủy</button>`);
   if (!live) acts.push(`<button class="ghost icon" data-act="delete" title="Xóa task" aria-label="Xóa task">${I.trash}</button>`);
   const body = t.messages.map((m, i) => {
-    if (m.role === "user") return `<div class="msg user">${esc(m.text)}${(m.files || []).length ? `<div class="att">📎 ${m.files.map(esc).join(", ")}</div>` : ""}</div>`;
+    if (m.role === "user") return `<div class="msg user">${esc(m.text)}${attHtml(m.files || [])}</div>`;
     if (m.role === "work") return workBlock(m, i);
     const n = (m.files || []).length;
     const fl = n ? `<button class="openf" data-act="open" title="${esc(T.output)}">${I.folder}Open folder · ${n} file</button>` : "";
