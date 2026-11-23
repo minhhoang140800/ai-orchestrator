@@ -1,0 +1,66 @@
+import base64
+import hashlib
+import json
+from pathlib import Path
+
+d = Path(__file__).parent
+MSG = {
+    "title": "AI Orchestrator — cài đặt",
+    "mode_fresh": "Cài mới, khoảng 5–15 phút. Không tắt cửa sổ này.",
+    "mode_update": "Đã cài trước đó → đang cập nhật. Dữ liệu và task giữ nguyên.",
+    "uac": "Nếu Windows hỏi quyền cài đặt: bấm Yes.",
+    "opening": "Đang mở AI Orchestrator…",
+    "have": "đã có",
+    "installing": "đang cài…",
+    "done": "xong",
+    "failed": "lỗi",
+    "libs": "Thư viện kiểm tra file",
+    "app": "Ứng dụng",
+    "no_winget": "Thiếu winget. Mở Microsoft Store, cài/cập nhật \"App Installer\" rồi chạy lại file này.",
+    "no_python": "Cài Python chưa xong. Khởi động lại máy rồi chạy lại file này.",
+    "no_claude": "Cài Claude Code chưa xong. Kiểm tra mạng rồi chạy lại file này.",
+    "no_start": "Ứng dụng không khởi động được.",
+    "log": "Chi tiết:",
+    "ok": "Xong. Trang AI Orchestrator đã mở trong trình duyệt. Lần sau chỉ cần bấm đúp file này.",
+}
+app = (d / "app.py").read_text(encoding="utf-8")
+ui = base64.b64encode((d / "ui.html").read_bytes()).decode()
+assert 'UI_B64 = ""' in app
+import os
+built = app.replace('UI_B64 = ""', f'UI_B64 = "{ui}"', 1)
+import datetime
+ver = datetime.datetime.utcnow().strftime("%Y%m%d.%H%M") + "-" + hashlib.sha1(built.encode()).hexdigest()[:6]  # so sánh được theo thời gian
+repo = os.environ.get("AIO_REPO", "")          # owner/repo trên GitHub
+base = f"https://raw.githubusercontent.com/{repo}/main/" if repo else ""
+built = built.replace('VERSION = "dev"', f'VERSION = "{ver}"', 1).replace('UPDATE_BASE = ""', f'UPDATE_BASE = "{base}"', 1)
+(d / "dist").mkdir(exist_ok=True)
+(d / "dist" / "app.py").write_bytes(built.encode("utf-8"))
+(d / "dist" / "latest.json").write_text(json.dumps({"version": ver, "sha256": hashlib.sha256(built.encode("utf-8")).hexdigest()}), encoding="utf-8")
+ps = (d / "install.tpl.ps1").read_text(encoding="utf-8")
+ps = (ps.replace("__APP_B64__", base64.b64encode(built.encode("utf-8")).decode())
+        .replace("__ICO_B64__", base64.b64encode((d / "icon.ico").read_bytes()).decode())
+        .replace("__VER__", ver)
+        .replace("__MSG_B64__", base64.b64encode(json.dumps(MSG, ensure_ascii=False).encode("utf-8")).decode()))
+
+# Chuyển các comment tiếng Việt trong phần PowerShell về ASCII (file .bat phải là ASCII)
+import unicodedata
+ps = "\n".join(unicodedata.normalize("NFKD", l.replace("đ", "d").replace("Đ", "D")).encode("ascii", "ignore").decode()
+               if l.lstrip().startswith("#") else l for l in ps.splitlines())
+ps.encode("ascii")
+
+bat = r"""@echo off
+chcp 65001 >nul
+title AI Orchestrator
+set "AIO_SELF=%~f0"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$s=[IO.File]::ReadAllText($env:AIO_SELF); $m='#'+'##PS-BEGIN###'; $i=$s.IndexOf($m); if ($i -lt 0) { Write-Host 'File loi'; exit 1 }; Invoke-Expression $s.Substring($i); exit $LASTEXITCODE"
+if errorlevel 1 (
+  echo.
+  echo Co loi. Chup man hinh cua so nay gui lai. Log: %LOCALAPPDATA%\AIOrchestrator\install.log
+  pause
+)
+exit /b
+###PS-BEGIN###
+""" + ps + "\n"
+out = d / "dist" / "AI-Orchestrator.bat"
+out.write_bytes(bat.replace("\r\n", "\n").replace("\n", "\r\n").encode("ascii"))
+print(out, out.stat().st_size, ver)

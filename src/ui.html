@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Orchestrator</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<style>
+:root{--bg:#f6f5f1;--side:#efeee8;--panel:#fff;--ink:#1b1b19;--mute:#77756d;--line:#e3e1d8;--soft:#f1f0ea;
+--acc:#1e5a46;--acc2:#e5efea;--run:#2463c7;--wait:#b26a00;--ok:#1e7a4c;--bad:#b4362a}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{font:14px/1.55 "Segoe UI",system-ui,-apple-system,sans-serif;color:var(--ink);background:var(--bg)}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px}
+button:hover{border-color:#c8c5ba}button:disabled{opacity:.45;cursor:default}
+button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+button.ghost{border-color:transparent;background:transparent}button.ghost:hover{background:rgba(0,0,0,.05)}
+button.icon{padding:6px;line-height:0}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+input[type=text],textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel)}
+textarea{resize:vertical}
+svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.app{display:grid;grid-template-columns:260px 1fr;height:100%}
+aside{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.brand{display:flex;align-items:center;gap:9px;padding:14px 14px 10px;font-weight:650;letter-spacing:-.01em}
+.brand img{width:22px;height:22px}
+.newtask{margin:2px 10px 4px;display:flex;align-items:center;gap:8px;justify-content:center}
+.lbl{font-size:11px;font-weight:650;color:var(--mute);text-transform:uppercase;letter-spacing:.06em;padding:12px 16px 4px}
+.tlist{flex:1;overflow:auto;padding:0 8px 8px;min-height:0}
+.titem{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;text-align:left;padding:7px 8px;border-radius:8px}
+.titem:hover{background:rgba(0,0,0,.04)}.titem.on{background:var(--panel);box-shadow:0 0 0 1px var(--line)}
+.titem span.t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sd{width:8px;height:8px;border-radius:50%;flex:none;background:#c4c1b6}
+.sd.running,.sd.queued{background:var(--run)}.sd.waiting{background:var(--wait)}.sd.done{background:var(--ok)}.sd.failed{background:var(--bad)}
+.sd.running{animation:pulse 1.4s ease-in-out infinite}@keyframes pulse{50%{opacity:.35}}
+.foot{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:8px 10px;border-top:1px solid var(--line)}
+.ais{flex:1 1 100%;display:flex;gap:12px;font-size:12px;color:var(--mute);white-space:nowrap;padding:2px 4px 4px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#c4c1b6;margin-right:4px;vertical-align:1px}
+.dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}.dot.pend{background:var(--run);animation:pulse 1.2s infinite}
+main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.thead{display:flex;align-items:center;gap:8px;padding:12px 22px;border-bottom:1px solid var(--line)}
+.thead h1{font-size:15px;margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thead .grow{flex:1}
+.thead input{font-size:15px;font-weight:600;padding:4px 8px;max-width:520px}
+.pill{font-size:12px;border-radius:99px;padding:1px 9px;white-space:nowrap;background:var(--soft);color:var(--mute)}
+.pill.running,.pill.queued{background:#e6eefb;color:var(--run)}.pill.waiting{background:#fbf0de;color:var(--wait)}
+.pill.done,.pill.completed{background:#e3f2ea;color:var(--ok)}.pill.failed,.pill.limit,.pill.timeout{background:#f8e5e2;color:var(--bad)}
+.scroll{flex:1;overflow:auto;min-height:0}
+.thread{max-width:780px;margin:0 auto;padding:22px 22px 10px;display:flex;flex-direction:column;gap:16px}
+.msg{white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.user{align-self:flex-end;background:var(--panel);border:1px solid var(--line);border-radius:16px 16px 4px 16px;padding:9px 13px;max-width:85%}
+.att{font-size:12px;color:var(--mute);margin-top:4px}
+.claude .txt{overflow-wrap:anywhere}.claude .txt p{margin:0 0 6px}.claude .txt ul{margin:0 0 6px;padding-left:20px}.claude .txt li{margin:2px 0}
+.claude .txt code{font:12.5px ui-monospace,Consolas,monospace;background:var(--soft);border-radius:4px;padding:1px 5px}
+.claude.question .txt,.claude.error .txt{white-space:normal}
+.openf{margin-top:10px;display:inline-flex;align-items:center;gap:8px}
+.claude.question .txt{background:#fbf0de;border-radius:10px;padding:9px 12px}
+.claude.error .txt{background:#f8e5e2;border-radius:10px;padding:9px 12px;font-size:13px}
+.files{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.fcard{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:9px 12px;min-width:220px;max-width:340px;text-align:left}
+.fcard:hover{border-color:#c8c5ba}.fcard b{display:block;font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
+.fcard small{color:var(--mute);font-size:12px}.fic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--acc2);color:var(--acc);flex:none}
+.work{color:var(--mute);font-size:13px}
+.whead{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;border:0;background:none;padding:2px 0;color:var(--mute)}
+.whead:hover{color:var(--ink)}.whead svg{transition:transform .15s}.whead.open svg{transform:rotate(90deg)}
+.wbody{margin:6px 0 0 6px;padding-left:12px;border-left:2px solid var(--line);display:flex;flex-direction:column;gap:3px}
+.wstep{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.wstep.cur{color:var(--ink)}
+.subs{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin:8px 0 2px;color:var(--ink)}
+.sub{display:grid;grid-template-columns:44px 1fr auto auto;gap:10px;align-items:center;padding:7px 12px;font-size:13px}
+.sub+.sub{border-top:1px solid var(--line)}
+.sub .id{color:var(--mute)}.sub .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:0 8px;color:var(--mute);background:var(--panel);white-space:nowrap}
+.compwrap{padding:10px 22px 18px}
+.comp{max-width:780px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.comp.drag{box-shadow:0 0 0 2px var(--acc)}
+.comp textarea{border:0;padding:4px 2px;min-height:46px;max-height:60vh;resize:none;background:transparent;overflow-y:auto;line-height:1.55}.comp textarea:focus{outline:none}
+.bar{display:flex;align-items:center;gap:4px}
+.atts{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 6px}
+.a{display:inline-flex;align-items:center;gap:2px;font-size:12px;background:var(--soft);border-radius:6px;padding:2px 2px 2px 8px;max-width:260px}
+.a span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.a button{border:0;background:none;padding:0 6px;color:var(--mute)}
+.hint{font-size:12px;color:var(--mute)}
+.home{flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 22px 14vh}
+.home h2{text-align:center;font-weight:600;font-size:22px;margin:0 0 18px;letter-spacing:-.01em}
+.home .comp textarea{min-height:90px}
+.ov{position:fixed;inset:0;background:rgba(27,27,25,.35);display:none;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto;z-index:8}
+.ov.show{display:flex}
+.modal{width:100%;max-width:580px;background:var(--panel);border-radius:14px;border:1px solid var(--line);display:flex;flex-direction:column;max-height:88vh}
+.tabs{display:flex;gap:2px;padding:12px 12px 0;border-bottom:1px solid var(--line)}
+.tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:8px 12px;color:var(--mute)}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:600}
+.mbody{padding:18px 20px;overflow:auto;display:flex;flex-direction:column;gap:14px}
+.mfoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--line)}
+.f{display:flex;flex-direction:column;gap:6px}.f>.k{font-size:12px;font-weight:600;color:var(--mute)}
+.row{display:flex;align-items:center;gap:8px}
+.accrow{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.accrow .n{flex:1;min-width:0}.accrow small{display:block;color:var(--mute);font-size:12px;overflow-wrap:anywhere}
+.accrow small.bad{color:var(--bad)}
+.path{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:7px 10px;background:var(--soft);border-radius:8px}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 14px;border-radius:8px;display:none;z-index:9;max-width:90vw}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:s .8s linear infinite;flex:none}
+@keyframes s{to{transform:rotate(360deg)}}
+@media (max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}aside{max-height:38vh}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><img src="/icon.svg" alt="">AI Orchestrator</div>
+    <button class="newtask" id="btnNew"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Task mới</button>
+    <div class="lbl">Task</div>
+    <div class="tlist" id="tlist"></div>
+    <div class="foot">
+      <div class="ais" id="aiDots"></div>
+      <span style="flex:1"></span>
+      <button class="ghost icon" id="btnOut" title="Mở thư mục kết quả" aria-label="Mở thư mục kết quả"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+      <button class="ghost icon" id="btnSet" title="Cài đặt" aria-label="Cài đặt"><svg class="i" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></button>
+      <button class="ghost icon" id="btnQuit" title="Tắt" aria-label="Tắt"><svg class="i" viewBox="0 0 24 24"><path d="M18.4 6.6a9 9 0 1 1-12.8 0M12 2v10"/></svg></button>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<div class="ov" id="ov"><div class="modal" role="dialog" aria-modal="true" aria-label="Cài đặt">
+  <div class="tabs"><button data-tab="acc">1 · Đăng nhập</button><button data-tab="setup">2 · Set up</button></div>
+  <div class="mbody" id="mbody"></div>
+  <div class="mfoot" id="mfoot"></div>
+</div></div>
+<div id="toast" role="status"></div>
+<input type="file" id="fileIn" multiple hidden>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const ST = { queued: "Chờ", running: "Đang làm", waiting: "Cần bạn", paused: "Tạm dừng", done: "Xong", failed: "Lỗi", cancelled: "Đã hủy", completed: "Đạt", limit: "Hết hạn mức", timeout: "Quá giờ" };
+const AIN = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini" };
+const WN = { codex: "ChatGPT", gemini: "Gemini" };
+const PH_NEW = "Giao việc đi, Claude chịu được";
+const PH_MORE = "Giao thêm việc đi, Claude chịu được";
+const I = {
+  attach: '<svg class="i" viewBox="0 0 24 24"><path d="m21.4 11-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>',
+  send: '<svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+  chev: '<svg class="i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
+  edit: '<svg class="i" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  trash: '<svg class="i" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
+  file: '<svg class="i" viewBox="0 0 24 24"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></svg>',
+  sheet: '<svg class="i" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M4 9h16M4 15h16M10 3v18"/></svg>',
+  img: '<svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg>',
+  code: '<svg class="i" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg>',
+  folder: '<svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  refresh: '<svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>',
+};
+let S = null, T = null, sel = sessionStorage.getItem("sel") || "", files = [], prev = {}, tab = "acc", form = null, firstRun = false;
+let fetchedAt = 0, openW = new Set(), closedW = new Set(), renaming = false;
+
+async function api(path, body) {
+  const o = { headers: { "X-AIO": "1" } };
+  if (body !== undefined) { o.method = "POST"; o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(body); }
+  const r = await fetch(path, o);
+  if (r.status === 403) { toast("Bấm đúp file AI-Orchestrator.bat để mở lại"); throw new Error("403"); }
+  return r.json();
+}
+async function upload(tid, f) {
+  const r = await fetch(`/api/upload?t=${tid}&name=${encodeURIComponent(f.name)}`, { method: "POST", headers: { "X-AIO": "1" }, body: f });
+  const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || "Tải file lỗi: " + f.name); return j.name;
+}
+function toast(m) { const t = $("toast"); t.textContent = m; t.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => (t.style.display = "none"), 4500); }
+function notify(title, body) { if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body, icon: "/icon.svg" }); }
+function md(s) {
+  const out = []; let list = false;
+  for (const raw of esc(s).split("\n")) {
+    let l = raw.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+    const m = l.match(/^(\s*)[-*•] (.*)$/), h = l.match(/^#{1,4} (.*)$/);
+    if (m) { if (!list) { out.push("<ul>"); list = true; } out.push(`<li style="margin-left:${Math.min(m[1].length, 8) * 8}px">${m[2]}</li>`); continue; }
+    if (list) { out.push("</ul>"); list = false; }
+    out.push(h ? `<p><b>${h[1]}</b></p>` : l.trim() ? `<p>${l}</p>` : "");
+  }
+  if (list) out.push("</ul>");
+  return out.join("");
+}
+function dur(sec) { sec = Math.max(0, Math.round(sec)); const m = Math.floor(sec / 60), s = sec % 60; return m ? `${m}m ${s}s` : `${s}s`; }
+function clock(sec) { sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"); }
+function ficon(n) { const e = n.split(".").pop().toLowerCase(); return ["csv", "xlsx", "xls"].includes(e) ? I.sheet : ["png", "jpg", "jpeg", "webp", "gif", "psd"].includes(e) ? I.img : ["py", "js", "html", "json", "ts", "css"].includes(e) ? I.code : I.file; }
+function ftype(n) { const e = n.split(".").pop().toLowerCase(); return { csv: "Spreadsheet", xlsx: "Spreadsheet", xls: "Spreadsheet", png: "Ảnh", jpg: "Ảnh", jpeg: "Ảnh", webp: "Ảnh", md: "Báo cáo", py: "Code", html: "Trang web", json: "Dữ liệu", txt: "Văn bản", pdf: "PDF", docx: "Tài liệu", pptx: "Slide" }[e] || e.toUpperCase(); }
+
+/* ---------------- state ---------------- */
+async function refresh() {
+  try { S = await api("/api/state"); } catch { return; }
+  for (const t of S.tasks) {
+    const p = prev[t.id];
+    if (p && p !== t.status && ["waiting", "done", "failed"].includes(t.status)) notify(ST[t.status] + " · " + t.title, "");
+    prev[t.id] = t.status;
+  }
+  if (S.updated) toast("Đã cập nhật lên bản mới");
+  const w = S.tasks.filter((t) => t.status === "waiting").length;
+  document.title = (w ? `(${w}) ` : "") + "AI Orchestrator";
+  renderSide();
+  if (sel && !S.tasks.find((t) => t.id === sel)) sel = "";
+  if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
+  if ($("ov").classList.contains("show") && tab === "acc") renderSettings();
+  if (!firstRun && (!S.output || !S.ais.claude.ok)) { firstRun = true; openSettings(S.ais.claude.ok ? "setup" : "acc"); }
+}
+async function loadTask() {
+  const d = await api("/api/task?id=" + sel);
+  if (d.error) { sel = ""; return renderHome(); }
+  fetchedAt = Date.now();
+  const changed = !T || JSON.stringify(T) !== JSON.stringify({ ...d, messages: d.messages.map((m) => ({ ...m, now_ts: undefined })) });
+  T = { ...d, messages: d.messages.map((m) => ({ ...m, now_ts: undefined })) };
+  T._now = d.messages.find((m) => m.now_ts)?.now_ts || 0;
+  if (changed && !renaming) renderTask();
+}
+
+/* ---------------- sidebar ---------------- */
+function aiDot(a) { return a.pending ? "pend" : a.ok ? "ok" : a.ok === false ? "bad" : ""; }
+function renderSide() {
+  $("tlist").innerHTML = S.tasks.length ? S.tasks.map((t) => `<button class="titem ${t.id === sel ? "on" : ""}" data-sel="${t.id}" title="${esc(ST[t.status])}"><span class="sd ${t.status}"></span><span class="t">${esc(t.title)}</span></button>`).join("")
+    : `<div class="hint" style="padding:6px 10px">Chưa có task</div>`;
+  $("aiDots").innerHTML = Object.entries(S.ais).map(([k, a]) => `<span><span class="dot ${aiDot(a)}"></span>${AIN[k]}</span>`).join("");
+}
+
+/* ---------------- composer ---------------- */
+function composer(id, ph) {
+  return `<div class="comp" id="${id}"><div class="atts" id="atts"></div>
+    <textarea id="txt" placeholder="${ph}" aria-label="Tin nhắn"></textarea>
+    <div class="bar"><button class="ghost icon" id="bFile" title="Đính kèm file" aria-label="Đính kèm file">${I.attach}</button>
+      <span style="flex:1"></span><span class="hint" id="cHint"></span>
+      <button class="pri icon" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
+}
+function bindComposer(onSend) {
+  const c = document.querySelector(".comp"), ta = $("txt");
+  $("bFile").onclick = () => $("fileIn").click();
+  $("bSend").onclick = onSend;
+  ta.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); onSend(); }
+  });
+  ta.addEventListener("input", () => fit(ta));
+  ["dragenter", "dragover"].forEach((ev) => c.addEventListener(ev, (e) => { e.preventDefault(); c.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach((ev) => c.addEventListener(ev, (e) => { e.preventDefault(); c.classList.remove("drag"); }));
+  c.addEventListener("drop", (e) => { files.push(...e.dataTransfer.files); renderAtts(); });
+  renderAtts();
+}
+function fit(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.6) + "px"; }
+addEventListener("resize", () => $("txt") && fit($("txt")));
+function renderAtts() {
+  const a = $("atts"); if (!a) return;
+  a.innerHTML = files.map((f, i) => `<span class="a"><span>📎 ${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
+  a.style.display = files.length ? "flex" : "none";
+}
+$("fileIn").onchange = (e) => { files.push(...e.target.files); e.target.value = ""; renderAtts(); };
+function busy(on, label) { const b = $("bSend"); if (!b) return; b.disabled = on; b.innerHTML = on ? `<span class="spin"></span>` : I.send; $("cHint").textContent = label || ""; }
+
+/* ---------------- home ---------------- */
+function renderHome() {
+  T = null;
+  $("main").innerHTML = `<div class="home"><h2>Hôm nay làm gì?</h2><div style="max-width:780px;width:100%;margin:0 auto">${composer("homeComp", PH_NEW)}</div></div>`;
+  bindComposer(sendNew);
+  $("txt").focus();
+}
+async function sendNew() {
+  const text = $("txt").value.trim(); if (!text) return $("txt").focus();
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+  busy(true);
+  try {
+    const r = await api("/api/task/new", { text }); if (r.error) throw new Error(r.error);
+    const names = [];
+    for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(r.id, f)); }
+    const s = await api("/api/task/submit", { id: r.id, files: names }); if (s.error) throw new Error(s.error);
+    $("txt").value = ""; files = []; sel = r.id; sessionStorage.setItem("sel", sel); T = null; await refresh();
+  } catch (e) { toast(e.message); busy(false); }
+}
+
+/* ---------------- task ---------------- */
+function workBlock(m, i) {
+  const key = T.id + ":" + i, live = m.status === "running";
+  const open = live ? !closedW.has(key) : openW.has(key);
+  const el = live ? (T._now - m.started_ts) + (Date.now() - fetchedAt) / 1000 : (m.ended_ts || m.started_ts) - m.started_ts;
+  const label = live ? `<span class="spin"></span>Đang làm · <span data-timer="${m.started_ts}">${clock(el)}</span>`
+    : { done: `Đã làm trong ${dur(el)}`, interrupted: `Dừng để nhận tin mới · ${dur(el)}`, paused: `Tạm dừng sau ${dur(el)}`, cancelled: `Đã hủy sau ${dur(el)}`, failed: `Lỗi sau ${dur(el)}` }[m.status] || dur(el);
+  const nsub = m.subtasks.length ? ` · ${m.subtasks.length} sub-task` : "";
+  const steps = m.steps.slice(live ? -8 : -40);
+  const subs = m.subtasks.length ? `<div class="subs">${m.subtasks.map((s) => `<div class="sub" title="${esc(s.error)}"><span class="id">${esc(s.id)}</span><span class="tt">${esc(s.title || "—")}</span>
+      <span class="chip">${WN[s.worker] || s.worker || "…"}${s.model ? " · " + esc(s.model) : ""}${s.attempt > 1 ? " · lần " + s.attempt : ""}</span>
+      <span class="pill ${s.status}">${s.status === "running" ? "Đang làm" : ST[s.status] || s.status}</span></div>`).join("")}</div>` : "";
+  return `<div class="work"><button class="whead ${open ? "open" : ""}" data-w="${key}" data-live="${live ? 1 : 0}">${label}${nsub}${I.chev}</button>
+    ${open ? `<div class="wbody">${steps.map((s, j) => `<div class="wstep ${live && j === steps.length - 1 ? "cur" : ""}" title="${esc(s)}">${esc(s)}</div>`).join("") || "<div class='wstep'>Đang khởi động…</div>"}</div>` : ""}${subs}</div>`;
+}
+function renderTask() {
+  const t = T, live = ["running", "queued"].includes(t.status);
+  const sc0 = document.querySelector(".scroll"), wasBottom = !sc0 || sc0.scrollHeight - sc0.scrollTop - sc0.clientHeight < 80;
+  const acts = [];
+  if (live) acts.push(`<button data-act="pause">Tạm dừng</button>`);
+  if (["paused", "failed"].includes(t.status)) acts.push(`<button class="pri" data-act="resume">Tiếp tục</button>`);
+  if (!["done", "cancelled"].includes(t.status)) acts.push(`<button data-act="cancel">Hủy</button>`);
+  if (!live) acts.push(`<button class="ghost icon" data-act="delete" title="Xóa task" aria-label="Xóa task">${I.trash}</button>`);
+  const body = t.messages.map((m, i) => {
+    if (m.role === "user") return `<div class="msg user">${esc(m.text)}${(m.files || []).length ? `<div class="att">📎 ${m.files.map(esc).join(", ")}</div>` : ""}</div>`;
+    if (m.role === "work") return workBlock(m, i);
+    const n = (m.files || []).length;
+    const fl = n ? `<button class="openf" data-act="open" title="${esc(T.output)}">${I.folder}Open folder · ${n} file</button>` : "";
+    return `<div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${fl}</div>`;
+  }).join("");
+  const queued = t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>Đang chuẩn bị…</span></div>` : "";
+  const comp = $("taskComp");
+  if (!comp || comp.dataset.t !== t.id) {          // chỉ tạo ô nhập 1 lần cho mỗi task
+    $("main").innerHTML = `<div class="thead" id="thead"></div><div class="scroll"><div class="thread" id="thread"></div></div>
+      <div class="compwrap">${composer("taskComp", PH_MORE)}</div>`;
+    $("taskComp").dataset.t = t.id;
+    bindComposer(sendMore);
+  }
+  $("thead").innerHTML = `<span class="pill ${t.status}">${ST[t.status]}</span>
+      <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1><button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
+      <span class="grow"></span>${acts.join("")}`;
+  $("thread").innerHTML = body + queued;
+  $("bRename").onclick = startRename;
+  const sc = document.querySelector(".scroll"); if (wasBottom) sc.scrollTop = sc.scrollHeight;
+}
+function startRename() {
+  renaming = true;
+  const h = $("tTitle"), inp = document.createElement("input");
+  inp.type = "text"; inp.value = T.title; inp.setAttribute("aria-label", "Tên task");
+  h.replaceWith(inp); inp.focus(); inp.select();
+  const done = async (save) => {
+    if (!renaming) return; renaming = false;
+    if (save && inp.value.trim() && inp.value.trim() !== T.title) await api("/api/task/act", { id: T.id, action: "rename", text: inp.value.trim() });
+    T = null; refresh();
+  };
+  inp.onkeydown = (e) => { if (e.key === "Enter") done(true); if (e.key === "Escape") done(false); };
+  inp.onblur = () => done(true);
+}
+async function sendMore() {
+  const text = $("txt").value.trim(); if (!text && !files.length) return $("txt").focus();
+  busy(true);
+  try {
+    const names = [];
+    for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(T.id, f)); }
+    const r = await api("/api/task/act", { id: T.id, action: "send", text, files: names }); if (r.error) throw new Error(r.error);
+    files = []; $("txt").value = ""; fit($("txt")); renderAtts(); busy(false); T = null; await refresh();
+  } catch (e) { toast(e.message); busy(false); }
+}
+setInterval(() => {   // đồng hồ "Đang làm"
+  document.querySelectorAll("[data-timer]").forEach((el) => { el.textContent = clock(T._now - +el.dataset.timer + (Date.now() - fetchedAt) / 1000); });
+}, 1000);
+
+/* ---------------- clicks ---------------- */
+document.addEventListener("click", async (e) => {
+  const el = e.target.closest("[data-sel],[data-act],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file]");
+  if (!el) return;
+  const d = el.dataset;
+  if (d.sel) { sel = d.sel; sessionStorage.setItem("sel", sel); T = null; files = []; renderSide(); await loadTask(); }
+  else if (d.w) { const set = d.live === "1" ? closedW : openW; set.has(d.w) ? set.delete(d.w) : set.add(d.w); renderTask(); }
+  else if (d.file) { const r = await api("/api/task/file", { id: T.id, path: d.file }); if (r.error) toast(r.error); }
+  else if (d.act) {
+    if (d.act === "cancel" && !confirm("Hủy task này?")) return;
+    if (d.act === "delete" && !confirm("Xóa task khỏi danh sách? File kết quả vẫn giữ nguyên.")) return;
+    el.disabled = true;
+    const r = await api("/api/task/act", { id: T.id, action: d.act }); if (r.error) toast(r.error);
+    if (d.act === "delete") { sel = ""; sessionStorage.removeItem("sel"); }
+    T = null; refresh();
+  }
+  else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
+  else if (d.tab) { collect(); tab = d.tab; renderSettings(); }
+  else if (d.login) { await api("/api/ai/login", { ai: d.login }); S.ais[d.login].pending = true; renderSettings(); }
+  else if (d.test) { S.ais[d.test].pending = true; renderSettings(); await api("/api/ai/test", { ai: d.test }); S = await api("/api/state"); renderSettings(); renderSide(); }
+});
+$("btnNew").onclick = () => { sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
+$("btnSet").onclick = () => openSettings("acc");
+$("btnOut").onclick = () => (S.output ? api("/api/open-output", {}) : openSettings("setup"));
+$("btnQuit").onclick = async () => {
+  if (!confirm("Tắt AI Orchestrator? Task đang làm sẽ tự chạy tiếp khi mở lại.")) return;
+  await api("/api/quit", {}); clearInterval(timer);
+  document.body.innerHTML = '<p style="font:16px system-ui;padding:40px">Đã tắt. Bấm đúp file AI-Orchestrator.bat để mở lại.</p>';
+};
+
+/* ---------------- settings ---------------- */
+function openSettings(t) { tab = t; form = { output: S.output, instructions: S.instructions }; renderSettings(); $("ov").classList.add("show"); }
+function collect() { if (form && $("fIns")) form.instructions = $("fIns").value; }
+function renderSettings() {
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  let h;
+  if (tab === "acc") {
+    h = Object.entries(S.ais).map(([k, a]) => {
+      const st = !a.installed ? `<small class="bad">Chưa cài — bấm đúp lại file AI-Orchestrator.bat</small>`
+        : a.pending ? `<small>Đang kiểm tra…</small>` : a.ok ? `<small>Sẵn sàng</small>` : a.ok === false ? `<small class="bad">Chưa đăng nhập${a.msg ? " · " + esc(a.msg) : ""}</small>` : `<small>Chưa đăng nhập</small>`;
+      return `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${a.ok && a.email ? " - " + esc(a.email) : ""}${st}</span>
+        <button class="ghost icon" data-test="${k}" title="Kiểm tra lại" aria-label="Kiểm tra lại" ${a.installed && !a.pending ? "" : "disabled"}>${I.refresh}</button>
+        <button data-login="${k}" ${a.installed && !a.pending ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button></div>`;
+    }).join("");
+  } else {
+    h = `<div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick">Chọn…</button></div></div>
+      <div class="f"><span class="k">Hướng dẫn cho Claude</span><textarea id="fIns" rows="6">${esc(form.instructions)}</textarea></div>`;
+  }
+  $("mbody").innerHTML = h;
+  $("mfoot").innerHTML = tab === "acc" ? `<button id="mClose">Đóng</button><button class="pri" id="mNext">Tiếp</button>` : `<button id="mBack">Quay lại</button><button class="pri" id="mNext">Xong</button>`;
+  $("mClose") && ($("mClose").onclick = closeSettings);
+  $("mBack") && ($("mBack").onclick = () => { collect(); tab = "acc"; renderSettings(); });
+  $("mNext").onclick = async () => {
+    if (tab === "acc") { tab = "setup"; return renderSettings(); }
+    collect();
+    const r = await api("/api/setup", form); if (r.error) return toast(r.error);
+    closeSettings();
+  };
+  if (tab === "setup") $("oPick").onclick = async () => { collect(); const r = await api("/api/pick", {}); if (r.path) { form.output = r.path; renderSettings(); } };
+}
+function closeSettings() { $("ov").classList.remove("show"); refresh(); }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("ov").classList.contains("show")) closeSettings(); });
+
+refresh();
+const timer = setInterval(() => { if (!$("ov").classList.contains("show") || tab === "acc") refresh(); }, 2000);
+</script>
+</body>
+</html>

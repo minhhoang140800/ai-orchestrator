@@ -1,0 +1,1180 @@
+"""AI Orchestrator: Claude làm PM, giao việc cho ChatGPT/Codex và Gemini/Antigravity.
+Một file duy nhất. Chạy trên máy, dữ liệu nằm trên máy.
+
+  pythonw app.py [--background]       chạy nền + mở giao diện (http://127.0.0.1:8765)
+  python app.py worker codex|gemini   (Claude dùng) giao 1 sub-task cho worker
+  python app.py check files|png|csv|xlsx ...   (Claude dùng) kiểm tra file kết quả
+"""
+import base64
+import csv
+import datetime
+import json
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import unicodedata
+import uuid
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+UI_B64 = ""  # filled at build time
+VERSION = "dev"  # filled at build time
+UPDATE_BASE = ""  # vd https://raw.githubusercontent.com/<owner>/<repo>/main/ (filled at build time)
+
+APP = Path(__file__).resolve()
+HOME = Path(os.environ.get("AIO_HOME") or APP.parent)
+DATA = HOME / "data"
+CFG_FILE = DATA / "config.json"
+PROJ = DATA / "projects"
+PORT = int(os.environ.get("AIO_PORT", "8765"))
+IS_WIN = os.name == "nt"
+NO_WINDOW = 0x08000000 if IS_WIN else 0
+MAX_RUNNING = 2
+PING = "Reply with the single word PONG and nothing else."
+
+AIS = {
+    "claude": {"bin": "claude", "login": ["auth", "login"], "test": ["-p", PING]},
+    "codex": {"bin": "codex", "login": ["login"], "test": ["exec", "--skip-git-repo-check", PING]},
+    "gemini": {"bin": "agy", "login": [], "test": ["-p", PING]},
+}
+ICON_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="13" fill="#E8EFF2"/><g stroke="#035A3D" stroke-width="2.8"><path d="M32 34.5V14.8M32 34.5 13.7 47.3M32 34.5l18.3 12.8"/></g><g fill="#035A3D"><circle cx="32" cy="34.5" r="8.8"/><circle cx="32" cy="14.8" r="5.1"/><circle cx="13.7" cy="47.3" r="4.9"/><circle cx="50.3" cy="47.3" r="4.9"/></g></svg>'
+
+
+# ---------------------------------------------------------------- helpers
+def now():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def rjson(p, default=None):
+    try:
+        return json.loads(Path(p).read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def wjson(p, obj):
+    p = Path(p)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def slug(s, n=40):
+    s = s.replace("đ", "d").replace("Đ", "D")
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Za-z0-9]+", "-", s).strip("-")[:n].lower() or "x"
+
+
+def safe_name(s, n=60):
+    s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", s).strip(" .")
+    return re.sub(r"\s+", " ", s)[:n].strip(" .") or "Untitled"
+
+
+def find_bin(name):
+    p = shutil.which(name)
+    if p:
+        return p
+    cands = [Path.home() / ".local" / "bin", Path(os.environ.get("APPDATA", "")) / "npm",
+             Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "antigravity-cli",
+             Path.home() / ".antigravity" / "bin"]
+    for d in cands:
+        for ext in ([".exe", ".cmd", ""] if IS_WIN else [""]):
+            c = d / (name + ext)
+            if c.exists():
+                return str(c)
+    return None
+
+
+def py_console():
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe":
+        c = exe.with_name("python.exe")
+        if c.exists():
+            return str(c)
+    return str(exe)
+
+
+def kill_tree(p):
+    if p and p.poll() is None:
+        if IS_WIN:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True,
+                           creationflags=NO_WINDOW)
+        else:
+            p.kill()
+
+
+def kill_orphan(pid):
+    """Tiến trình claude cũ còn sót khi app bị tắt đột ngột: dừng trước khi chạy tiếp."""
+    if not pid or not IS_WIN:
+        return
+    r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True,
+                       text=True, creationflags=NO_WINDOW)
+    if "claude" in (r.stdout or "").lower():
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, creationflags=NO_WINDOW)
+
+
+def open_path(p):
+    p = str(p)
+    if IS_WIN:
+        os.startfile(p)  # noqa
+    elif shutil.which("xdg-open"):
+        subprocess.Popen(["xdg-open", p])
+
+
+def refresh_path():
+    """Lấy PATH mới nhất từ registry (CLI vừa cài xong vẫn tìm thấy)."""
+    if not IS_WIN:
+        return
+    try:
+        import winreg
+        parts = []
+        for root, key in [(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+                          (winreg.HKEY_CURRENT_USER, "Environment")]:
+            try:
+                with winreg.OpenKey(root, key) as k:
+                    parts.append(os.path.expandvars(winreg.QueryValueEx(k, "Path")[0]))
+            except OSError:
+                pass
+        if parts:
+            os.environ["PATH"] = ";".join(parts + [os.environ.get("PATH", "")])
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------- config
+_cfg_lock = threading.Lock()
+CFG = None
+TASKS_DIR = DATA / "tasks"
+DEFAULT_INSTRUCTIONS = (
+    "Xưng hô: tôi - bạn. Trả lời tiếng Việt, ngắn gọn, nêu kết luận trực tiếp, không mở đầu, không rào đón.\n"
+    "Không bịa dữ kiện, ngày tháng, số liệu, nguồn. Phần chưa chắc chắn ghi rõ và tách riêng.\n"
+    "Làm đúng phạm vi yêu cầu, không tự mở rộng.\n"
+    "Chỉ soạn nháp để tôi duyệt; không tự gửi tin nhắn hay hành động thay tôi; không cam kết thay tôi."
+)
+
+
+def load_cfg():
+    c = rjson(CFG_FILE, {}) or {}
+    c.setdefault("token", secrets.token_urlsafe(18))
+    c.setdefault("output", "")
+    c.setdefault("instructions", DEFAULT_INSTRUCTIONS)
+    c.setdefault("ais", {})
+    for a in c["ais"].values():
+        a.pop("pending", None)
+    return c
+
+
+def save_cfg():
+    with _cfg_lock:
+        wjson(CFG_FILE, CFG)
+
+
+def pick_folder():
+    try:
+        import tkinter
+        from tkinter import filedialog
+        r = tkinter.Tk()
+        r.withdraw()
+        r.attributes("-topmost", True)
+        d = filedialog.askdirectory(parent=r)
+        r.destroy()
+        return os.path.normpath(d) if d else ""
+    except Exception:
+        return ""
+
+
+_pick_lock = threading.Lock()
+
+
+def drives():
+    """Mọi ổ đĩa Claude được đọc: ổ trong máy + ổ mạng đã map (Windows), thư mục home (khác)."""
+    if IS_WIN:
+        import string
+        return [f"{c}:\\" for c in string.ascii_uppercase[2:] if os.path.isdir(f"{c}:\\")]
+    return [str(Path.home())]
+
+
+# ---------------------------------------------------------------- tasks
+TASKS = {}          # task_id -> dict (persisted in task.json)
+PROCS = {}          # task_id -> Popen
+_tlock = threading.RLock()
+
+
+def tdir(t):
+    return TASKS_DIR / t["id"]
+
+
+def tsave(t):
+    with _tlock:
+        wjson(tdir(t) / "task.json", {k: v for k, v in t.items() if not k.startswith("_")})
+
+
+def tmsg(t, role, text, **kw):
+    t.setdefault("messages", []).append({"role": role, "text": text, "time": now(), **kw})
+    return len(t["messages"]) - 1
+
+
+def work(t):
+    i = t.get("wi")
+    if i is not None and i < len(t.get("messages", [])) and t["messages"][i]["role"] == "work":
+        return t["messages"][i]
+    return None
+
+
+def step(t, line):
+    w = work(t)
+    line = line.strip()
+    if w is not None and line:
+        w["steps"].append(line[:300])
+        w["steps"] = w["steps"][-60:]
+
+
+def end_work(t, status):
+    w = work(t)
+    if w is not None and w.get("status") == "running":
+        w["status"] = status
+        w["ended"] = now()
+        w["ended_ts"] = time.time()
+
+
+def migrate_old():
+    """Chuyển task của bản trước (data/projects/<p>/tasks/<id>) sang data/tasks/<id>."""
+    old = DATA / "projects"
+    if not old.exists():
+        return
+    for f in old.glob("*/tasks/*/task.json"):
+        t = rjson(f)
+        if not t or (TASKS_DIR / t["id"]).exists():
+            continue
+        pname = (rjson(f.parents[2] / "project.json") or {}).get("name", "")
+        if not t.get("folder"):
+            t["folder"] = str(Path(safe_name(pname)) / safe_name(t["id"] + " " + t.get("title", ""), 80)) if pname else t["id"]
+        msgs = t.get("messages") or [{"role": "user", "text": t.get("text", ""), "time": t.get("created", "")}]
+        t["messages"] = [m for m in msgs if m.get("role") in ("user", "claude")]
+        t.pop("log", None)
+        wjson(f, t)
+        shutil.move(str(f.parent), str(TASKS_DIR / t["id"]))
+
+
+def load_tasks():
+    TASKS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        migrate_old()
+    except Exception:
+        pass
+    for f in TASKS_DIR.glob("*/task.json"):
+        t = rjson(f)
+        if not t:
+            continue
+        if t.get("status") == "running":      # app bị tắt khi đang chạy -> tự chạy tiếp
+            kill_orphan(t.get("pid"))
+            end_work(t, "interrupted")
+            t["status"] = "queued"
+            t["next"] = {"kind": "resume"}
+        TASKS[t["id"]] = t
+        tsave(t)
+
+
+def out_dir(t):
+    return Path(CFG["output"]) / t.get("folder", t["id"])
+
+
+def subtasks(t):
+    """Sub-task Claude đã giao cho worker: đọc từ work/<ID>/vN/status.json."""
+    out = []
+    w = tdir(t) / "work"
+    if not w.exists():
+        return out
+    for d in sorted(x for x in w.iterdir() if x.is_dir()):
+        vs = sorted((v for v in d.iterdir() if v.is_dir() and re.fullmatch(r"v\d+", v.name)),
+                    key=lambda v: int(v.name[1:]))
+        if not vs:
+            continue
+        v = vs[-1]
+        st = rjson(v / "status.json") or {}
+        title = ""
+        tf = v / "TASK.md"
+        if tf.exists():
+            for line in tf.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.strip():
+                    title = line.strip().lstrip("#").strip()[:90]
+                    break
+        out.append({"id": d.name, "title": title, "attempt": len(vs), "worker": st.get("worker") or "",
+                    "model": st.get("model") or "", "status": st.get("status") or "running",
+                    "seconds": st.get("seconds"), "error": (st.get("error") or "")[:200],
+                    "ts": (v / "status.json").stat().st_mtime if (v / "status.json").exists() else v.stat().st_mtime})
+    return out
+
+
+def write_claude_md(t):
+    py, app = py_console(), str(APP)
+    on = [w for w in ("codex", "gemini") if find_bin(AIS[w]["bin"]) and CFG["ais"].get(w, {}).get("ok") is not False]
+    desc = {"codex": "codex — ChatGPT/Codex: code, CSV/Excel, script, tạo ảnh ($imagegen)",
+            "gemini": "gemini — Gemini/Antigravity: research, tổng hợp, phân tích, ý tưởng (chỉ trả văn bản)"}
+    txt = f"""# Task {t['id']}
+
+## Hướng dẫn của người dùng (ưu tiên áp dụng)
+{CFG.get('instructions', '').strip() or '(không)'}
+
+## Vai trò
+Bạn là PM. Phân tích yêu cầu, tự quyết cách làm, chia sub-task, chọn worker và model, giao việc,
+nghiệm thu trên file thật, sửa đúng phần lỗi, báo cáo. Task này là một cuộc trò chuyện nhiều lượt.
+
+## Đường dẫn
+- Thư mục làm việc (nháp, log): thư mục hiện tại
+- File người dùng gửi: ./input/
+- Được ĐỌC mọi ổ đĩa của máy: {', '.join(drives())}. Người dùng nhắc tới file/thư mục nào thì tự tìm.
+  Không sửa, không xóa, không di chuyển file nào ngoài thư mục làm việc và OUTPUT.
+- OUTPUT (nơi lưu sản phẩm giao người dùng): {out_dir(t)}
+
+## Worker sẵn có trên máy
+{chr(10).join('- ' + desc[w] for w in on) or '- (không có — tự làm)'}
+Tự chọn worker cho từng sub-task, không bắt buộc dùng. Việc nhỏ hoặc cần phán đoán thì tự làm.
+Worker lỗi đăng nhập/không chạy: coi như không có, chuyển worker khác hoặc tự làm.
+
+Giao sub-task: viết yêu cầu đầy đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy
+cuộc trò chuyện), rồi chạy:
+  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--model <model>] [--timeout 900]
+  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2
+Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worker tạo). Sửa lỗi: giao lại cùng --out.
+
+## Tạo ảnh
+Thử tạo bằng codex ($imagegen) hoặc cách khác có sẵn. Chỉ khi không thể tạo được (lỗi, hết hạn mức, không đạt sau 2 lần sửa):
+viết prompt vào OUTPUT/prompts/, rồi hỏi người dùng (question.md): "Dán prompt trong <đường dẫn> vào ChatGPT, lưu ảnh vào
+OUTPUT/images/ rồi trả lời 'xong'". Khi được trả lời: kiểm tra ảnh, nêu chỗ cần sửa hoặc nghiệm thu.
+
+## Tối ưu chất lượng, thời gian, hạn mức
+- Model nhỏ/nhanh cho việc đơn giản; model mạnh cho việc khó. Áp dụng cho subagent và worker (--model).
+  Nâng model khi kết quả không đạt, hạ khi việc lặp lại.
+- Song song sub-task độc lập; tuần tự khi phụ thuộc.
+- Worker status "limit": chuyển worker khác hoặc tự làm nếu đảm bảo chất lượng; nếu không, hỏi người dùng.
+
+## Nghiệm thu
+- status completed của worker chưa phải là xong. Luôn kiểm tra file thật.
+- Đo được: "{py}" "{app}" check files|png|csv|xlsx ... (xem --help). Hình ảnh/ngữ nghĩa: mở file xem trực tiếp.
+- Lỗi: giao sửa đúng phần lỗi, tối đa 2 lần mỗi sub-task; quá thì ghi partial.
+
+## Tiến độ
+Cập nhật tasks/plan.json sau mỗi bước: goal, subtasks[id, worker, model, status, attempt, outputs].
+Có thể bị ngắt giữa chừng (người dùng gửi tin gấp, hoặc máy tắt): khi chạy tiếp, đọc plan.json, bỏ qua bước đã xong.
+
+## Khi cần người dùng quyết định
+Chỉ hỏi khi thật sự quan trọng: thao tác không hoàn tác, tốn nhiều hạn mức, yêu cầu mâu thuẫn, thiếu dữ liệu không suy ra được.
+Cách hỏi: ghi câu hỏi ngắn + các phương án vào ./question.md rồi DỪNG. Việc khác: tự quyết, ghi giả định.
+
+## Kết thúc mỗi lượt
+Lưu sản phẩm vào OUTPUT (không tạo file báo cáo). Câu trả lời cuối gửi người dùng: ngắn, chỉ thông tin cần thiết —
+kết quả đạt/chưa đạt, điểm cần người dùng biết, việc người dùng cần làm. Không liệt kê lại từng file
+(giao diện có nút mở thư mục kết quả). Có thể dùng **đậm**, `code`, gạch đầu dòng.
+
+## Cấm
+Không dùng API key. Không ghi mật khẩu/token vào file.
+"""
+    (tdir(t) / "CLAUDE.md").write_text(txt, encoding="utf-8")
+
+
+def build_prompt(t, nxt):
+    kind = nxt.get("kind")
+    files = nxt.get("files") or []
+    fl = f"\nFile mới trong ./input/: {', '.join(files)}." if files else ""
+    text = nxt.get("text", "")
+    if kind == "start" or not t.get("session_started"):
+        base = f"Task mới. Yêu cầu của người dùng:\n\n{t['text']}\n"
+        if kind != "start" and text:
+            base += f"\nBổ sung của người dùng:\n{text}\n"
+        return base + fl + "\nLàm theo CLAUDE.md."
+    if kind == "answer":
+        return f"Người dùng trả lời:\n\n{text}\n{fl}\nTiếp tục task."
+    if kind == "urgent":
+        return (f"Người dùng vừa gửi tin nhắn trong lúc bạn đang làm (bạn đã bị ngắt):\n\n{text}\n{fl}\n"
+                "Đọc tasks/plan.json, điều chỉnh kế hoạch theo tin nhắn này rồi tiếp tục. Làm theo CLAUDE.md.")
+    if kind == "followup":
+        return f"Tin nhắn mới của người dùng:\n\n{text}\n{fl}\nLàm theo CLAUDE.md."
+    return "Task bị dừng giữa chừng. Đọc tasks/plan.json và chạy tiếp từ bước đang dở. Làm theo CLAUDE.md."
+
+
+def gen_title(t):
+    """Đặt tên task ngắn như Claude (model nhỏ, tốn rất ít hạn mức). Lỗi thì giữ tên tạm."""
+    exe = find_bin("claude")
+    try:
+        if exe:
+            p = subprocess.run([exe, "-p", "Đặt tiêu đề 3-7 từ, cùng ngôn ngữ, cho yêu cầu dưới đây. "
+                                "Chỉ trả về tiêu đề, không dấu ngoặc, không giải thích.\n\n" + t["text"][:2000],
+                                "--model", "haiku"], cwd=str(tdir(t)), stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, encoding="utf-8", errors="replace", timeout=40, creationflags=NO_WINDOW)
+            title = (p.stdout or "").strip().splitlines()[0].strip(" \"'*#`.") if p.returncode == 0 and p.stdout.strip() else ""
+            if 2 <= len(title) <= 80 and not t.get("renamed"):
+                t["title"] = title
+    except Exception:
+        pass
+    with _tlock:
+        t["titling"] = False
+        tsave(t)
+
+
+def start_run(t):
+    exe = find_bin("claude")
+    nxt = t.pop("next", None) or {"kind": "start"}
+    d = tdir(t)
+    if not exe or not CFG.get("output"):
+        t["status"] = "failed"
+        tmsg(t, "claude", "Chưa cài Claude Code" if not exe else "Chưa chọn thư mục kết quả (Cài đặt → Set up)", kind="error")
+        return tsave(t)
+    if not t.get("folder"):
+        t["folder"] = safe_name(f"{t['created'][:10]} {t['title']}", 80)
+    out_dir(t).mkdir(parents=True, exist_ok=True)
+    write_claude_md(t)
+    q = d / "question.md"
+    if q.exists():
+        q.unlink()
+    args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
+            "--permission-mode", "acceptEdits",
+            "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite"]
+    if t.get("session_started"):
+        args += ["--resume", t["session"]]
+    else:
+        t["session"] = str(uuid.uuid4())
+        args += ["--session-id", t["session"]]
+    for f in dict.fromkeys([str(out_dir(t))] + drives()):
+        args += ["--add-dir", f]
+    t.update(status="running", started=now(), _pause=False, _cancel=False, _quit=False, _redirect=None)
+    t["wi"] = tmsg(t, "work", "", status="running", started=now(), started_ts=time.time(), steps=[])
+    tsave(t)
+    try:
+        proc = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                                creationflags=NO_WINDOW)
+    except Exception as e:
+        end_work(t, "failed")
+        t["status"] = "failed"
+        tmsg(t, "claude", str(e), kind="error")
+        return tsave(t)
+    PROCS[t["id"]] = proc
+    t["pid"] = proc.pid
+    tsave(t)
+    threading.Thread(target=watch, args=(t, proc, nxt), daemon=True).start()
+
+
+def summarize_tool(b):
+    name = b.get("name", "")
+    inp = b.get("input") or {}
+    s = str(inp.get("description") or inp.get("command") or inp.get("file_path") or inp.get("pattern")
+            or inp.get("url") or inp.get("query") or inp.get("prompt") or "").replace("\n", " ")
+    m = re.search(r" worker (codex|gemini) .*?--out\s+\"?([^\s\"]+)", s)
+    if m:
+        sid = re.split(r"[\\/]", m.group(2).rstrip("/\\"))[-1]
+        return f"Giao {sid} cho {'ChatGPT' if m.group(1) == 'codex' else 'Gemini'}"
+    if " check " in s:
+        return "Kiểm tra kết quả"
+    label = {"Read": "Đọc", "Write": "Ghi", "Edit": "Sửa", "MultiEdit": "Sửa", "Glob": "Tìm file", "Grep": "Tìm",
+             "LS": "Xem thư mục", "WebSearch": "Tìm trên web", "WebFetch": "Đọc web", "Task": "Sub-agent",
+             "Agent": "Sub-agent", "TodoWrite": "Cập nhật kế hoạch", "Bash": "Chạy"}.get(name, name)
+    if name in ("Read", "Write", "Edit", "MultiEdit") and s:
+        s = re.split(r"[\\/]", s)[-1]
+    return f"{label}: {s[:110]}" if s and name != "TodoWrite" else label
+
+
+def new_files(t, since):
+    od = out_dir(t)
+    if not od.exists():
+        return []
+    fs = [f for f in od.rglob("*") if f.is_file() and f.stat().st_mtime >= since - 1]
+    fs.sort(key=str)
+    return [str(f.relative_to(od)).replace("\\", "/") for f in fs][:30]
+
+
+def watch(t, p, nxt):
+    raw = open(tdir(t) / "run.log", "a", encoding="utf-8")
+    raw.write(f"\n===== {now()} {nxt.get('kind')} =====\n")
+    result = None
+    w = work(t)
+    since = (w or {}).get("started_ts", time.time())
+    for line in p.stdout:
+        raw.write(line)
+        raw.flush()
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+        typ = ev.get("type")
+        if ev.get("session_id") and not t.get("session_started"):
+            t["session_started"] = True
+            t["session"] = ev["session_id"]
+            tsave(t)
+        if typ == "assistant":
+            for b in (ev.get("message") or {}).get("content") or []:
+                if b.get("type") == "text" and b.get("text", "").strip():
+                    step(t, b["text"].strip().split("\n")[0])
+                elif b.get("type") == "tool_use":
+                    step(t, summarize_tool(b))
+        elif typ == "result":
+            result = ev
+    err = p.stderr.read()
+    if err.strip():
+        raw.write("--- stderr ---\n" + err)
+    raw.close()
+    p.wait()
+    PROCS.pop(t["id"], None)
+    with _tlock:
+        q = tdir(t) / "question.md"
+        t.pop("pid", None)
+        if t.get("_quit"):
+            t["status"] = "running"        # app đóng: giữ running để lần mở sau tự chạy tiếp
+        elif t.get("_redirect"):
+            end_work(t, "interrupted")
+            t["status"] = "queued"
+            t["next"] = t["_redirect"]
+        elif t.get("_cancel"):
+            end_work(t, "cancelled")
+            t["status"] = "cancelled"
+        elif t.get("_pause"):
+            end_work(t, "paused")
+            t["status"] = "paused"
+        elif q.exists() and q.read_text(encoding="utf-8").strip():
+            end_work(t, "done")
+            t["status"] = "waiting"
+            tmsg(t, "claude", q.read_text(encoding="utf-8").strip(), kind="question", files=new_files(t, since))
+        elif p.returncode == 0 and result and not result.get("is_error"):
+            end_work(t, "done")
+            t["status"] = "done"
+            t["finished"] = now()
+            tmsg(t, "claude", (result.get("result") or "Xong.").strip(), files=new_files(t, since))
+        else:
+            end_work(t, "failed")
+            msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {p.returncode}"
+            t["status"] = "failed"
+            tmsg(t, "claude", msg, kind="error")
+        t["_redirect"] = None
+        tsave(t)
+
+
+def scheduler():
+    while True:
+        with _tlock:
+            running = sum(1 for t in TASKS.values() if t["status"] == "running")
+            queued = sorted((t for t in TASKS.values() if t["status"] == "queued"), key=lambda x: x["created"])
+            for t in queued:
+                if running >= MAX_RUNNING:
+                    break
+                if t.get("titling") and time.time() - t.get("created_ts", 0) < 30:
+                    continue          # chờ đặt tên xong để thư mục kết quả có tên đẹp
+                start_run(t)
+                running += 1
+        time.sleep(1)
+
+
+def act(tid, action, text="", files=None):
+    t = TASKS.get(tid)
+    if not t:
+        return {"error": "Không tìm thấy task"}
+    s = t["status"]
+    files = [f for f in (files or []) if (tdir(t) / "input" / f).exists()]
+    text = (text or "").strip()
+    with _tlock:
+        if action == "pause" and s == "running":
+            t["_pause"] = True
+            kill_tree(PROCS.get(tid))
+        elif action == "pause" and s == "queued":
+            t["status"] = "paused"
+        elif action == "cancel" and s in ("running", "queued", "paused", "waiting", "failed"):
+            if s == "running":
+                t["_cancel"] = True
+                kill_tree(PROCS.get(tid))
+            else:
+                t["status"] = "cancelled"
+        elif action == "resume" and s in ("paused", "failed"):
+            t["status"] = "queued"
+            t.setdefault("next", {"kind": "resume"})
+        elif action == "send" and (text or files):
+            tmsg(t, "user", text, files=files)
+            if s == "running":                         # tin gấp: ngắt, Claude điều chỉnh rồi làm tiếp
+                t["_redirect"] = {"kind": "urgent", "text": text, "files": files}
+                kill_tree(PROCS.get(tid))
+            elif s == "queued" and t.get("next"):      # chưa chạy: gộp vào yêu cầu đang chờ
+                n = t["next"]
+                n["text"] = (n.get("text", "") + "\n\n" + text).strip()
+                n["files"] = (n.get("files") or []) + files
+                if n.get("kind") == "resume":
+                    n["kind"] = "urgent"
+            else:
+                t["status"] = "queued"
+                t["next"] = {"kind": "answer" if s == "waiting" else "followup", "text": text, "files": files}
+        elif action == "rename" and text:
+            t["title"] = text[:80]
+            t["renamed"] = True
+        elif action == "open":
+            open_path(out_dir(t) if CFG.get("output") and out_dir(t).exists() else tdir(t))
+            return {"ok": True}
+        elif action == "delete" and s not in ("running", "queued"):
+            TASKS.pop(tid, None)
+            shutil.rmtree(tdir(t), ignore_errors=True)
+            return {"ok": True}
+        else:
+            return {"error": "Không thực hiện được ở trạng thái này"}
+        tsave(t)
+    return {"ok": True}
+
+
+def open_task_file(tid, rel):
+    t = TASKS.get(tid)
+    if not t or not CFG.get("output"):
+        return {"error": "Không tìm thấy"}
+    base = out_dir(t).resolve()
+    f = (base / rel).resolve()
+    if base not in f.parents or not f.exists():
+        return {"error": "Không tìm thấy file"}
+    open_path(f)
+    return {"ok": True}
+
+
+def new_task(text):
+    if not text.strip():
+        return {"error": "Chưa nhập yêu cầu"}
+    tid = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
+    while tid in TASKS:
+        tid += "b"
+    t = {"id": tid, "title": re.sub(r"\s+", " ", text.strip())[:50], "text": text.strip(),
+         "status": "draft", "created": now(), "created_ts": time.time(), "messages": []}
+    (tdir(t) / "input").mkdir(parents=True, exist_ok=True)
+    with _tlock:
+        TASKS[tid] = t
+        tsave(t)
+    return {"ok": True, "id": tid}
+
+
+def submit_task(tid, files):
+    t = TASKS.get(tid)
+    if not t or t["status"] != "draft":
+        return {"error": "Task không hợp lệ"}
+    with _tlock:
+        files = [f for f in files if (tdir(t) / "input" / f).exists()]
+        tmsg(t, "user", t["text"], files=files)
+        t["status"] = "queued"
+        t["next"] = {"kind": "start", "files": files}
+        t["titling"] = True
+        t["created_ts"] = time.time()
+        tsave(t)
+    threading.Thread(target=gen_title, args=(t,), daemon=True).start()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- AI accounts
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def _jwt_email(tok):
+    try:
+        part = tok.split(".")[1]
+        part += "=" * (-len(part) % 4)
+        return json.loads(base64.urlsafe_b64decode(part)).get("email", "")
+    except Exception:
+        return ""
+
+
+def ai_email(ai):
+    """Email tài khoản đang đăng nhập. Chỉ đọc email, không đọc/ghi token ra ngoài."""
+    home = Path.home()
+    try:
+        if ai == "claude":
+            for f in (home / ".claude.json", home / ".claude" / ".claude.json"):
+                acc = (rjson(f) or {}).get("oauthAccount") or {}
+                if acc.get("emailAddress"):
+                    return acc["emailAddress"]
+        elif ai == "codex":
+            f = Path(os.environ.get("CODEX_HOME") or home / ".codex") / "auth.json"
+            toks = (rjson(f) or {}).get("tokens") or {}
+            e = _jwt_email(toks.get("id_token", ""))
+            if e:
+                return e
+        elif ai == "gemini":
+            for f in (home / ".gemini" / "google_accounts.json", home / ".gemini" / "antigravity-cli" / "google_accounts.json"):
+                act = (rjson(f) or {}).get("active")
+                if act:
+                    return act
+            exe = find_bin("agy")
+            if exe:
+                p = subprocess.run([exe, "status"], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", timeout=20, creationflags=NO_WINDOW)
+                m = EMAIL_RE.search((p.stdout or "") + (p.stderr or ""))
+                if m:
+                    return m.group(0)
+    except Exception:
+        pass
+    return ""
+
+
+def ai_state():
+    return {k: {"installed": bool(find_bin(v["bin"])), **CFG["ais"].get(k, {})} for k, v in AIS.items()}
+
+
+def ai_login(ai):
+    exe = find_bin(AIS[ai]["bin"])
+    if not exe:
+        return {"error": "Chưa cài. Chạy lại file AI-Orchestrator.bat."}
+    d = DATA / ".login"
+    d.mkdir(parents=True, exist_ok=True)
+    CFG["ais"].setdefault(ai, {})["pending"] = True
+
+    def run():
+        try:
+            if IS_WIN:   # cửa sổ đăng nhập hiện lên trước; đóng xong thì tự kiểm tra
+                subprocess.run(["cmd.exe", "/c", "start", "/wait", "AI Orchestrator - Dang nhap", exe,
+                                *AIS[ai]["login"]], cwd=str(d), creationflags=NO_WINDOW)
+            else:
+                subprocess.run([exe, *AIS[ai]["login"]], cwd=str(d), stdin=subprocess.DEVNULL,
+                               capture_output=True, timeout=300)
+        except Exception:
+            pass
+        ai_test(ai)
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True}
+
+
+def ai_test(ai):
+    exe = find_bin(AIS[ai]["bin"])
+    if not exe:
+        res = {"ok": False, "msg": "Chưa cài"}
+    else:
+        d = DATA / ".test"
+        d.mkdir(parents=True, exist_ok=True)
+        try:
+            p = subprocess.run([exe, *AIS[ai]["test"]], cwd=str(d), stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, encoding="utf-8", errors="replace", timeout=150, creationflags=NO_WINDOW)
+            out = (p.stdout or "") + (p.stderr or "")
+            ok = "PONG" in out.upper()
+            res = {"ok": ok, "msg": "" if ok else (out.strip()[-200:] or f"exit {p.returncode}")}
+        except subprocess.TimeoutExpired:
+            res = {"ok": False, "msg": "Chưa đăng nhập hoặc không phản hồi"}
+        except Exception as e:
+            res = {"ok": False, "msg": str(e)}
+    res["at"] = now()
+    if res.get("ok"):
+        res["email"] = ai_email(ai)
+    CFG["ais"][ai] = res
+    save_cfg()
+    return res
+
+
+def check_untested():
+    for k in AIS:
+        a = CFG["ais"].get(k, {})
+        if a.get("ok") and not a.get("email"):
+            a["email"] = ai_email(k)
+            save_cfg()
+        if "ok" not in CFG["ais"].get(k, {}) and find_bin(AIS[k]["bin"]):
+            CFG["ais"].setdefault(k, {})["pending"] = True
+            ai_test(k)
+
+
+# ---------------------------------------------------------------- HTTP
+def ui_html():
+    if UI_B64:
+        return base64.b64decode(UI_B64)
+    return (APP.parent / "ui.html").read_bytes()
+
+
+def task_detail(t):
+    d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished")}
+    msgs = [dict(m) for m in t.get("messages", [])]
+    subs = subtasks(t)
+    works = [m for m in msgs if m["role"] == "work"]
+    for m in works:
+        m["subtasks"] = []
+    for s in subs:   # gắn sub-task vào lượt làm việc chứa thời điểm của nó
+        for m in reversed(works):
+            if s["ts"] >= m.get("started_ts", 0) - 1:
+                m["subtasks"].append(s)
+                break
+    if t["status"] == "running" and works:
+        works[-1]["now_ts"] = time.time()
+    d["messages"] = msgs
+    d["output"] = str(out_dir(t)) if CFG.get("output") else ""
+    return d
+
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def send(self, code, body, ctype="application/json", headers=None):
+        b = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype + ("; charset=utf-8" if "svg" not in ctype else ""))
+        self.send_header("Content-Length", str(len(b)))
+        self.send_header("Cache-Control", "no-store")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(b)
+
+    def ok_host(self):
+        return self.headers.get("Host", "") in (f"127.0.0.1:{PORT}", f"localhost:{PORT}")
+
+    def cookie_ok(self):
+        m = re.search(r"(?:^|;\s*)aio=([^;]+)", self.headers.get("Cookie", ""))
+        return bool(m) and secrets.compare_digest(m.group(1), CFG["token"])
+
+    def authed(self):
+        # cookie SameSite=Strict + header riêng (trang lạ không gửi được) + đúng Host
+        return self.ok_host() and self.cookie_ok() and self.headers.get("X-AIO") == "1"
+
+    def do_GET(self):
+        if not self.ok_host():
+            return self.send(403, {"error": "forbidden"})
+        u = urlparse(self.path)
+        q = parse_qs(u.query)
+        if u.path in ("/favicon.ico", "/icon.svg"):
+            return self.send(200, ICON_SVG, "image/svg+xml")
+        if u.path == "/":
+            tok = q.get("t", [""])[0]
+            if tok and secrets.compare_digest(tok, CFG["token"]):
+                return self.send(302, b"", "text/plain", {
+                    "Location": "/",
+                    "Set-Cookie": f"aio={CFG['token']}; Path=/; HttpOnly; SameSite=Strict; Max-Age=315360000"})
+            if not self.cookie_ok():
+                return self.send(200, "<meta charset=utf-8><p style='font:16px system-ui;padding:40px'>"
+                                      "Bấm đúp file AI-Orchestrator.bat để mở.</p>".encode(), "text/html")
+            return self.send(200, ui_html(), "text/html")
+        if not self.authed():
+            return self.send(403, {"error": "forbidden"})
+        if u.path == "/api/state":
+            with _tlock:
+                ts = [{k: t.get(k) for k in ("id", "title", "status", "created")}
+                      for t in TASKS.values() if t["status"] != "draft"]
+            ts.sort(key=lambda x: x["created"], reverse=True)
+            upd = CFG.pop("updated_to", "")
+            if upd:
+                save_cfg()
+            return self.send(200, {"ais": ai_state(), "output": CFG["output"], "instructions": CFG["instructions"],
+                                   "tasks": ts, "version": VERSION, "updated": upd})
+        if u.path == "/api/task":
+            t = TASKS.get(q.get("id", [""])[0])
+            return self.send(200, task_detail(t) if t else {"error": "Không tìm thấy task"})
+        self.send(404, {"error": "not found"})
+
+    def do_POST(self):
+        if not self.authed():
+            return self.send(403, {"error": "forbidden"})
+        u = urlparse(self.path)
+        n = int(self.headers.get("Content-Length") or 0)
+        if u.path == "/api/upload":
+            return self.upload(parse_qs(u.query), n)
+        try:
+            data = json.loads(self.rfile.read(n) or b"{}")
+        except Exception:
+            data = {}
+        try:
+            r = self.route(u.path, data)
+        except Exception as e:
+            r = {"error": str(e)}
+        self.send(200, r)
+
+    def upload(self, qs, n):
+        name = Path(qs.get("name", [""])[0]).name
+        t = TASKS.get(qs.get("t", [""])[0])
+        if not t or not name:
+            return self.send(400, {"error": "bad upload"})
+        dst_dir = tdir(t) / "input"
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        with open(dst_dir / name, "wb") as f:
+            left = n
+            while left > 0:
+                chunk = self.rfile.read(min(left, 1 << 20))
+                if not chunk:
+                    break
+                f.write(chunk)
+                left -= len(chunk)
+        return self.send(200, {"ok": True, "name": name})
+
+    def route(self, path, d):
+        if path == "/api/ai/login" and d.get("ai") in AIS:
+            return ai_login(d["ai"])
+        if path == "/api/ai/test" and d.get("ai") in AIS:
+            return ai_test(d["ai"])
+        if path == "/api/pick":
+            with _pick_lock:
+                return {"path": pick_folder()}
+        if path == "/api/setup":
+            o = (d.get("output") or "").strip()
+            if not o or not Path(o).is_dir():
+                return {"error": "Chọn thư mục nhận kết quả"}
+            CFG["output"] = o
+            if isinstance(d.get("instructions"), str):
+                CFG["instructions"] = d["instructions"].strip()
+            save_cfg()
+            return {"ok": True}
+        if path == "/api/open-output":
+            if CFG.get("output"):
+                open_path(CFG["output"])
+            return {"ok": True}
+        if path == "/api/task/new":
+            return new_task(d.get("text", ""))
+        if path == "/api/task/submit":
+            return submit_task(d.get("id", ""), d.get("files", []))
+        if path == "/api/task/act":
+            return act(d.get("id", ""), d.get("action", ""), d.get("text", ""), d.get("files"))
+        if path == "/api/task/file":
+            return open_task_file(d.get("id", ""), d.get("path", ""))
+        if path == "/api/quit":
+            threading.Thread(target=shutdown, daemon=True).start()
+            return {"ok": True}
+        return {"error": "bad request"}
+
+
+def shutdown():
+    time.sleep(0.3)
+    with _tlock:
+        for tid, p in list(PROCS.items()):
+            TASKS[tid]["_quit"] = True      # lần mở sau tự chạy tiếp
+            kill_tree(p)
+    time.sleep(0.8)
+    os._exit(0)
+
+
+UPDATED = {"pending": None, "done": ""}
+
+
+def check_update():
+    """Tải bản mới từ GitHub (chỉ code, không có dữ liệu). Áp dụng khi không có task đang chạy."""
+    import hashlib
+    import urllib.request
+    if not UPDATE_BASE or VERSION == "dev":
+        return
+    while True:
+        try:
+            meta = json.loads(urllib.request.urlopen(UPDATE_BASE + "latest.json", timeout=20).read())
+            if meta.get("version", "") > VERSION:
+                body = urllib.request.urlopen(UPDATE_BASE + "app.py", timeout=60).read()
+                if hashlib.sha256(body).hexdigest() == meta.get("sha256"):
+                    (HOME / "app.py.new").write_bytes(body)
+                    UPDATED["pending"] = meta["version"]
+        except Exception:
+            pass
+        for _ in range(3 * 3600 // 10):          # kiểm tra lại mỗi 3 giờ; áp dụng khi rảnh
+            if UPDATED["pending"] and not any(t["status"] in ("running", "queued") for t in TASKS.values()):
+                apply_update()
+            time.sleep(10)
+
+
+def apply_update():
+    new = HOME / "app.py.new"
+    if not new.exists():
+        return
+    os.replace(new, APP)
+    (HOME / "version.txt").write_text(UPDATED["pending"], encoding="ascii")
+    CFG["updated_to"] = UPDATED["pending"]
+    save_cfg()
+    env = dict(os.environ, AIO_RESTART="1")
+    subprocess.Popen([sys.executable, str(APP), "--background"], cwd=str(HOME), env=env,
+                     creationflags=NO_WINDOW)
+    os._exit(0)
+
+
+def serve(background=False):
+    global CFG
+    refresh_path()
+    CFG = load_cfg()
+    save_cfg()
+    url = f"http://127.0.0.1:{PORT}/?t={CFG['token']}"
+    srv = None
+    for _ in range(20 if os.environ.get("AIO_RESTART") else 1):   # vừa tự cập nhật: chờ bản cũ nhả cổng
+        try:
+            srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+            break
+        except OSError:
+            time.sleep(0.5)
+    if srv is None:                       # đã chạy rồi -> chỉ mở trình duyệt
+        if not background:
+            webbrowser.open(url)
+        return
+    if os.environ.get("AIO_RESTART"):
+        os.environ.pop("AIO_RESTART", None)
+    TASKS_DIR.mkdir(parents=True, exist_ok=True)
+    load_tasks()
+    threading.Thread(target=scheduler, daemon=True).start()
+    threading.Thread(target=check_untested, daemon=True).start()
+    threading.Thread(target=check_update, daemon=True).start()
+    if not background and not os.environ.get("AIO_NO_BROWSER"):
+        webbrowser.open(url)
+    print("AI Orchestrator:", url, flush=True)
+    srv.serve_forever()
+
+
+# ---------------------------------------------------------------- worker (Claude gọi)
+def run_limited(cmd, cwd, timeout):
+    p = subprocess.Popen(cmd, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                         creationflags=NO_WINDOW)
+    try:
+        so, se = p.communicate(timeout=timeout)
+        return p.returncode, so, se, False
+    except subprocess.TimeoutExpired:
+        kill_tree(p)
+        try:
+            so, se = p.communicate(timeout=10)
+        except Exception:
+            so, se = "", ""
+        return -1, so, se, True
+
+
+def cmd_worker(argv):
+    import argparse
+    ap = argparse.ArgumentParser(prog="worker")
+    ap.add_argument("worker", choices=["codex", "gemini"])
+    ap.add_argument("--task", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--model")
+    ap.add_argument("--timeout", type=int, default=900)
+    a = ap.parse_args(argv)
+    proj = Path.cwd()
+    task = Path(a.task).resolve()
+    out = Path(a.out).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    n = 1
+    while (out / f"v{n}").exists():
+        n += 1
+    v = out / f"v{n}"
+    v.mkdir()
+    st = {"worker": a.worker, "model": a.model, "out_dir": str(v)}
+    exe = find_bin("codex" if a.worker == "codex" else "agy")
+    if not task.exists():
+        st.update(status="failed", error=f"Không thấy {task}")
+    elif not exe:
+        st.update(status="failed", error="Worker chưa cài")
+    else:
+        text = task.read_text(encoding="utf-8")
+        (v / "TASK.md").write_text(text, encoding="utf-8")
+        if a.worker == "codex":
+            prompt = ("Thực hiện đúng yêu cầu trong TASK.md ở thư mục hiện tại. "
+                      f"File đầu vào (chỉ đọc): {proj / 'input'}. Ghi mọi file kết quả vào thư mục hiện tại. "
+                      "Cuối cùng liệt kê file đã tạo và cách đã kiểm tra.")
+            cmd = [exe, "exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "-C", str(v),
+                   "--output-last-message", str(v / "result.md")]
+            if a.model:
+                cmd += ["-m", a.model]
+            cmd.append(prompt)
+            cwd = v
+        else:
+            cmd = [exe, "-p", text, "--output-format", "json"]
+            cwd = proj
+        t0 = time.time()
+        code, so, se, to = run_limited(cmd, cwd, a.timeout)
+        st.update(seconds=round(time.time() - t0), exit_code=code)
+        (v / "worker.log").write_text(f"--- stdout ---\n{so}\n--- stderr ---\n{se}\n", encoding="utf-8")
+        if a.worker == "gemini" and so.strip():
+            try:
+                resp = json.loads(so).get("response") or so
+            except Exception:
+                resp = so
+            (v / "result.md").write_text(resp, encoding="utf-8")
+        res = v / "result.md"
+        low = (so + se).lower()
+        if to:
+            st.update(status="timeout", error=f"Quá {a.timeout}s")
+        elif any(k in low for k in ("usage limit", "rate limit", "quota", "resource_exhausted", "429")) and code != 0:
+            st.update(status="limit", error="Worker hết hạn mức: " + (se or so).strip()[-300:])
+        elif code != 0:
+            st.update(status="failed", error=(se or so).strip()[-500:])
+        elif not res.exists() or not res.read_text(encoding="utf-8").strip():
+            st.update(status="failed", error="Worker không trả kết quả")
+        else:
+            st["status"] = "completed"
+    st["files"] = sorted(str(f.relative_to(v)).replace("\\", "/") for f in v.rglob("*")
+                         if f.is_file() and f.name not in ("TASK.md", "worker.log", "status.json"))
+    wjson(v / "status.json", st)
+    print(json.dumps(st, ensure_ascii=False))
+    sys.exit(0 if st["status"] == "completed" else 1)
+
+
+# ---------------------------------------------------------------- check (Claude gọi)
+def cmd_check(argv):
+    import argparse
+    checks = []
+
+    def add(name, ok, detail=""):
+        checks.append({"check": name, "pass": bool(ok), "detail": str(detail)})
+
+    ap = argparse.ArgumentParser(prog="check")
+    sp = ap.add_subparsers(dest="cmd", required=True)
+    p = sp.add_parser("files"); p.add_argument("--dir", required=True); p.add_argument("--glob", default="*"); p.add_argument("--count", type=int)
+    p = sp.add_parser("png"); p.add_argument("--dir", required=True); p.add_argument("--count", type=int); p.add_argument("--alpha", action="store_true"); p.add_argument("--size")
+    p = sp.add_parser("csv"); p.add_argument("--file", required=True); p.add_argument("--cols"); p.add_argument("--min-rows", type=int, default=1); p.add_argument("--sum", action="append")
+    p = sp.add_parser("xlsx"); p.add_argument("--file", required=True); p.add_argument("--sheets"); p.add_argument("--min-rows", type=int, default=1)
+    a = ap.parse_args(argv)
+    try:
+        if a.cmd == "files":
+            fs = sorted(f for f in Path(a.dir).glob(a.glob) if f.is_file())
+            add(f"số file {a.glob}", a.count is None or len(fs) == a.count, f"{len(fs)} (cần {a.count})")
+            for f in fs:
+                add(f"{f.name} không rỗng", f.stat().st_size > 0, f"{f.stat().st_size} bytes")
+        elif a.cmd == "png":
+            from PIL import Image
+            fs = sorted(Path(a.dir).glob("*.png"))
+            add("số file PNG", a.count is None or len(fs) == a.count, f"{len(fs)} (cần {a.count})")
+            for f in fs:
+                try:
+                    im = Image.open(f)
+                    im.load()
+                    add(f"{f.name} PNG hợp lệ", im.format == "PNG", f"{im.size[0]}x{im.size[1]} {im.mode}")
+                    if a.size:
+                        add(f"{f.name} kích thước", f"{im.size[0]}x{im.size[1]}" == a.size.lower(), f"{im.size[0]}x{im.size[1]}")
+                    if a.alpha:
+                        if im.mode not in ("RGBA", "LA"):
+                            add(f"{f.name} nền trong suốt", False, f"mode {im.mode}, không có alpha")
+                        else:
+                            lo, hi = im.getchannel("A").getextrema()
+                            add(f"{f.name} nền trong suốt", lo == 0 and hi > 0, f"alpha {lo}..{hi}")
+                except Exception as e:
+                    add(f"{f.name} đọc được", False, e)
+        elif a.cmd == "csv":
+            with open(a.file, newline="", encoding="utf-8-sig") as fh:
+                rows = list(csv.DictReader(fh))
+            cols = list(rows[0].keys()) if rows else []
+            add("đọc CSV", True, f"{len(rows)} dòng, cột: {cols}")
+            if a.cols:
+                miss = [c for c in a.cols.split(",") if c not in cols]
+                add("đủ cột", not miss, f"thiếu {miss}" if miss else "đủ")
+            add("số dòng", len(rows) >= a.min_rows, f"{len(rows)} >= {a.min_rows}")
+            for s in a.sum or []:
+                col, val = s.split("=")
+                got = 0.0
+                for r in rows:
+                    try:
+                        got += float(str(r.get(col, "")).replace(",", ""))
+                    except ValueError:
+                        pass
+                add(f"tổng {col}", abs(got - float(val)) <= max(0.01, abs(float(val)) * 1e-6), f"{got} (cần {val})")
+        elif a.cmd == "xlsx":
+            import openpyxl
+            wb = openpyxl.load_workbook(a.file, data_only=True)
+            add("mở XLSX", True, f"sheets {wb.sheetnames}")
+            if a.sheets:
+                miss = [s for s in a.sheets.split(",") if s not in wb.sheetnames]
+                add("đủ sheet", not miss, f"thiếu {miss}" if miss else "đủ")
+            for ws in wb.worksheets:
+                add(f"sheet {ws.title} có dữ liệu", ws.max_row - 1 >= a.min_rows, f"{ws.max_row - 1} dòng")
+    except ImportError as e:
+        add("thư viện", False, f"{e} — chạy lại file cài đặt")
+    except Exception as e:
+        add("lỗi", False, e)
+    ok = bool(checks) and all(c["pass"] for c in checks)
+    print(json.dumps({"pass": ok, "checks": checks}, ensure_ascii=False, indent=1))
+    sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "worker":
+        cmd_worker(sys.argv[2:])
+    elif len(sys.argv) > 1 and sys.argv[1] == "check":
+        cmd_check(sys.argv[2:])
+    else:
+        serve(background="--background" in sys.argv)
