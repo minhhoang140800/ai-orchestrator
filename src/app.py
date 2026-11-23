@@ -1118,7 +1118,7 @@ def check_update():
             fetch_update()
         except Exception:
             pass
-        for _ in range(3 * 3600 // 10):          # kiểm tra lại mỗi 3 giờ; áp dụng khi rảnh
+        for _ in range(15 * 60 // 10):            # kiểm tra lại mỗi 15 phút; áp dụng khi rảnh
             if UPDATED["pending"] and not any(t["status"] in ("running", "queued") for t in TASKS.values()):
                 apply_update()
             time.sleep(10)
