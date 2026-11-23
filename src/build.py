@@ -16,13 +16,17 @@ MSG = {
     "failed": "lỗi",
     "libs": "Thư viện kiểm tra file",
     "app": "Ứng dụng",
-    "no_winget": "Thiếu winget. Mở Microsoft Store, cài/cập nhật \"App Installer\" rồi chạy lại file này.",
+    "no_winget": "không có, sẽ tải bộ cài trực tiếp",
     "no_python": "Cài Python chưa xong. Khởi động lại máy rồi chạy lại file này.",
     "no_claude": "Cài Claude Code chưa xong. Kiểm tra mạng rồi chạy lại file này.",
     "no_start": "Ứng dụng không khởi động được.",
     "log": "Chi tiết:",
     "ok": "Xong. Trang AI Orchestrator đã mở trong trình duyệt. Lưu bookmark link dưới đây — app tự chạy nền khi bật máy nên link luôn mở được:",
 }
+import unicodedata as _u
+# Cửa sổ cmd hay lỗi font tiếng Việt có dấu -> dùng tiếng Việt không dấu
+MSG = {k: _u.normalize("NFKD", v.replace("đ", "d").replace("Đ", "D").replace("–", "-").replace("→", "->").replace("—", "-")).encode("ascii", "ignore").decode().replace("…", "...")
+       for k, v in MSG.items()}
 app = (d / "app.py").read_text(encoding="utf-8")
 ui = base64.b64encode((d / "ui.html").read_bytes()).decode()
 assert 'UI_B64 = ""' in app

@@ -378,7 +378,9 @@ Chỉ hỏi khi thật sự quan trọng: thao tác không hoàn tác, tốn nhi
 Cách hỏi: ghi câu hỏi ngắn + các phương án vào ./question.md rồi DỪNG. Việc khác: tự quyết, ghi giả định.
 
 ## Kết thúc mỗi lượt
-Lưu sản phẩm vào OUTPUT (không tạo file báo cáo). Câu trả lời cuối gửi người dùng: ngắn, chỉ thông tin cần thiết —
+Báo cáo, đề xuất, kết quả nghiên cứu, concept, so sánh: viết thẳng trong câu trả lời, KHÔNG tạo file .md/.txt.
+Chỉ tạo file khi sản phẩm vốn là file (ảnh, code, Excel/CSV, tài liệu người dùng cần mang đi dùng) hoặc người dùng yêu cầu.
+Sản phẩm dạng file lưu vào OUTPUT. Câu trả lời cuối gửi người dùng: chỉ thông tin cần thiết —
 kết quả đạt/chưa đạt, điểm cần người dùng biết, việc người dùng cần làm. Không liệt kê lại từng file
 (giao diện có nút mở thư mục kết quả). Có thể dùng **đậm**, `code`, gạch đầu dòng.
 
