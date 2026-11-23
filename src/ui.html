@@ -359,7 +359,7 @@ document.addEventListener("click", async (e) => {
   }
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
   else if (d.tab) { collect(); tab = d.tab; renderSettings(); }
-  else if (d.login) { await api("/api/ai/login", { ai: d.login }); S.ais[d.login].pending = true; renderSettings(); }
+  else if (d.login) { await api("/api/ai/login", { ai: d.login }); S.ais[d.login].pending = "login"; renderSettings(); }
   else if (d.test) { S.ais[d.test].pending = true; renderSettings(); await api("/api/ai/test", { ai: d.test }); S = await api("/api/state"); renderSettings(); renderSide(); }
 });
 $("btnNew").onclick = () => { sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
@@ -380,7 +380,7 @@ function renderSettings() {
   if (tab === "acc") {
     h = Object.entries(S.ais).map(([k, a]) => {
       const st = !a.installed ? `<small class="bad">Chưa cài — bấm đúp lại file cài AI-Orchestrator (.bat)</small>`
-        : a.pending ? `<small>Đang kiểm tra…</small>` : a.ok ? `<small>Sẵn sàng</small>` : a.ok === false ? `<small class="bad">Chưa đăng nhập${a.msg ? " · " + esc(a.msg) : ""}</small>` : `<small>Chưa đăng nhập</small>`;
+        : a.pending === "login" ? `<small>Đang chờ đăng nhập… Copy link trong cửa sổ: giữ <b>Shift</b> + kéo chuột để bôi đen, chuột phải để copy. Hoặc giữ <b>Ctrl</b> + bấm vào link để mở.</small>` : a.pending ? `<small>Đang kiểm tra…</small>` : a.ok ? `<small>Sẵn sàng</small>` : a.ok === false ? `<small class="bad">Chưa đăng nhập${a.msg ? " · " + esc(a.msg) : ""}</small>` : `<small>Chưa đăng nhập</small>`;
       return `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${a.ok && a.email ? " - " + esc(a.email) : ""}${st}</span>
         <button class="ghost icon" data-test="${k}" title="Kiểm tra lại" aria-label="Kiểm tra lại" ${a.installed && !a.pending ? "" : "disabled"}>${I.refresh}</button>
         <button data-login="${k}" ${a.installed && !a.pending ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button></div>`;

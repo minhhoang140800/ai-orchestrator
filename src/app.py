@@ -731,11 +731,24 @@ def ai_login(ai):
         return {"error": "Chưa cài. Chạy lại file cài AI-Orchestrator (.bat)."}
     d = DATA / ".login"
     d.mkdir(parents=True, exist_ok=True)
-    CFG["ais"].setdefault(ai, {})["pending"] = True
+    CFG["ais"].setdefault(ai, {})["pending"] = "login"
 
     def run():
         try:
-            if IS_WIN:   # cửa sổ đăng nhập hiện lên trước; đóng xong thì tự kiểm tra
+            wt = shutil.which("wt") if IS_WIN else None
+            if wt:
+                # Windows Terminal: bôi đen/copy link được (giữ Shift khi kéo chuột), Ctrl+click mở link
+                flag = d / f"{ai}.done"
+                flag.unlink(missing_ok=True)
+                script = d / f"login_{ai}.cmd"
+                script.write_text("@echo off\r\n" + subprocess.list2cmdline([exe, *AIS[ai]["login"]])
+                                  + f'\r\ntype nul > "{flag}"\r\n', encoding="utf-8")
+                subprocess.Popen([wt, "-w", "new", "--title", "AI Orchestrator - Dang nhap", "-d", str(d),
+                                  "cmd.exe", "/c", str(script)], creationflags=NO_WINDOW)
+                t0 = time.time()
+                while not flag.exists() and time.time() - t0 < 900:
+                    time.sleep(2)
+            elif IS_WIN:   # cửa sổ đăng nhập hiện lên trước; đóng xong thì tự kiểm tra
                 subprocess.run(["cmd.exe", "/c", "start", "/wait", "AI Orchestrator - Dang nhap", exe,
                                 *AIS[ai]["login"]], cwd=str(d), creationflags=NO_WINDOW)
             else:
