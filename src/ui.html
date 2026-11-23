@@ -236,13 +236,25 @@ function bindComposer(onSend) {
   ["dragenter", "dragover"].forEach((ev) => c.addEventListener(ev, (e) => { e.preventDefault(); c.classList.add("drag"); }));
   ["dragleave", "drop"].forEach((ev) => c.addEventListener(ev, (e) => { e.preventDefault(); c.classList.remove("drag"); }));
   c.addEventListener("drop", (e) => { files.push(...e.dataTransfer.files); renderAtts(); });
+  ta.addEventListener("paste", (e) => {        // dán ảnh/file từ clipboard (Ctrl+V)
+    const got = [...(e.clipboardData?.items || [])].filter((it) => it.kind === "file").map((it) => it.getAsFile()).filter(Boolean);
+    if (!got.length) return;
+    e.preventDefault();
+    const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
+    got.forEach((f, i) => {
+      const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
+      const generic = !f.name || /^image\.(png|jpe?g|gif|webp)$/i.test(f.name);
+      files.push(generic ? new File([f], `anh-dan-${stamp}${got.length > 1 ? "-" + (i + 1) : ""}.${ext}`, { type: f.type }) : f);
+    });
+    renderAtts();
+  });
   renderAtts();
 }
 function fit(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.6) + "px"; }
 addEventListener("resize", () => $("txt") && fit($("txt")));
 function renderAtts() {
   const a = $("atts"); if (!a) return;
-  a.innerHTML = files.map((f, i) => `<span class="a"><span>📎 ${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
+  a.innerHTML = files.map((f, i) => `<span class="a">${f.type?.startsWith("image/") ? `<img src="${URL.createObjectURL(f)}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:4px;margin-right:4px">` : "📎 "}<span>${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
   a.style.display = files.length ? "flex" : "none";
 }
 $("fileIn").onchange = (e) => { files.push(...e.target.files); e.target.value = ""; renderAtts(); };
