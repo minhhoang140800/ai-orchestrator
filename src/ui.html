@@ -199,15 +199,26 @@ async function refresh() {
   if ($("ov").classList.contains("show") && !document.activeElement?.id?.startsWith("code_") && !$("mUpd")?.disabled) renderSettings();
   if (!firstRun && (!S.output || !S.ais.claude.ok)) { firstRun = true; openSettings(); }
 }
+let lastSnap = "", pendingRender = false;
+function selecting() {          // người dùng đang bôi đen chữ trong khung chat -> không vẽ lại
+  const s = getSelection();
+  return s && !s.isCollapsed && $("thread") && $("thread").contains(s.anchorNode);
+}
 async function loadTask() {
   const d = await api("/api/task?id=" + sel);
   if (d.error) { sel = ""; return renderHome(); }
   fetchedAt = Date.now();
-  const changed = !T || JSON.stringify(T) !== JSON.stringify({ ...d, messages: d.messages.map((m) => ({ ...m, now_ts: undefined })) });
-  T = { ...d, messages: d.messages.map((m) => ({ ...m, now_ts: undefined })) };
-  T._now = d.messages.find((m) => m.now_ts)?.now_ts || 0;
-  if (changed && !renaming) renderTask();
+  const now = d.messages.find((m) => m.now_ts)?.now_ts || 0;
+  const clean = { ...d, messages: d.messages.map((m) => ({ ...m, now_ts: undefined })) };
+  const snap = JSON.stringify(clean);
+  const changed = !T || T.id !== d.id || snap !== lastSnap || pendingRender;
+  T = clean; T._now = now;
+  if (!changed || renaming) return;
+  if (selecting()) { pendingRender = true; return; }   // chờ bỏ chọn rồi mới cập nhật
+  lastSnap = snap; pendingRender = false;
+  renderTask();
 }
+document.addEventListener("selectionchange", () => { if (pendingRender && !selecting() && T && !renaming) { pendingRender = false; lastSnap = JSON.stringify({ ...T, _now: undefined }); renderTask(); } });
 
 /* ---------------- sidebar ---------------- */
 function aiDot(a) { return a.pending ? "pend" : a.ok ? "ok" : a.ok === false ? "bad" : ""; }
@@ -262,7 +273,7 @@ function busy(on, label) { const b = $("bSend"); if (!b) return; b.disabled = on
 
 /* ---------------- home ---------------- */
 function renderHome() {
-  T = null;
+  T = null; lastSnap = "";
   $("main").innerHTML = `<div class="home"><h2>Hôm nay làm gì?</h2><div style="max-width:780px;width:100%;margin:0 auto">${composer("homeComp", PH_NEW)}</div></div>`;
   bindComposer(sendNew);
   $("txt").focus();
@@ -276,7 +287,7 @@ async function sendNew() {
     const names = [];
     for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(r.id, f)); }
     const s = await api("/api/task/submit", { id: r.id, files: names }); if (s.error) throw new Error(s.error);
-    $("txt").value = ""; files = []; sel = r.id; sessionStorage.setItem("sel", sel); T = null; await refresh();
+    $("txt").value = ""; files = []; sel = r.id; sessionStorage.setItem("sel", sel); T = null; lastSnap = ""; await refresh();
   } catch (e) { toast(e.message); busy(false); }
 }
 
@@ -333,7 +344,7 @@ function startRename() {
   const done = async (save) => {
     if (!renaming) return; renaming = false;
     if (save && inp.value.trim() && inp.value.trim() !== T.title) await api("/api/task/act", { id: T.id, action: "rename", text: inp.value.trim() });
-    T = null; refresh();
+    T = null; lastSnap = ""; refresh();
   };
   inp.onkeydown = (e) => { if (e.key === "Enter") done(true); if (e.key === "Escape") done(false); };
   inp.onblur = () => done(true);
@@ -345,7 +356,7 @@ async function sendMore() {
     const names = [];
     for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(T.id, f)); }
     const r = await api("/api/task/act", { id: T.id, action: "send", text, files: names }); if (r.error) throw new Error(r.error);
-    files = []; $("txt").value = ""; fit($("txt")); renderAtts(); busy(false); T = null; await refresh();
+    files = []; $("txt").value = ""; fit($("txt")); renderAtts(); busy(false); T = null; lastSnap = ""; await refresh();
   } catch (e) { toast(e.message); busy(false); }
 }
 setInterval(() => {   // đồng hồ "Đang làm"
@@ -357,7 +368,7 @@ document.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-sel],[data-act],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-code]");
   if (!el) return;
   const d = el.dataset;
-  if (d.sel) { sel = d.sel; sessionStorage.setItem("sel", sel); T = null; files = []; renderSide(); await loadTask(); }
+  if (d.sel) { sel = d.sel; sessionStorage.setItem("sel", sel); T = null; lastSnap = ""; files = []; renderSide(); await loadTask(); }
   else if (d.w) { const set = d.live === "1" ? closedW : openW; set.has(d.w) ? set.delete(d.w) : set.add(d.w); renderTask(); }
   else if (d.file) { const r = await api("/api/task/file", { id: T.id, path: d.file }); if (r.error) toast(r.error); }
   else if (d.act) {
@@ -366,7 +377,7 @@ document.addEventListener("click", async (e) => {
     el.disabled = true;
     const r = await api("/api/task/act", { id: T.id, action: d.act }); if (r.error) toast(r.error);
     if (d.act === "delete") { sel = ""; sessionStorage.removeItem("sel"); }
-    T = null; refresh();
+    T = null; lastSnap = ""; refresh();
   }
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
   else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; const r = await api("/api/ai/code", { ai: d.code, code: v }); toast(r.error || "Đã gửi mã, đang kiểm tra…"); }
