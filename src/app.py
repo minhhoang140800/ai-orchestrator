@@ -163,12 +163,8 @@ def refresh_path():
 _cfg_lock = threading.Lock()
 CFG = None
 TASKS_DIR = DATA / "tasks"
-DEFAULT_INSTRUCTIONS = (
-    "Xưng hô: tôi - bạn. Trả lời tiếng Việt, ngắn gọn, nêu kết luận trực tiếp, không mở đầu, không rào đón.\n"
-    "Không bịa dữ kiện, ngày tháng, số liệu, nguồn. Phần chưa chắc chắn ghi rõ và tách riêng.\n"
-    "Làm đúng phạm vi yêu cầu, không tự mở rộng.\n"
-    "Chỉ soạn nháp để tôi duyệt; không tự gửi tin nhắn hay hành động thay tôi; không cam kết thay tôi."
-)
+DEFAULT_INSTRUCTIONS = ""
+OLD_DEFAULT_PREFIX = "Xưng hô: tôi - bạn. Trả lời tiếng Việt, ngắn gọn"
 
 
 def load_cfg():
@@ -176,6 +172,8 @@ def load_cfg():
     c.setdefault("token", secrets.token_urlsafe(18))
     c.setdefault("output", "")
     c.setdefault("instructions", DEFAULT_INSTRUCTIONS)
+    if c["instructions"].startswith(OLD_DEFAULT_PREFIX):     # bỏ hướng dẫn mặc định của bản cũ
+        c["instructions"] = ""
     c.setdefault("ais", {})
     for a in c["ais"].values():
         a.pop("pending", None)
@@ -999,6 +997,8 @@ class H(BaseHTTPRequestHandler):
     def route(self, path, d):
         if path == "/api/ai/login" and d.get("ai") in AIS:
             return ai_login(d["ai"])
+        if path == "/api/update":
+            return update_now()
         if path == "/api/ai/code" and d.get("ai") in AIS:
             return ai_code(d["ai"], str(d.get("code", "")))
         if path == "/api/ai/test" and d.get("ai") in AIS:
@@ -1011,8 +1011,6 @@ class H(BaseHTTPRequestHandler):
             if not o or not Path(o).is_dir():
                 return {"error": "Chọn thư mục nhận kết quả"}
             CFG["output"] = o
-            if isinstance(d.get("instructions"), str):
-                CFG["instructions"] = d["instructions"].strip()
             save_cfg()
             return {"ok": True}
         if path == "/api/open-output":
@@ -1081,20 +1079,43 @@ def shutdown():
 UPDATED = {"pending": None, "done": ""}
 
 
-def check_update():
-    """Tải bản mới từ GitHub (chỉ code, không có dữ liệu). Áp dụng khi không có task đang chạy."""
+def fetch_update():
+    """Tải bản mới từ GitHub (chỉ code, không có dữ liệu). Trả về số phiên bản mới, '' nếu đang mới nhất."""
     import hashlib
     import urllib.request
+    if not UPDATE_BASE or VERSION == "dev":
+        return ""
+    meta = json.loads(urllib.request.urlopen(UPDATE_BASE + "latest.json", timeout=20).read())
+    if meta.get("version", "") > VERSION:
+        body = urllib.request.urlopen(UPDATE_BASE + "app.py", timeout=60).read()
+        if hashlib.sha256(body).hexdigest() == meta.get("sha256"):
+            (HOME / "app.py.new").write_bytes(body)
+            UPDATED["pending"] = meta["version"]
+            m = re.search(rb'^RELEASE = "([^"]+)"', body, re.M)
+            UPDATED["release"] = m.group(1).decode() if m else ""
+            return UPDATED["release"] or meta["version"]
+    return ""
+
+
+def update_now():
+    try:
+        new = fetch_update()
+    except Exception:
+        return {"error": "Không kết nối được GitHub, thử lại sau"}
+    if not new and not UPDATED["pending"]:
+        return {"ok": True, "msg": f"Đang dùng bản mới nhất (v{RELEASE})"}
+    if any(t["status"] in ("running", "queued") for t in TASKS.values()):
+        return {"ok": True, "msg": f"Có bản v{UPDATED.get('release') or new}. Sẽ tự cập nhật khi các task làm xong."}
+    threading.Thread(target=lambda: (time.sleep(0.5), apply_update()), daemon=True).start()
+    return {"ok": True, "restart": True, "msg": "Đang cập nhật, trang sẽ tự tải lại…"}
+
+
+def check_update():
     if not UPDATE_BASE or VERSION == "dev":
         return
     while True:
         try:
-            meta = json.loads(urllib.request.urlopen(UPDATE_BASE + "latest.json", timeout=20).read())
-            if meta.get("version", "") > VERSION:
-                body = urllib.request.urlopen(UPDATE_BASE + "app.py", timeout=60).read()
-                if hashlib.sha256(body).hexdigest() == meta.get("sha256"):
-                    (HOME / "app.py.new").write_bytes(body)
-                    UPDATED["pending"] = meta["version"]
+            fetch_update()
         except Exception:
             pass
         for _ in range(3 * 3600 // 10):          # kiểm tra lại mỗi 3 giờ; áp dụng khi rảnh

@@ -85,11 +85,11 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .ov{position:fixed;inset:0;background:rgba(27,27,25,.35);display:none;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto;z-index:8}
 .ov.show{display:flex}
 .modal{width:100%;max-width:580px;background:var(--panel);border-radius:14px;border:1px solid var(--line);display:flex;flex-direction:column;max-height:88vh}
-.tabs{display:flex;gap:2px;padding:12px 12px 0;border-bottom:1px solid var(--line)}
+.mhead{padding:16px 20px 0;font-weight:650;font-size:16px}.tabs{display:flex;gap:2px;padding:12px 12px 0;border-bottom:1px solid var(--line)}
 .tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:8px 12px;color:var(--mute)}
 .tabs button.on{color:var(--ink);border-bottom-color:var(--acc);font-weight:600}
 .mbody{padding:18px 20px;overflow:auto;display:flex;flex-direction:column;gap:14px}
-.mfoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--line)}
+.mfoot{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid var(--line)}
 .f{display:flex;flex-direction:column;gap:6px}.f>.k{font-size:12px;font-weight:600;color:var(--mute)}
 .row{display:flex;align-items:center;gap:8px}
 .accrow{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
@@ -120,7 +120,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 </div>
 
 <div class="ov" id="ov"><div class="modal" role="dialog" aria-modal="true" aria-label="Cài đặt">
-  <div class="tabs"><button data-tab="acc">1 · Đăng nhập</button><button data-tab="setup">2 · Set up</button></div>
+  <div class="mhead">Cài đặt</div>
   <div class="mbody" id="mbody"></div>
   <div class="mfoot" id="mfoot"></div>
 </div></div>
@@ -196,8 +196,8 @@ async function refresh() {
   renderSide();
   if (sel && !S.tasks.find((t) => t.id === sel)) sel = "";
   if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
-  if ($("ov").classList.contains("show") && tab === "acc" && !document.activeElement?.id?.startsWith("code_")) renderSettings();
-  if (!firstRun && (!S.output || !S.ais.claude.ok)) { firstRun = true; openSettings(S.ais.claude.ok ? "setup" : "acc"); }
+  if ($("ov").classList.contains("show") && !document.activeElement?.id?.startsWith("code_") && !$("mUpd")?.disabled) renderSettings();
+  if (!firstRun && (!S.output || !S.ais.claude.ok)) { firstRun = true; openSettings(); }
 }
 async function loadTask() {
   const d = await api("/api/task?id=" + sel);
@@ -357,51 +357,45 @@ document.addEventListener("click", async (e) => {
     T = null; refresh();
   }
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
-  else if (d.tab) { collect(); tab = d.tab; renderSettings(); }
   else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; const r = await api("/api/ai/code", { ai: d.code, code: v }); toast(r.error || "Đã gửi mã, đang kiểm tra…"); }
   else if (d.login) { await api("/api/ai/login", { ai: d.login }); S.ais[d.login].pending = "login"; renderSettings(); }
   else if (d.test) { S.ais[d.test].pending = true; renderSettings(); await api("/api/ai/test", { ai: d.test }); S = await api("/api/state"); renderSettings(); renderSide(); }
 });
 $("btnNew").onclick = () => { sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
-$("btnSet").onclick = () => openSettings("acc");
-$("btnOut").onclick = () => (S.output ? api("/api/open-output", {}) : openSettings("setup"));
+$("btnSet").onclick = () => openSettings();
+$("btnOut").onclick = () => (S.output ? api("/api/open-output", {}) : openSettings());
 /* ---------------- settings ---------------- */
-function openSettings(t) { tab = t; form = { output: S.output, instructions: S.instructions }; renderSettings(); $("ov").classList.add("show"); }
-function collect() { if (form && $("fIns")) form.instructions = $("fIns").value; }
+function openSettings() { form = { output: S.output }; renderSettings(); $("ov").classList.add("show"); }
 function renderSettings() {
-  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
-  let h;
-  if (tab === "acc") {
-    h = Object.entries(S.ais).map(([k, a]) => {
-      const st = !a.installed ? `<small class="bad">Chưa cài — bấm đúp lại file cài AI-Orchestrator (.bat)</small>`
-        : a.code ? `<small>Đã mở trang đăng nhập Google trên trình duyệt. Đăng nhập xong, dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`
-        : a.pending === "login" ? `<small>Đang chờ đăng nhập…</small>` : a.pending ? `<small>Đang kiểm tra…</small>` : a.ok ? `<small>Sẵn sàng</small>` : a.ok === false ? `<small class="bad">Chưa đăng nhập${a.msg ? " · " + esc(a.msg) : ""}</small>` : `<small>Chưa đăng nhập</small>`;
-      return `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${a.ok && a.email ? " - " + esc(a.email) : ""}${st}</span>
-        <button class="ghost icon" data-test="${k}" title="Kiểm tra lại" aria-label="Kiểm tra lại" ${a.installed ? "" : "disabled"}>${I.refresh}</button>
-        <button data-login="${k}" ${a.installed && !a.pending ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button></div>`;
-    }).join("");
-  } else {
-    h = `<div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick">Chọn…</button></div></div>
-      <div class="f"><span class="k">Hướng dẫn cho Claude</span><textarea id="fIns" rows="6">${esc(form.instructions)}</textarea></div>`;
-  }
-  $("mbody").innerHTML = h;
-  $("mfoot").innerHTML = tab === "acc" ? `<button id="mClose">Đóng</button><button class="pri" id="mNext">Tiếp</button>` : `<button id="mBack">Quay lại</button><button class="pri" id="mNext">Xong</button>`;
-  $("mClose") && ($("mClose").onclick = closeSettings);
-  $("mBack") && ($("mBack").onclick = () => { collect(); tab = "acc"; renderSettings(); });
-  $("mNext").onclick = async () => {
-    if (tab === "acc") { tab = "setup"; return renderSettings(); }
-    collect();
-    const r = await api("/api/setup", form); if (r.error) return toast(r.error);
+  const acc = Object.entries(S.ais).map(([k, a]) => {
+    const st = !a.installed ? `<small class="bad">Chưa cài — bấm đúp lại file cài AI-Orchestrator (.bat)</small>`
+      : a.code ? `<small>Đã mở trang đăng nhập Google trên trình duyệt. Đăng nhập xong, dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`
+      : a.pending === "login" ? `<small>Đang chờ đăng nhập…</small>` : a.pending ? `<small>Đang kiểm tra…</small>` : a.ok ? `<small>Sẵn sàng</small>` : a.ok === false ? `<small class="bad">Chưa đăng nhập${a.msg ? " · " + esc(a.msg) : ""}</small>` : `<small>Chưa đăng nhập</small>`;
+    return `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${a.ok && a.email ? " - " + esc(a.email) : ""}${st}</span>
+      <button class="ghost icon" data-test="${k}" title="Kiểm tra lại" aria-label="Kiểm tra lại" ${a.installed ? "" : "disabled"}>${I.refresh}</button>
+      <button data-login="${k}" ${a.installed && !a.pending ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button></div>`;
+  }).join("");
+  $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI</span>${acc}</div>
+    <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick">Chọn…</button></div></div>`;
+  $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
+  $("oPick").onclick = async () => { const r = await api("/api/pick", {}); if (r.path) { form.output = r.path; renderSettings(); } };
+  $("mDone").onclick = async () => {
+    if (form.output !== S.output || !S.output) { const r = await api("/api/setup", form); if (r.error) return toast(r.error); }
     closeSettings();
   };
-  if (tab === "setup") $("oPick").onclick = async () => { collect(); const r = await api("/api/pick", {}); if (r.path) { form.output = r.path; renderSettings(); } };
+  $("mUpd").onclick = async () => {
+    const b = $("mUpd"); b.disabled = true; b.innerHTML = '<span class="spin"></span> Đang kiểm tra…';
+    const r = await api("/api/update", {}); toast(r.error || r.msg);
+    if (r.restart) { setTimeout(function wait() { fetch("/icon.svg").then(() => location.reload(), () => setTimeout(wait, 1000)); }, 2500); return; }
+    renderSettings();
+  };
 }
 function closeSettings() { $("ov").classList.remove("show"); refresh(); }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("ov").classList.contains("show")) closeSettings(); });
 
 addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
 refresh();
-const timer = setInterval(() => { if (!$("ov").classList.contains("show") || tab === "acc") refresh(); }, 2000);
+const timer = setInterval(refresh, 2000);
 </script>
 </body>
 </html>
