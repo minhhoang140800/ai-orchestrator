@@ -46,7 +46,16 @@ function Fail($text) {
   exit 1
 }
 function AppUp {
-  try { Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8765/icon.svg' -TimeoutSec 2 | Out-Null; return $true } catch { return $false }
+  foreach ($p in @(80, 8765)) {
+    try { $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$p/icon.svg" -TimeoutSec 2; if ($r.Content -match '<svg') { return $true } } catch {}
+  }
+  return $false
+}
+function AppLink {
+  $p = 80
+  try { $c = Get-Content (Join-Path $AppHome 'data\config.json') -Raw | ConvertFrom-Json; if ($c.port) { $p = [int]$c.port } } catch {}
+  if ($p -eq 80) { return 'http://ai-orchestrator.localhost/' }
+  return "http://ai-orchestrator.localhost:$p/"
 }
 function PyW {
   $py = FindPy
@@ -71,7 +80,8 @@ if ($installed -and (Has claude) -and (PyW)) {
   Start-Process -FilePath $pyw -ArgumentList ('"' + $AppPy + '"') -WorkingDirectory $AppHome
   for ($i = 0; $i -lt 20 -and -not (AppUp); $i++) { Start-Sleep -Milliseconds 500 }
   if (-not (AppUp)) { Fail $M.no_start }
-  Start-Sleep -Seconds 1
+  Say ('  ' + (AppLink)) 'Cyan'
+  Start-Sleep -Seconds 2
   exit 0
 }
 
@@ -129,5 +139,6 @@ for ($i = 0; $i -lt 30 -and -not (AppUp); $i++) { Start-Sleep -Milliseconds 700 
 if (-not (AppUp)) { Fail $M.no_start }
 Say ''
 Say ('  ' + $M.ok) 'Green'
-Start-Sleep -Seconds 6
+Say ('  ' + (AppLink)) 'Cyan'
+Start-Sleep -Seconds 8
 exit 0

@@ -33,7 +33,14 @@ HOME = Path(os.environ.get("AIO_HOME") or APP.parent)
 DATA = HOME / "data"
 CFG_FILE = DATA / "config.json"
 PROJ = DATA / "projects"
-PORT = int(os.environ.get("AIO_PORT", "8765"))
+PORTS = [int(os.environ["AIO_PORT"])] if os.environ.get("AIO_PORT") else [80, 8765]
+PORT = PORTS[0]
+HOSTNAME = "ai-orchestrator.localhost"   # trình duyệt tự trỏ *.localhost về máy này, không cần sửa file hosts
+
+
+def app_url(port=None):
+    port = port or PORT
+    return f"http://{HOSTNAME}{'' if port == 80 else ':' + str(port)}/"
 IS_WIN = os.name == "nt"
 NO_WINDOW = 0x08000000 if IS_WIN else 0
 MAX_RUNNING = 2
@@ -817,15 +824,14 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def ok_host(self):
-        return self.headers.get("Host", "") in (f"127.0.0.1:{PORT}", f"localhost:{PORT}")
-
-    def cookie_ok(self):
-        m = re.search(r"(?:^|;\s*)aio=([^;]+)", self.headers.get("Cookie", ""))
-        return bool(m) and secrets.compare_digest(m.group(1), CFG["token"])
+        h = self.headers.get("Host", "").lower()
+        names = (HOSTNAME, "127.0.0.1", "localhost")
+        return h in names + tuple(f"{n}:{PORT}" for n in names) if PORT == 80 else h in tuple(f"{n}:{PORT}" for n in names)
 
     def authed(self):
-        # cookie SameSite=Strict + header riêng (trang lạ không gửi được) + đúng Host
-        return self.ok_host() and self.cookie_ok() and self.headers.get("X-AIO") == "1"
+        # chỉ nhận từ máy này (server nghe 127.0.0.1), đúng Host (chặn DNS rebinding),
+        # và header riêng (trang web lạ không gửi được nếu không qua CORS)
+        return self.ok_host() and self.headers.get("X-AIO") == "1"
 
     def do_GET(self):
         if not self.ok_host():
@@ -835,14 +841,8 @@ class H(BaseHTTPRequestHandler):
         if u.path in ("/favicon.ico", "/icon.svg"):
             return self.send(200, ICON_SVG, "image/svg+xml")
         if u.path == "/":
-            tok = q.get("t", [""])[0]
-            if tok and secrets.compare_digest(tok, CFG["token"]):
-                return self.send(302, b"", "text/plain", {
-                    "Location": "/",
-                    "Set-Cookie": f"aio={CFG['token']}; Path=/; HttpOnly; SameSite=Strict; Max-Age=315360000"})
-            if not self.cookie_ok():
-                return self.send(200, "<meta charset=utf-8><p style='font:16px system-ui;padding:40px'>"
-                                      "Bấm đúp file AI-Orchestrator.bat để mở.</p>".encode(), "text/html")
+            if q.get("t"):
+                return self.send(302, b"", "text/plain", {"Location": "/"})
             return self.send(200, ui_html(), "text/html")
         if not self.authed():
             return self.send(403, {"error": "forbidden"})
@@ -979,25 +979,47 @@ def apply_update():
     os._exit(0)
 
 
+def running_port():
+    """Cổng của bản đang chạy (nếu có)."""
+    import urllib.request
+    for p in PORTS:
+        try:
+            if b"<svg" in urllib.request.urlopen(f"http://127.0.0.1:{p}/icon.svg", timeout=1.5).read()[:200]:
+                return p
+        except Exception:
+            pass
+    return None
+
+
 def serve(background=False):
-    global CFG
+    global CFG, PORT
     refresh_path()
     CFG = load_cfg()
     save_cfg()
-    url = f"http://127.0.0.1:{PORT}/?t={CFG['token']}"
     srv = None
-    for _ in range(20 if os.environ.get("AIO_RESTART") else 1):   # vừa tự cập nhật: chờ bản cũ nhả cổng
-        try:
-            srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+    restart = bool(os.environ.pop("AIO_RESTART", None))
+    if not restart:
+        p = running_port()
+        if p:                             # đã chạy rồi -> chỉ mở trình duyệt
+            if not background:
+                webbrowser.open(app_url(p))
+            return
+    order = ([CFG["port"]] if CFG.get("port") in PORTS else []) + PORTS
+    for p in dict.fromkeys(order):
+        for _ in range(20 if restart and p == order[0] else 1):   # vừa tự cập nhật: chờ bản cũ nhả cổng
+            try:
+                srv = ThreadingHTTPServer(("127.0.0.1", p), H)
+                break
+            except OSError:
+                time.sleep(0.5)
+        if srv:
+            PORT = p
             break
-        except OSError:
-            time.sleep(0.5)
-    if srv is None:                       # đã chạy rồi -> chỉ mở trình duyệt
-        if not background:
-            webbrowser.open(url)
+    if srv is None:
         return
-    if os.environ.get("AIO_RESTART"):
-        os.environ.pop("AIO_RESTART", None)
+    CFG["port"] = PORT
+    save_cfg()
+    url = app_url()
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     load_tasks()
     threading.Thread(target=scheduler, daemon=True).start()

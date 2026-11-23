@@ -21,7 +21,7 @@ MSG = {
     "no_claude": "Cài Claude Code chưa xong. Kiểm tra mạng rồi chạy lại file này.",
     "no_start": "Ứng dụng không khởi động được.",
     "log": "Chi tiết:",
-    "ok": "Xong. Trang AI Orchestrator đã mở trong trình duyệt. Lần sau chỉ cần bấm đúp file này.",
+    "ok": "Xong. Trang AI Orchestrator đã mở trong trình duyệt. Lưu bookmark link dưới đây — app tự chạy nền khi bật máy nên link luôn mở được:",
 }
 app = (d / "app.py").read_text(encoding="utf-8")
 ui = base64.b64encode((d / "ui.html").read_bytes()).decode()
@@ -29,7 +29,7 @@ assert 'UI_B64 = ""' in app
 import os
 built = app.replace('UI_B64 = ""', f'UI_B64 = "{ui}"', 1)
 import datetime
-ver = datetime.datetime.utcnow().strftime("%Y%m%d.%H%M") + "-" + hashlib.sha1(built.encode()).hexdigest()[:6]  # so sánh được theo thời gian
+ver = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d.%H%M") + "-" + hashlib.sha1(built.encode()).hexdigest()[:6]  # so sánh được theo thời gian
 repo = os.environ.get("AIO_REPO", "")          # owner/repo trên GitHub
 base = f"https://raw.githubusercontent.com/{repo}/main/" if repo else ""
 built = built.replace('VERSION = "dev"', f'VERSION = "{ver}"', 1).replace('UPDATE_BASE = ""', f'UPDATE_BASE = "{base}"', 1)
