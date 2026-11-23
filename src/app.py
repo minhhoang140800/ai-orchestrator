@@ -203,6 +203,7 @@ def load_cfg():
         a.pop("code", None)
         a.pop("window", None)
         a.pop("url", None)
+        a.pop("note", None)
     return c
 
 
@@ -850,6 +851,15 @@ def status_loop():
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\\\)|\x1b[=>()][0-9A-B]?")
 
 
+def dlog(msg):
+    """Nhật ký chẩn đoán (đi kèm Export log)."""
+    try:
+        with open(DATA / "debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[{now()}] v{RELEASE} py{sys.version.split()[0]} {msg}\n")
+    except Exception:
+        pass
+
+
 class HiddenTerm:
     """Chạy chương trình dạng cửa sổ dòng lệnh ở chế độ ẩn (terminal ảo), đọc màn hình và gõ phím thay người dùng."""
 
@@ -860,8 +870,10 @@ class HiddenTerm:
             try:
                 from winpty import PtyProcess
             except ImportError:      # cài thư viện terminal ảo (1 lần)
-                subprocess.run([py_console(), "-m", "pip", "install", "--user", "--quiet", "--disable-pip-version-check",
-                                "pywinpty"], capture_output=True, timeout=300, creationflags=NO_WINDOW)
+                r = subprocess.run([py_console(), "-m", "pip", "install", "--user", "--disable-pip-version-check",
+                                    "pywinpty"], capture_output=True, text=True, errors="replace", timeout=300,
+                                   creationflags=NO_WINDOW)
+                dlog("pip install pywinpty -> exit %s\n%s\n%s" % (r.returncode, (r.stdout or "")[-1500:], (r.stderr or "")[-1500:]))
                 import importlib
                 import site
                 importlib.invalidate_caches()
@@ -1032,8 +1044,13 @@ def ai_login(ai, switch=False):
                     try:
                         done = gemini_term_login(exe, d, cur)
                     except Exception as e:           # không dựng được terminal ảo -> dùng cửa sổ như cũ
+                        import traceback
                         done = None
-                        cur["msg"] = str(e)[:150]
+                        cur["note"] = f"{type(e).__name__}: {e}"[:200]
+                        dlog("gemini hidden login failed:\n" + traceback.format_exc())
+                    else:
+                        lg0 = LOGINS.get("gemini")
+                        dlog(f"gemini hidden login done={done}; screen tail:\n" + (lg0.buf[-1500:] if lg0 else ""))
                     lg = LOGINS.pop("gemini", None)
                     if lg:
                         lg.kill()
@@ -1347,6 +1364,8 @@ def export_log():
                                                            if x.name in ("status.json", "worker.log", "TASK.md", "result.md")]:
                 if f.is_file():
                     z.write(f, f"{t['id']}/{f.relative_to(d).as_posix()}")
+        if (DATA / "debug.log").is_file():
+            z.write(DATA / "debug.log", "debug.log")
         if (HOME / "install.log").is_file():
             z.write(HOME / "install.log", "install.log")
         z.writestr("summary.md", "\n".join(lines))
