@@ -464,7 +464,12 @@ def start_run(t):
         tmsg(t, "claude", "Chưa cài Claude Code" if not exe else "Chưa chọn thư mục kết quả (Cài đặt → Set up)", kind="error")
         return tsave(t)
     if not t.get("folder"):
-        t["folder"] = safe_name(f"{t['created'][:10]} {t['title']}", 80)
+        base = safe_name(t["title"], 80)          # thư mục kết quả = tên task, nằm ngay trong thư mục export
+        used = {x.get("folder") for x in TASKS.values() if x is not t}
+        name, n = base, 2
+        while name in used or (Path(CFG["output"]) / name).exists():
+            name, n = f"{base} ({n})", n + 1
+        t["folder"] = name
     out_dir(t).mkdir(parents=True, exist_ok=True)
     write_claude_md(t)
     q = d / "question.md"
