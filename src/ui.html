@@ -115,6 +115,63 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:s .8s linear infinite;flex:none}
 @keyframes s{to{transform:rotate(360deg)}}
 @media (max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}aside{max-height:38vh}}
+
+/* ===== Giao diện v3.1: nền trắng, bề mặt xám-xanh nhạt, nút dạng viên thuốc, bo tròn lớn ===== */
+:root{--bg:#fff;--side:#f0f4f9;--panel:#fff;--ink:#1f1f1f;--mute:#5f6368;--line:#e1e5ea;--soft:#f0f4f9;
+--acc:#0b57d0;--acc2:#d3e3fd;--run:#0b57d0;--wait:#b06000;--ok:#146c2e;--bad:#b3261e}
+body{font:14px/1.55 "Google Sans Text","Google Sans","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button{border-radius:999px;padding:7px 16px;border-color:var(--line);transition:background .15s,box-shadow .15s}
+button:hover{background:var(--soft);border-color:var(--line)}
+button.pri{background:var(--acc);border-color:var(--acc)}button.pri:hover{background:#0842a0;box-shadow:0 1px 3px rgba(11,87,208,.35)}
+button.ghost:hover{background:rgba(31,31,31,.08)}button.icon{padding:8px;border-radius:50%}
+input[type=text],textarea{border-radius:14px;border-color:var(--line)}input[type=text]:focus{outline:2px solid var(--acc2);border-color:var(--acc)}
+.app{grid-template-columns:284px 1fr}
+aside{border-right:0;padding:6px 6px 0}
+.brand{font-size:19px;font-weight:500;letter-spacing:0;padding:14px 14px 14px;gap:10px}.brand img{width:26px;height:26px;border-radius:7px}
+.ver{font-size:11px}
+.newtask{justify-content:flex-start;margin:2px 6px;padding:10px 16px;border:0;background:transparent;font-weight:500;gap:12px}
+.newtask:hover{background:rgba(31,31,31,.08)}
+#btnNew{background:var(--acc2);color:#041e49}#btnNew:hover{background:#c2d7fb}
+.lbl{text-transform:none;letter-spacing:0;font-size:13px;font-weight:500;padding:18px 20px 6px}
+.tlist{padding:0 6px 8px}
+.titem{border-radius:999px;padding:8px 14px;gap:10px}.titem:hover{background:rgba(31,31,31,.08)}
+.titem.on{background:var(--acc2);box-shadow:none;color:#041e49;font-weight:500}
+.foot{border-top:0;padding:8px 12px 12px}.ais{font-size:12px}
+main{background:var(--bg)}
+.thead{border-bottom:0;padding:14px 26px}.thead h1{font-size:18px;font-weight:500}
+.pill{padding:2px 12px;font-weight:500}.pill.running,.pill.queued{background:var(--acc2);color:#041e49}
+.pill.done,.pill.completed{background:#c4eed0;color:#0a3818}.pill.waiting,.pill.login{background:#ffe7c2;color:#5c3200}
+.pill.failed,.pill.rejected,.pill.limit,.pill.timeout{background:#f9dedc;color:#8c1d18}
+.msg.user{background:var(--soft);border:0;border-radius:22px 22px 6px 22px;padding:11px 18px}
+.claude .txt{font-size:14.5px;line-height:1.65}.claude .txt code{background:var(--soft);border-radius:6px}
+.claude.question .txt{background:#fff4df;border-radius:18px;padding:12px 16px}.claude.error .txt{background:#fce8e6;border-radius:18px;padding:12px 16px}
+.subs,.dec,.lib table{border-radius:18px;border-color:var(--line)}.sub{padding:9px 16px}
+.chip{border-color:var(--line);background:var(--soft);border:0;padding:1px 10px}
+.wbody{border-left-color:var(--acc2)}
+.openf{background:var(--soft);border:0;font-weight:500}.openf:hover{background:var(--acc2)}
+.thumbs img{border-radius:14px;border:0}
+.comp{border-radius:28px;border:0;background:var(--soft);padding:12px 16px 10px;box-shadow:none;transition:box-shadow .2s,background .2s}
+.comp:focus-within{background:#fff;box-shadow:0 1px 3px rgba(60,64,67,.2),0 4px 12px 3px rgba(60,64,67,.12)}
+.comp.drag{box-shadow:0 0 0 2px var(--acc)}
+.comp textarea{font-size:15px;padding:6px 4px}.comp #bSend{width:40px;height:40px;display:grid;place-items:center}
+.a{background:#fff;border-radius:10px;padding:4px 4px 4px 10px}
+.home{position:relative;overflow:hidden}
+.home::before{content:"";position:absolute;inset:-10% 5% auto 5%;height:95%;pointer-events:none;
+ background:radial-gradient(42% 46% at 50% 55%,rgba(138,180,248,.38),rgba(197,221,255,.18) 55%,transparent 75%)}
+.home>*{position:relative}
+.home h2{font-size:36px;font-weight:400;letter-spacing:-.01em;margin-bottom:28px;
+ background:linear-gradient(90deg,#1f6feb 0%,#7c5cff 45%,#e0569f 90%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.home .comp{background:#fff;box-shadow:0 1px 3px rgba(60,64,67,.18),0 4px 14px 3px rgba(60,64,67,.1)}
+.ov{background:rgba(31,31,31,.32);backdrop-filter:blur(2px)}
+.modal{border-radius:28px;border:0;box-shadow:0 8px 30px rgba(0,0,0,.2)}.mhead{font-size:22px;font-weight:400;padding:22px 26px 0}
+.mbody{padding:18px 26px}.mfoot{border-top:0;padding:8px 26px 22px}
+.accrow{border-radius:18px;border:0;background:var(--soft);padding:12px 16px}.accrow button{background:#fff}.accrow button.pri{background:var(--acc)}
+.path{border-radius:14px;padding:9px 14px}.f>.k{font-size:13px;font-weight:500}
+.seg{border-radius:999px}.seg button{padding:6px 16px}
+.lib th{font-weight:500}.dec>button{padding:10px 16px}.dec .g{padding:8px 16px 10px}
+#toast{border-radius:10px;background:#303030;padding:12px 18px}
+.dot.ok,.sd.done{background:var(--ok)}.sd.running,.sd.queued{background:var(--acc)}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#c4c7c5;border-radius:10px;border:2px solid transparent;background-clip:content-box}::-webkit-scrollbar-thumb:hover{background:#9aa0a6;background-clip:content-box;border:2px solid transparent}
 </style>
 </head>
 <body>
