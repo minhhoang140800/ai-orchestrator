@@ -27,9 +27,8 @@ where claude >nul 2>&1 && call claude auth logout >nul 2>&1
 where codex >nul 2>&1 && call codex logout >nul 2>&1
 
 echo [1] Dang xuat Gemini (xoa phien luu trong Windows Credential Manager)...
-for /f "tokens=1,* delims=:" %%a in ('cmdkey /list ^| findstr /i "antigravity gemini agy"') do (
-  for /f "tokens=* delims= " %%t in ("%%b") do cmdkey /delete:"%%t" >nul 2>&1
-)
+cmdkey /delete:gemini:antigravity >nul 2>&1
+cmdkey /delete:LegacyGeneric:target=gemini:antigravity >nul 2>&1
 if exist "%USERPROFILE%\.gemini\antigravity-cli" rd /s /q "%USERPROFILE%\.gemini\antigravity-cli"
 if exist "%USERPROFILE%\.gemini\google_accounts.json" del /q "%USERPROFILE%\.gemini\google_accounts.json"
 if exist "%USERPROFILE%\.gemini\oauth_creds.json" del /q "%USERPROFILE%\.gemini\oauth_creds.json"

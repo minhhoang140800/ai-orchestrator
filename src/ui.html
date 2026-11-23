@@ -409,7 +409,7 @@ function autoLogin() {      // tự mở lần lượt trang đăng nhập của
 function accState(k, a) {
   if (!a.installed) return `<small class="bad">Chưa cài — bấm đúp lại file cài AI-Orchestrator (.bat)</small>`;
   if (a.window === "logout") return `<small>Trong cửa sổ Gemini: gõ <b>/logout</b>, đăng nhập tài khoản mới trên trình duyệt, rồi đóng cửa sổ.</small>`;
-  if (a.window) return `<small>Đăng nhập trên trình duyệt, xong thì đóng cửa sổ Gemini.</small>`;
+  if (a.window) return `<small>1. Đăng nhập Google trên trình duyệt → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào <b>cửa sổ Gemini</b> (chuột phải hoặc Ctrl+V) rồi Enter. 3. Thấy email hiện lên thì đóng cửa sổ.</small>`;
   if (a.pending) return `<small>Đăng nhập trên tab trình duyệt vừa mở…</small>`;
   if (a.ok) return `<small>${a.email ? esc(a.email) : "Đã đăng nhập"}</small>`;
   return `<small class="bad">Chưa đăng nhập</small>`;

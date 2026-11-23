@@ -846,6 +846,18 @@ def status_loop():
         time.sleep(15)
 
 
+def gemini_has_cred():
+    """Máy đã có phiên đăng nhập Antigravity chưa (Windows Credential Manager hoặc file token)."""
+    if (Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token").exists():
+        return True
+    if not IS_WIN:
+        return True
+    try:
+        return "gemini:antigravity" in _run_hidden(["cmdkey", "/list"], 15).stdout.lower()
+    except Exception:
+        return False
+
+
 def gemini_ping(exe, timeout):
     """Gemini: chạy 1 câu ngắn. Đã đăng nhập -> trả lời ngay; chưa -> agy tự mở trình duyệt đăng nhập."""
     d = DATA / ".login"
@@ -898,14 +910,15 @@ def ai_login(ai, switch=False):
                 kill_tree(p)
                 ai_status(ai)
             else:
-                ok, msg, took = (False, "", 0) if switch else gemini_ping(exe, 420)
-                if not ok and (switch or took < 20):
-                    # agy cần cửa sổ để đăng nhập/đổi tài khoản: mở 1 cửa sổ, đóng xong thì kiểm tra lại
+                # agy -p không tự hoàn tất đăng nhập được (không có chỗ dán mã) -> chỉ chạy ẩn khi máy đã có phiên lưu
+                ok = (not switch) and gemini_has_cred() and gemini_ping(exe, 120)[0]
+                if not ok:
                     cur["window"] = "logout" if switch else "login"
-                    if IS_WIN:
+                    if IS_WIN:      # cửa sổ agy: đăng nhập trên trình duyệt, dán mã vào cửa sổ, rồi đóng
                         subprocess.run(["cmd.exe", "/c", "start", "/wait", "AI Orchestrator - Gemini", exe],
                                        cwd=str(d), creationflags=NO_WINDOW)
-                    ok, msg, took = gemini_ping(exe, 120)
+                    cur.pop("window", None)
+                    ok = gemini_has_cred() and gemini_ping(exe, 120)[0]
                 cur.update(ok=ok, msg="" if ok else "Chưa đăng nhập được", email="")
         except Exception as e:
             cur.update(ok=False, msg=str(e)[:150])
@@ -930,6 +943,9 @@ def ai_cancel(ai):
 def check_startup():
     for ai in ("claude", "codex"):
         ai_status(ai)
+    g = CFG["ais"].setdefault("gemini", {})
+    if g.get("ok") and not gemini_has_cred():
+        g.update(ok=False, msg="")
     save_cfg()
 
 
