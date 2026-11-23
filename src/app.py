@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 UI_B64 = ""  # filled at build time
 VERSION = "dev"  # filled at build time
+RELEASE = "dev"  # số phiên bản hiển thị (vd 1.6), filled at build time
 UPDATE_BASE = ""  # vd https://raw.githubusercontent.com/<owner>/<repo>/main/ (filled at build time)
 
 APP = Path(__file__).resolve()
@@ -727,7 +728,7 @@ def ai_state():
 def ai_login(ai):
     exe = find_bin(AIS[ai]["bin"])
     if not exe:
-        return {"error": "Chưa cài. Chạy lại file AI-Orchestrator.bat."}
+        return {"error": "Chưa cài. Chạy lại file cài AI-Orchestrator (.bat)."}
     d = DATA / ".login"
     d.mkdir(parents=True, exist_ok=True)
     CFG["ais"].setdefault(ai, {})["pending"] = True
@@ -862,7 +863,7 @@ class H(BaseHTTPRequestHandler):
             if upd:
                 save_cfg()
             return self.send(200, {"ais": ai_state(), "output": CFG["output"], "instructions": CFG["instructions"],
-                                   "tasks": ts, "version": VERSION, "updated": upd})
+                                   "tasks": ts, "version": VERSION, "release": RELEASE, "updated": upd})
         if u.path == "/api/task":
             t = TASKS.get(q.get("id", [""])[0])
             return self.send(200, task_detail(t) if t else {"error": "Không tìm thấy task"})

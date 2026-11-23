@@ -36,6 +36,8 @@ import datetime
 ver = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d.%H%M") + "-" + hashlib.sha1(built.encode()).hexdigest()[:6]  # so sánh được theo thời gian
 repo = os.environ.get("AIO_REPO", "")          # owner/repo trên GitHub
 base = f"https://raw.githubusercontent.com/{repo}/main/" if repo else ""
+rel = (d / "RELEASE").read_text().strip()          # số phiên bản hiển thị, tăng mỗi lần phát hành
+built = built.replace('RELEASE = "dev"', f'RELEASE = "{rel}"', 1)
 built = built.replace('VERSION = "dev"', f'VERSION = "{ver}"', 1).replace('UPDATE_BASE = ""', f'UPDATE_BASE = "{base}"', 1)
 (d / "dist").mkdir(exist_ok=True)
 (d / "dist" / "app.py").write_bytes(built.encode("utf-8"))
@@ -54,7 +56,7 @@ ps.encode("ascii")
 
 bat = r"""@echo off
 chcp 65001 >nul
-title AI Orchestrator
+title AI Orchestrator v""" + rel + r"""
 set "AIO_SELF=%~f0"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$s=[IO.File]::ReadAllText($env:AIO_SELF); $m='#'+'##PS-BEGIN###'; $i=$s.IndexOf($m); if ($i -lt 0) { Write-Host 'File loi'; exit 1 }; Invoke-Expression $s.Substring($i); exit $LASTEXITCODE"
 if errorlevel 1 (
@@ -65,6 +67,8 @@ if errorlevel 1 (
 exit /b
 ###PS-BEGIN###
 """ + ps + "\n"
-out = d / "dist" / "AI-Orchestrator.bat"
+for old in (d / "dist").glob("AI-Orchestrator*.bat"):
+    old.unlink()
+out = d / "dist" / f"AI-Orchestrator_v{rel}.bat"
 out.write_bytes(bat.replace("\r\n", "\n").replace("\n", "\r\n").encode("ascii"))
 print(out, out.stat().st_size, ver)

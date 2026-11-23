@@ -23,7 +23,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stro
 .app{display:grid;grid-template-columns:260px 1fr;height:100%}
 aside{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
 .brand{display:flex;align-items:center;gap:9px;padding:14px 14px 10px;font-weight:650;letter-spacing:-.01em}
-.brand img{width:22px;height:22px}
+.brand img{width:22px;height:22px}.ver{font-size:11px;font-weight:500;color:var(--mute);margin-left:auto}
 .newtask{margin:2px 10px 4px;display:flex;align-items:center;gap:8px;justify-content:center}
 .lbl{font-size:11px;font-weight:650;color:var(--mute);text-transform:uppercase;letter-spacing:.06em;padding:12px 16px 4px}
 .tlist{flex:1;overflow:auto;padding:0 8px 8px;min-height:0}
@@ -105,7 +105,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 <body>
 <div class="app">
   <aside>
-    <div class="brand"><img src="/icon.svg" alt="">AI Orchestrator</div>
+    <div class="brand"><img src="/icon.svg" alt="">AI Orchestrator<span class="ver" id="ver"></span></div>
     <button class="newtask" id="btnNew"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Task mới</button>
     <div class="lbl">Task</div>
     <div class="tlist" id="tlist"></div>
@@ -156,7 +156,7 @@ async function api(path, body) {
   const o = { headers: { "X-AIO": "1" } };
   if (body !== undefined) { o.method = "POST"; o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(body); }
   const r = await fetch(path, o);
-  if (r.status === 403) { toast("Bấm đúp file AI-Orchestrator.bat để mở lại"); throw new Error("403"); }
+  if (r.status === 403) { toast("Bấm đúp file cài AI-Orchestrator (.bat) để mở lại"); throw new Error("403"); }
   return r.json();
 }
 async function upload(tid, f) {
@@ -190,7 +190,8 @@ async function refresh() {
     if (p && p !== t.status && ["waiting", "done", "failed"].includes(t.status)) notify(ST[t.status] + " · " + t.title, "");
     prev[t.id] = t.status;
   }
-  if (S.updated) toast("Đã cập nhật lên bản mới");
+  $("ver").textContent = S.release && S.release !== "dev" ? "v" + S.release : "";
+  if (S.updated) toast("Đã cập nhật lên v" + S.release);
   const w = S.tasks.filter((t) => t.status === "waiting").length;
   document.title = (w ? `(${w}) ` : "") + "AI Orchestrator";
   renderSide();
@@ -367,7 +368,7 @@ $("btnOut").onclick = () => (S.output ? api("/api/open-output", {}) : openSettin
 $("btnQuit").onclick = async () => {
   if (!confirm("Tắt AI Orchestrator? Task đang làm sẽ tự chạy tiếp khi mở lại.")) return;
   await api("/api/quit", {}); clearInterval(timer);
-  document.body.innerHTML = '<p style="font:16px system-ui;padding:40px">Đã tắt. Bấm đúp file AI-Orchestrator.bat để mở lại.</p>';
+  document.body.innerHTML = '<p style="font:16px system-ui;padding:40px">Đã tắt. Bấm đúp file cài AI-Orchestrator (.bat) để mở lại.</p>';
 };
 
 /* ---------------- settings ---------------- */
@@ -378,7 +379,7 @@ function renderSettings() {
   let h;
   if (tab === "acc") {
     h = Object.entries(S.ais).map(([k, a]) => {
-      const st = !a.installed ? `<small class="bad">Chưa cài — bấm đúp lại file AI-Orchestrator.bat</small>`
+      const st = !a.installed ? `<small class="bad">Chưa cài — bấm đúp lại file cài AI-Orchestrator (.bat)</small>`
         : a.pending ? `<small>Đang kiểm tra…</small>` : a.ok ? `<small>Sẵn sàng</small>` : a.ok === false ? `<small class="bad">Chưa đăng nhập${a.msg ? " · " + esc(a.msg) : ""}</small>` : `<small>Chưa đăng nhập</small>`;
       return `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${a.ok && a.email ? " - " + esc(a.email) : ""}${st}</span>
         <button class="ghost icon" data-test="${k}" title="Kiểm tra lại" aria-label="Kiểm tra lại" ${a.installed && !a.pending ? "" : "disabled"}>${I.refresh}</button>
