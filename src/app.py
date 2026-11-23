@@ -131,8 +131,31 @@ def kill_orphan(pid):
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, creationflags=NO_WINDOW)
 
 
+PS_OPEN_FOLDER = r"""
+$p = $env:AIO_OPEN.TrimEnd('\')
+$w = $null
+foreach ($x in (New-Object -ComObject Shell.Application).Windows()) {
+  try { if ($x.Document.Folder.Self.Path.TrimEnd('\') -ieq $p) { $w = $x; break } } catch {}
+}
+if ($w) {
+  Add-Type -Namespace AIO -Name W -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);'
+  $h = [IntPtr]$w.HWND
+  if ([AIO.W]::IsIconic($h)) { [void][AIO.W]::ShowWindow($h, 9) }
+  (New-Object -ComObject WScript.Shell).SendKeys('%')
+  [void][AIO.W]::SetForegroundWindow($h)
+} else { Start-Process explorer.exe -ArgumentList ('"' + $p + '"') }
+"""
+
+
 def open_path(p):
     p = str(p)
+    if IS_WIN and os.path.isdir(p):      # thư mục đang mở sẵn -> đưa cửa sổ đó lên, không mở thêm
+        try:
+            subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", PS_OPEN_FOLDER],
+                             env=dict(os.environ, AIO_OPEN=p), creationflags=NO_WINDOW)
+            return
+        except Exception:
+            pass
     if IS_WIN:
         os.startfile(p)  # noqa
     elif shutil.which("xdg-open"):
@@ -178,6 +201,7 @@ def load_cfg():
     for a in c["ais"].values():
         a.pop("pending", None)
         a.pop("code", None)
+        a.pop("window", None)
     return c
 
 
@@ -416,7 +440,7 @@ def gen_title(t):
     """Đặt tên task ngắn như Claude (model nhỏ, tốn rất ít hạn mức). Lỗi thì giữ tên tạm."""
     exe = find_bin("claude")
     try:
-        if exe:
+        if exe and CFG["ais"].get("claude", {}).get("ok"):
             p = subprocess.run([exe, "-p", "Đặt tiêu đề 3-7 từ, cùng ngôn ngữ, cho yêu cầu dưới đây. "
                                 "Chỉ trả về tiêu đề, không dấu ngoặc, không giải thích.\n\n" + t["text"][:2000],
                                 "--model", "haiku"], cwd=str(tdir(t)), stdin=subprocess.DEVNULL, capture_output=True,
@@ -567,6 +591,26 @@ def watch(t, p, nxt):
         tsave(t)
 
 
+_ready = {"t": 0.0, "ok": False}
+
+
+def claude_ready(t):
+    """Claude chưa đăng nhập: tự mở trang đăng nhập 1 lần cho task này, task chờ rồi tự chạy."""
+    if time.time() - _ready["t"] > 5:
+        _ready["t"] = time.time()
+        cur = CFG["ais"].get("claude", {})
+        _ready["ok"] = bool(cur.get("ok")) if cur.get("pending") else bool(ai_status("claude").get("ok"))
+    if _ready["ok"]:
+        if t.pop("need_login", None):
+            tsave(t)
+        return True
+    if not t.get("need_login"):
+        t["need_login"] = True
+        tsave(t)
+        ai_login("claude")
+    return False
+
+
 def scheduler():
     while True:
         with _tlock:
@@ -575,6 +619,8 @@ def scheduler():
             for t in queued:
                 if running >= MAX_RUNNING:
                     break
+                if not claude_ready(t):
+                    continue          # chờ đăng nhập Claude (đã tự mở trang đăng nhập)
                 if t.get("titling") and time.time() - t.get("created_ts", 0) < 30:
                     continue          # chờ đặt tên xong để thư mục kết quả có tên đẹp
                 start_run(t)
@@ -727,149 +773,139 @@ def ai_state():
     return {k: {"installed": bool(find_bin(v["bin"])), **CFG["ais"].get(k, {})} for k, v in AIS.items()}
 
 
-def cred_mark(ai):
-    """Dấu hiệu đã đăng nhập xong (không tốn hạn mức): thời điểm sửa file đăng nhập."""
-    home = Path.home()
-    files = {"claude": [home / ".claude.json", home / ".claude" / ".credentials.json"],
-             "codex": [Path(os.environ.get("CODEX_HOME") or home / ".codex") / "auth.json"],
-             "gemini": [home / ".gemini" / "google_accounts.json", home / ".gemini" / "oauth_creds.json",
-                        home / ".gemini" / "antigravity-cli"]}[ai]
-    return max((f.stat().st_mtime for f in files if f.exists()), default=0)
+LOGINS = {}          # ai -> Popen của tiến trình đăng nhập đang chạy
+_status_lock = threading.Lock()
 
 
-LOGINS = {}   # ai -> {"proc": Popen, "url": str}
-URL_RE = re.compile(r"https://\S+")
+def _run_hidden(args, timeout, cwd=None):
+    return subprocess.run(args, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=timeout, creationflags=NO_WINDOW)
 
 
-def gemini_web_login(exe, d):
-    """Chạy agy không cửa sổ, bắt link đăng nhập, mở trên trình duyệt; mã xác nhận nhập trên trang web.
-    Trả về True nếu bắt được link; False -> dùng cửa sổ như cũ."""
+def ai_status(ai):
+    """Trạng thái đăng nhập. Claude/ChatGPT: lệnh trạng thái (tức thì, không tốn hạn mức).
+    Gemini không có lệnh trạng thái -> giữ kết quả lần đăng nhập gần nhất."""
+    exe = find_bin(AIS[ai]["bin"])
+    cur = CFG["ais"].setdefault(ai, {})
+    if not exe:
+        cur.update(ok=False, msg="Chưa cài")
+        return cur
     try:
-        p = subprocess.Popen([exe], cwd=str(d), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                             creationflags=NO_WINDOW, env=dict(os.environ, NO_BROWSER="true"))
-    except Exception:
-        return False
-    found = {}
+        if ai == "claude":
+            p = _run_hidden([exe, "auth", "status", "--json"], 20)
+            j = json.loads(p.stdout[p.stdout.index("{"):]) if "{" in (p.stdout or "") else {}
+            ok = bool(j.get("loggedIn"))
+            cur.update(ok=ok, msg="", email=(j.get("email") or ai_email(ai)) if ok else "")
+        elif ai == "codex":
+            p = _run_hidden([exe, "login", "status"], 20)
+            out = ((p.stdout or "") + (p.stderr or "")).lower()
+            ok = p.returncode == 0 and "not logged" not in out
+            cur.update(ok=ok, msg="", email=ai_email(ai) if ok else "")
+    except Exception as e:
+        cur.setdefault("ok", False)
+        cur["msg"] = str(e)[:150]
+    return cur
 
-    def reader():
-        buf = ""
-        for ch in iter(lambda: p.stdout.read(1), ""):
-            buf = (buf + ch)[-4000:]
-            if "url" not in found and ch in " \n\r\x1b":
-                clean = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", buf).replace("\n", "").replace("\r", "")
-                m = URL_RE.search(clean)
-                if m and ("accounts.google" in m.group(0) or "oauth" in m.group(0)):
-                    found["url"] = m.group(0).rstrip(".,)")
 
-    threading.Thread(target=reader, daemon=True).start()
+def status_loop():
+    """Cập nhật trạng thái Claude/ChatGPT định kỳ khi trang đang mở."""
+    while True:
+        if time.time() - LAST_SEEN["t"] < 30:
+            for ai in ("claude", "codex"):
+                if not CFG["ais"].get(ai, {}).get("pending"):
+                    with _status_lock:
+                        before = dict(CFG["ais"].get(ai, {}))
+                        ai_status(ai)
+                        if before != CFG["ais"].get(ai):
+                            save_cfg()
+        time.sleep(15)
+
+
+def gemini_ping(exe, timeout):
+    """Gemini: chạy 1 câu ngắn. Đã đăng nhập -> trả lời ngay; chưa -> agy tự mở trình duyệt đăng nhập."""
+    d = DATA / ".login"
+    d.mkdir(parents=True, exist_ok=True)
+    p = subprocess.Popen([exe, "-p", PING], cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                         creationflags=NO_WINDOW)
+    LOGINS["gemini"] = p
     t0 = time.time()
-    while time.time() - t0 < 15 and "url" not in found and p.poll() is None:
-        time.sleep(0.3)
-    if "url" not in found:
+    try:
+        out, _ = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
         kill_tree(p)
-        return False
-    LOGINS["gemini"] = {"proc": p, "url": found["url"]}
-    webbrowser.open(found["url"])
-    return True
+        return False, "timeout", time.time() - t0
+    return "PONG" in (out or "").upper(), (out or "").strip()[-200:], time.time() - t0
 
 
-def ai_login(ai):
+def ai_login(ai, switch=False):
+    """Đăng nhập trên trình duyệt, không mở cửa sổ dòng lệnh (trừ khi Gemini bắt buộc)."""
     exe = find_bin(AIS[ai]["bin"])
     if not exe:
         return {"error": "Chưa cài. Chạy lại file cài AI-Orchestrator (.bat)."}
+    cur = CFG["ais"].setdefault(ai, {})
+    if cur.get("pending"):
+        return {"ok": True}
+    cur["pending"] = "login"
     d = DATA / ".login"
     d.mkdir(parents=True, exist_ok=True)
-    CFG["ais"].setdefault(ai, {})["pending"] = "login"
-    before = cred_mark(ai)
 
     def run():
-        args = [exe, *AIS[ai]["login"]]
         try:
-            if ai == "gemini" and gemini_web_login(exe, d):
-                CFG["ais"][ai]["code"] = True          # trang web hiện ô dán mã
-            elif IS_WIN:
-                wt = shutil.which("wt")
-                if wt:
-                    subprocess.Popen([wt, "-w", "new", "--title", "AI Orchestrator - Dang nhap", "-d", str(d), *args],
-                                     creationflags=NO_WINDOW)
-                else:
-                    subprocess.Popen(["cmd.exe", "/c", "start", "AI Orchestrator - Dang nhap", *args],
-                                     cwd=str(d), creationflags=NO_WINDOW)
+            if ai in ("claude", "codex"):
+                if switch:
+                    try:
+                        _run_hidden([exe, "auth", "logout"] if ai == "claude" else [exe, "logout"], 30)
+                    except Exception:
+                        pass
+                elif ai_status(ai).get("ok"):
+                    return
+                args = [exe, "auth", "login", "--claudeai"] if ai == "claude" else [exe, "login"]
+                p = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)   # CLI tự mở trình duyệt
+                LOGINS[ai] = p
+                t0 = time.time()
+                while time.time() - t0 < 600:
+                    time.sleep(2)
+                    if p.poll() is not None or (time.time() - t0 > 6 and ai_status(ai).get("ok")):
+                        break
+                time.sleep(1)
+                kill_tree(p)
+                ai_status(ai)
             else:
-                subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
-        # Chờ đăng nhập xong: file đăng nhập thay đổi; kiểm tra định kỳ; tối đa 10 phút
-        t0, last_test = time.time(), time.time()
-        while time.time() - t0 < 600:
-            time.sleep(3)
-            if cred_mark(ai) > before:
-                time.sleep(2)
-                break
-            lg = LOGINS.get(ai)
-            if lg and lg["proc"].poll() is not None:
-                break
-            if time.time() - last_test > 30:
-                last_test = time.time()
-                if ai_test(ai, keep_pending=True).get("ok"):
-                    break
-        lg = LOGINS.pop(ai, None)
-        if lg:
-            kill_tree(lg["proc"])
-        CFG["ais"].get(ai, {}).pop("code", None)
-        ai_test(ai)
+                ok, msg, took = (False, "", 0) if switch else gemini_ping(exe, 420)
+                if not ok and (switch or took < 20):
+                    # agy cần cửa sổ để đăng nhập/đổi tài khoản: mở 1 cửa sổ, đóng xong thì kiểm tra lại
+                    cur["window"] = "logout" if switch else "login"
+                    if IS_WIN:
+                        subprocess.run(["cmd.exe", "/c", "start", "/wait", "AI Orchestrator - Gemini", exe],
+                                       cwd=str(d), creationflags=NO_WINDOW)
+                    ok, msg, took = gemini_ping(exe, 120)
+                cur.update(ok=ok, msg="" if ok else "Chưa đăng nhập được", email="")
+        except Exception as e:
+            cur.update(ok=False, msg=str(e)[:150])
+        finally:
+            LOGINS.pop(ai, None)
+            cur.pop("pending", None)
+            cur.pop("window", None)
+            cur["at"] = now()
+            save_cfg()
 
     threading.Thread(target=run, daemon=True).start()
     return {"ok": True}
 
 
-def ai_code(ai, code):
-    lg = LOGINS.get(ai)
-    if not lg or lg["proc"].poll() is not None or not code.strip():
-        return {"error": "Phiên đăng nhập đã hết, bấm Đăng nhập lại"}
-    lg["proc"].stdin.write(code.strip() + "\n")
-    lg["proc"].stdin.flush()
+def ai_cancel(ai):
+    p = LOGINS.get(ai)
+    if p:
+        kill_tree(p)
     return {"ok": True}
 
 
-def ai_test(ai, keep_pending=False):
-    exe = find_bin(AIS[ai]["bin"])
-    if not exe:
-        res = {"ok": False, "msg": "Chưa cài"}
-    else:
-        d = DATA / ".test"
-        d.mkdir(parents=True, exist_ok=True)
-        try:
-            p = subprocess.run([exe, *AIS[ai]["test"]], cwd=str(d), stdin=subprocess.DEVNULL, capture_output=True,
-                               text=True, encoding="utf-8", errors="replace", timeout=150, creationflags=NO_WINDOW)
-            out = (p.stdout or "") + (p.stderr or "")
-            ok = "PONG" in out.upper()
-            res = {"ok": ok, "msg": "" if ok else (out.strip()[-200:] or f"exit {p.returncode}")}
-        except subprocess.TimeoutExpired:
-            res = {"ok": False, "msg": "Chưa đăng nhập hoặc không phản hồi"}
-        except Exception as e:
-            res = {"ok": False, "msg": str(e)}
-    res["at"] = now()
-    if keep_pending and not res.get("ok"):
-        return res                     # đang chờ đăng nhập: chưa xong thì giữ trạng thái chờ
-    if res.get("ok"):
-        res["email"] = ai_email(ai)
-    CFG["ais"][ai] = res
+def check_startup():
+    for ai in ("claude", "codex"):
+        ai_status(ai)
     save_cfg()
-    return res
-
-
-def check_untested():
-    for k in AIS:
-        a = CFG["ais"].get(k, {})
-        if a.get("ok") and not a.get("email"):
-            a["email"] = ai_email(k)
-            save_cfg()
-        if "ok" not in CFG["ais"].get(k, {}) and find_bin(AIS[k]["bin"]):
-            CFG["ais"].setdefault(k, {})["pending"] = True
-            ai_test(k)
 
 
 # ---------------------------------------------------------------- HTTP
@@ -881,6 +917,8 @@ def ui_html():
 
 def task_detail(t):
     d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished")}
+    if t.get("need_login") and t["status"] == "queued":
+        d["status"] = "login"
     msgs = [dict(m) for m in t.get("messages", [])]
     subs = subtasks(t)
     works = [m for m in msgs if m["role"] == "work"]
@@ -946,6 +984,9 @@ class H(BaseHTTPRequestHandler):
             with _tlock:
                 ts = [{k: t.get(k) for k in ("id", "title", "status", "created")}
                       for t in TASKS.values() if t["status"] != "draft"]
+                for x in ts:
+                    if TASKS[x["id"]].get("need_login") and x["status"] == "queued":
+                        x["status"] = "login"
             ts.sort(key=lambda x: x["created"], reverse=True)
             upd = CFG.pop("updated_to", "")
             if upd:
@@ -996,13 +1037,11 @@ class H(BaseHTTPRequestHandler):
 
     def route(self, path, d):
         if path == "/api/ai/login" and d.get("ai") in AIS:
-            return ai_login(d["ai"])
+            return ai_login(d["ai"], switch=bool(d.get("switch")))
+        if path == "/api/ai/cancel" and d.get("ai") in AIS:
+            return ai_cancel(d["ai"])
         if path == "/api/update":
             return update_now()
-        if path == "/api/ai/code" and d.get("ai") in AIS:
-            return ai_code(d["ai"], str(d.get("code", "")))
-        if path == "/api/ai/test" and d.get("ai") in AIS:
-            return ai_test(d["ai"])
         if path == "/api/pick":
             with _pick_lock:
                 return {"path": pick_folder()}
@@ -1182,7 +1221,8 @@ def serve(background=False):
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
     load_tasks()
     threading.Thread(target=scheduler, daemon=True).start()
-    threading.Thread(target=check_untested, daemon=True).start()
+    threading.Thread(target=check_startup, daemon=True).start()
+    threading.Thread(target=status_loop, daemon=True).start()
     threading.Thread(target=check_update, daemon=True).start()
     threading.Thread(target=page_watch, daemon=True).start()
     if not background and not os.environ.get("AIO_NO_BROWSER"):

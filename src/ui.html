@@ -43,7 +43,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .thead .grow{flex:1}
 .thead input{font-size:15px;font-weight:600;padding:4px 8px;max-width:520px}
 .pill{font-size:12px;border-radius:99px;padding:1px 9px;white-space:nowrap;background:var(--soft);color:var(--mute)}
-.pill.running,.pill.queued{background:#e6eefb;color:var(--run)}.pill.waiting{background:#fbf0de;color:var(--wait)}
+.pill.login{background:#fbf0de;color:var(--wait)}.sd.login{background:var(--wait)}.pill.running,.pill.queued{background:#e6eefb;color:var(--run)}.pill.waiting{background:#fbf0de;color:var(--wait)}
 .pill.done,.pill.completed{background:#e3f2ea;color:var(--ok)}.pill.failed,.pill.limit,.pill.timeout{background:#f8e5e2;color:var(--bad)}
 .scroll{flex:1;overflow:auto;min-height:0}
 .thread{max-width:780px;margin:0 auto;padding:22px 22px 10px;display:flex;flex-direction:column;gap:16px}
@@ -131,7 +131,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const ST = { queued: "Chờ", running: "Đang làm", waiting: "Cần bạn", paused: "Tạm dừng", done: "Xong", failed: "Lỗi", cancelled: "Đã hủy", completed: "Đạt", limit: "Hết hạn mức", timeout: "Quá giờ", stopped: "Đã dừng" };
+const ST = { login: "Chờ đăng nhập", queued: "Chờ", running: "Đang làm", waiting: "Cần bạn", paused: "Tạm dừng", done: "Xong", failed: "Lỗi", cancelled: "Đã hủy", completed: "Đạt", limit: "Hết hạn mức", timeout: "Quá giờ", stopped: "Đã dừng" };
 const AIN = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini" };
 const WN = { codex: "ChatGPT", gemini: "Gemini" };
 const PH_NEW = "Giao việc đi, Claude chịu được";
@@ -197,8 +197,9 @@ async function refresh() {
   renderSide();
   if (sel && !S.tasks.find((t) => t.id === sel)) sel = "";
   if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
-  if ($("ov").classList.contains("show") && !document.activeElement?.id?.startsWith("code_") && !$("mUpd")?.disabled) renderSettings();
-  if (!firstRun && (!S.output || !S.ais.claude.ok)) { firstRun = true; openSettings(); }
+  if ($("ov").classList.contains("show") && !$("mUpd")?.disabled) renderSettings();
+  autoLogin();
+  if (!firstRun) { firstRun = true; if (!S.output || !S.ais.claude.ok) { chain = true; openSettings(); } }
 }
 let lastSnap = "", pendingRender = false;
 function selecting() {          // người dùng đang bôi đen chữ trong khung chat -> không vẽ lại
@@ -308,7 +309,7 @@ function workBlock(m, i) {
     ${open ? `<div class="wbody">${steps.map((s, j) => `<div class="wstep ${live && j === steps.length - 1 ? "cur" : ""}" title="${esc(s)}">${esc(s)}</div>`).join("") || "<div class='wstep'>Đang khởi động…</div>"}</div>` : ""}${subs}</div>`;
 }
 function renderTask() {
-  const t = T, live = ["running", "queued"].includes(t.status);
+  const t = T, live = ["running", "queued", "login"].includes(t.status);
   const sc0 = document.querySelector(".scroll"), wasBottom = !sc0 || sc0.scrollHeight - sc0.scrollTop - sc0.clientHeight < 80;
   const acts = [];
   if (live) acts.push(`<button data-act="pause">Tạm dừng</button>`);
@@ -322,7 +323,7 @@ function renderTask() {
     const fl = n ? `<button class="openf" data-act="open" title="${esc(T.output)}">${I.folder}Open folder · ${n} file</button>` : "";
     return `<div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${fl}</div>`;
   }).join("");
-  const queued = t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>Đang chuẩn bị…</span></div>` : "";
+  const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Claude chưa đăng nhập. Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>Đang chuẩn bị…</span></div>` : "";
   const comp = $("taskComp");
   if (!comp || comp.dataset.t !== t.id) {          // chỉ tạo ô nhập 1 lần cho mỗi task
     $("main").innerHTML = `<div class="thead" id="thead"></div><div class="scroll"><div class="thread" id="thread"></div></div>
@@ -366,7 +367,7 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-code]");
+  const el = e.target.closest("[data-sel],[data-act],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin]");
   if (!el) return;
   const d = el.dataset;
   if (d.sel) { sel = d.sel; sessionStorage.setItem("sel", sel); T = null; lastSnap = ""; files = []; renderSide(); await loadTask(); }
@@ -381,32 +382,38 @@ document.addEventListener("click", async (e) => {
     T = null; lastSnap = ""; refresh();
   }
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
-  else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; const r = await api("/api/ai/code", { ai: d.code, code: v }); toast(r.error || "Đã gửi mã, đang kiểm tra…"); }
-  else if (d.login) { await api("/api/ai/login", { ai: d.login }); S.ais[d.login].pending = "login"; renderSettings(); }
-  else if (d.test) { S.ais[d.test].pending = true; renderSettings(); await api("/api/ai/test", { ai: d.test }); S = await api("/api/state"); renderSettings(); renderSide(); }
+  else if (d.relogin) { await api("/api/ai/cancel", { ai: "claude" }); setTimeout(() => api("/api/ai/login", { ai: "claude" }), 1500); }
+  else if (d.cancel) { await api("/api/ai/cancel", { ai: d.cancel }); }
+  else if (d.login) { chain = false; S.ais[d.login].pending = "login"; renderSettings(); const r = await api("/api/ai/login", { ai: d.login, switch: !!d.switch }); if (r.error) toast(r.error); }
 });
 $("btnNew").onclick = () => { sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
 $("btnSet").onclick = () => openSettings();
 $("btnOut").onclick = () => (S.output ? api("/api/open-output", {}) : openSettings());
 /* ---------------- settings ---------------- */
 function openSettings() { form = { output: S.output }; renderSettings(); $("ov").classList.add("show"); }
+let chain = false, tried = new Set();
+function autoLogin() {      // tự mở lần lượt trang đăng nhập của các AI chưa đăng nhập
+  if (!chain || Object.values(S.ais).some((a) => a.pending)) return;
+  const next = Object.entries(S.ais).find(([k, a]) => a.installed && !a.ok && !tried.has(k));
+  if (!next) { chain = false; return; }
+  tried.add(next[0]); S.ais[next[0]].pending = "login"; api("/api/ai/login", { ai: next[0] });
+}
+function accState(k, a) {
+  if (!a.installed) return `<small class="bad">Chưa cài — bấm đúp lại file cài AI-Orchestrator (.bat)</small>`;
+  if (a.window === "logout") return `<small>Trong cửa sổ Gemini: gõ <b>/logout</b>, đăng nhập tài khoản mới trên trình duyệt, rồi đóng cửa sổ.</small>`;
+  if (a.window) return `<small>Đăng nhập trên trình duyệt, xong thì đóng cửa sổ Gemini.</small>`;
+  if (a.pending) return `<small>Đăng nhập trên tab trình duyệt vừa mở…</small>`;
+  if (a.ok) return `<small>${a.email ? esc(a.email) : "Đã đăng nhập"}</small>`;
+  return `<small class="bad">Chưa đăng nhập</small>`;
+}
 function renderSettings() {
-  const acc = Object.entries(S.ais).map(([k, a]) => {
-    const st = !a.installed ? `<small class="bad">Chưa cài — bấm đúp lại file cài AI-Orchestrator (.bat)</small>`
-      : a.code ? `<small>Đã mở trang đăng nhập Google trên trình duyệt. Đăng nhập xong, dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`
-      : a.pending === "login" ? `<small>Đang chờ đăng nhập…</small>` : a.pending ? `<small>Đang kiểm tra…</small>` : a.ok ? `<small>Sẵn sàng</small>` : a.ok === false ? `<small class="bad">Chưa đăng nhập${a.msg ? " · " + esc(a.msg) : ""}</small>` : `<small>Chưa đăng nhập</small>`;
-    return `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${a.ok && a.email ? " - " + esc(a.email) : ""}${st}</span>
-      <button class="ghost icon" data-test="${k}" title="Kiểm tra lại" aria-label="Kiểm tra lại" ${a.installed ? "" : "disabled"}>${I.refresh}</button>
-      <button data-login="${k}" ${a.installed && !a.pending ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button></div>`;
-  }).join("");
+  const acc = Object.entries(S.ais).map(([k, a]) => `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${accState(k, a)}</span>
+      ${a.pending ? `<button data-cancel="${k}">Hủy</button>` : `<button class="${a.ok ? "" : "pri"}" data-login="${k}" data-switch="${a.ok ? 1 : ""}" ${a.installed ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button>`}</div>`).join("");
   $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI</span>${acc}</div>
-    <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick">Chọn…</button></div></div>`;
+    <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>`;
   $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
-  $("oPick").onclick = async () => { const r = await api("/api/pick", {}); if (r.path) { form.output = r.path; renderSettings(); } };
-  $("mDone").onclick = async () => {
-    if (form.output !== S.output || !S.output) { const r = await api("/api/setup", form); if (r.error) return toast(r.error); }
-    closeSettings();
-  };
+  $("oPick").onclick = async () => { const r = await api("/api/pick", {}); if (r.path) { form.output = r.path; const s = await api("/api/setup", form); if (s.error) toast(s.error); else S.output = form.output; renderSettings(); } };
+  $("mDone").onclick = () => { if (!S.output) return toast("Chọn thư mục nhận kết quả"); closeSettings(); };
   $("mUpd").onclick = async () => {
     const b = $("mUpd"); b.disabled = true; b.innerHTML = '<span class="spin"></span> Đang kiểm tra…';
     const r = await api("/api/update", {}); toast(r.error || r.msg);
@@ -414,7 +421,7 @@ function renderSettings() {
     renderSettings();
   };
 }
-function closeSettings() { $("ov").classList.remove("show"); refresh(); }
+function closeSettings() { $("ov").classList.remove("show"); chain = false; refresh(); }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("ov").classList.contains("show")) closeSettings(); });
 
 addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
