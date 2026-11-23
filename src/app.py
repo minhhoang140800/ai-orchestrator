@@ -1365,9 +1365,19 @@ def fetch_update():
     import urllib.request
     if not UPDATE_BASE or VERSION == "dev":
         return ""
-    meta = json.loads(urllib.request.urlopen(UPDATE_BASE + "latest.json", timeout=20).read())
+    base = UPDATE_BASE
+    try:      # lấy mã commit mới nhất qua GitHub API rồi tải theo đúng commit đó -> không dính bộ đệm 5 phút của GitHub
+        m = re.match(r"https://raw\.githubusercontent\.com/([^/]+/[^/]+)/([^/]+)/", UPDATE_BASE)
+        req = urllib.request.Request(f"https://api.github.com/repos/{m.group(1)}/commits/{m.group(2)}",
+                                     headers={"Accept": "application/vnd.github.sha", "User-Agent": "ai-orchestrator"})
+        sha = urllib.request.urlopen(req, timeout=15).read().decode().strip()
+        if re.fullmatch(r"[0-9a-f]{40}", sha):
+            base = f"https://raw.githubusercontent.com/{m.group(1)}/{sha}/"
+    except Exception:
+        pass
+    meta = json.loads(urllib.request.urlopen(base + "latest.json", timeout=20).read())
     if meta.get("version", "") > VERSION:
-        body = urllib.request.urlopen(UPDATE_BASE + "app.py", timeout=60).read()
+        body = urllib.request.urlopen(base + "app.py", timeout=60).read()
         if hashlib.sha256(body).hexdigest() == meta.get("sha256"):
             (HOME / "app.py.new").write_bytes(body)
             UPDATED["pending"] = meta["version"]
