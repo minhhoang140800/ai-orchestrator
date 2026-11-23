@@ -198,7 +198,7 @@ async function refresh() {
   renderSide();
   if (sel && !S.tasks.find((t) => t.id === sel)) sel = "";
   if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
-  if ($("ov").classList.contains("show") && !$("mUpd")?.disabled) renderSettings();
+  if ($("ov").classList.contains("show") && !$("mUpd")?.disabled && !(document.activeElement?.id || "").startsWith("code_") && !document.querySelector("[data-code]:disabled")) renderSettings();
   autoLogin();
   if (!firstRun) { firstRun = true; if (!S.output || !S.ais.claude.ok) { chain = true; openSettings(); } }
 }
@@ -375,7 +375,7 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin]");
+  const el = e.target.closest("[data-sel],[data-act],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code]");
   if (!el) return;
   const d = el.dataset;
   if (d.sel) { sel = d.sel; sessionStorage.setItem("sel", sel); T = null; lastSnap = ""; files = []; renderSide(); await loadTask(); }
@@ -391,6 +391,7 @@ document.addEventListener("click", async (e) => {
   }
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
   else if (d.relogin) { await api("/api/ai/cancel", { ai: "claude" }); setTimeout(() => api("/api/ai/login", { ai: "claude" }), 1500); }
+  else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; el.innerHTML = '<span class="spin"></span>'; const r = await api("/api/ai/code", { ai: d.code, code: v }); if (r.error) toast(r.error); setTimeout(() => { if (el.isConnected) { el.disabled = false; el.textContent = "Gửi"; toast("Mã chưa được chấp nhận — thử lại hoặc bấm Hủy rồi Đăng nhập lại"); } }, 12000); }
   else if (d.cancel) { await api("/api/ai/cancel", { ai: d.cancel }); }
   else if (d.login) { chain = false; S.ais[d.login].pending = "login"; renderSettings(); const r = await api("/api/ai/login", { ai: d.login, switch: !!d.switch }); if (r.error) toast(r.error); }
 });
@@ -409,6 +410,7 @@ function autoLogin() {      // tự mở lần lượt trang đăng nhập của
 function accState(k, a) {
   if (!a.installed) return `<small class="bad">Chưa cài — bấm đúp lại file cài AI-Orchestrator (.bat)</small>`;
   if (a.window === "logout") return `<small>Trong cửa sổ Gemini: gõ <b>/logout</b>, đăng nhập tài khoản mới trên trình duyệt, rồi đóng cửa sổ.</small>`;
+  if (a.code) return `<small>1. Đăng nhập Google trên tab vừa mở${a.url ? ` (<a href="${esc(a.url)}" target="_blank">mở lại</a>)` : ""} → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Dán mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`;
   if (a.window) return `<small>1. Đăng nhập Google trên trình duyệt → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào <b>cửa sổ Gemini</b> (chuột phải hoặc Ctrl+V) rồi Enter. 3. Thấy email hiện lên thì đóng cửa sổ.</small>`;
   if (a.pending) return `<small>Đăng nhập trên tab trình duyệt vừa mở…</small>`;
   if (a.ok) return `<small>${a.email ? esc(a.email) : "Đã đăng nhập"}</small>`;

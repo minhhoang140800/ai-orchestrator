@@ -202,6 +202,7 @@ def load_cfg():
         a.pop("pending", None)
         a.pop("code", None)
         a.pop("window", None)
+        a.pop("url", None)
     return c
 
 
@@ -846,8 +847,121 @@ def status_loop():
         time.sleep(15)
 
 
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\\\)|\x1b[=>()][0-9A-B]?")
+
+
+class HiddenTerm:
+    """Chạy chương trình dạng cửa sổ dòng lệnh ở chế độ ẩn (terminal ảo), đọc màn hình và gõ phím thay người dùng."""
+
+    def __init__(self, args, cwd):
+        self.buf = ""
+        self.pid = None
+        if IS_WIN:
+            try:
+                from winpty import PtyProcess
+            except ImportError:      # cài thư viện terminal ảo (1 lần)
+                subprocess.run([py_console(), "-m", "pip", "install", "--user", "--quiet", "--disable-pip-version-check",
+                                "pywinpty"], capture_output=True, timeout=300, creationflags=NO_WINDOW)
+                import importlib
+                import site
+                importlib.invalidate_caches()
+                sys.path.append(site.getusersitepackages())
+                from winpty import PtyProcess
+            self.p = PtyProcess.spawn(subprocess.list2cmdline(args), cwd=cwd, dimensions=(50, 500))
+            self.pid = self.p.pid
+            self._read = lambda: self.p.read(4096)
+            self._write = self.p.write
+            self.alive = self.p.isalive
+        else:
+            import pty
+            m, s = pty.openpty()
+            self.sp = subprocess.Popen(args, cwd=cwd, stdin=s, stdout=s, stderr=s, close_fds=True, start_new_session=True)
+            os.close(s)
+            self.pid = self.sp.pid
+            self._read = lambda: os.read(m, 4096).decode("utf-8", "replace")
+            self._write = lambda t: os.write(m, t.encode())
+            self.alive = lambda: self.sp.poll() is None
+        threading.Thread(target=self._pump, daemon=True).start()
+
+    def _pump(self):
+        try:
+            while True:
+                d = self._read()
+                if not d:
+                    break
+                self.buf = (self.buf + ANSI_RE.sub("", d))[-20000:]
+        except Exception:
+            pass
+
+    def send(self, text):
+        self._write(text)
+
+    def wait_for(self, pattern, timeout):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            m = re.search(pattern, self.buf, re.I)
+            if m:
+                return m
+            if not self.alive():
+                return None
+            time.sleep(0.3)
+        return None
+
+    def poll(self):
+        return None if self.alive() else 0
+
+    def kill(self):
+        try:
+            if IS_WIN:
+                self.p.terminate(force=True)
+            else:
+                self.sp.kill()
+        except Exception:
+            pass
+
+
+def gemini_forget():
+    """Xóa phiên Antigravity đã lưu (để đổi tài khoản)."""
+    try:
+        if IS_WIN:
+            _run_hidden(["cmdkey", "/delete:gemini:antigravity"], 15)
+        f = Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+        if f.exists():
+            f.unlink()
+        if os.environ.get("FAKE_STATE"):
+            Path(os.environ["FAKE_STATE"], "agy").unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def gemini_term_login(exe, d, cur):
+    """Đăng nhập Antigravity không cần cửa sổ: tool tự chọn Google OAuth, mã xác nhận dán trên trang web của tool."""
+    term = HiddenTerm([exe], str(d))
+    LOGINS["gemini"] = term
+    m = term.wait_for(r"Select login method|not signed in|@[\w-]+\.[\w.-]+", 40)
+    if not m:
+        return False
+    if "@" in m.group(0) and "signed in" not in term.buf.lower():
+        return True                       # đã đăng nhập sẵn
+    term.wait_for(r"Select login method", 10)
+    term.send("\r")                       # chọn 1. Google OAuth -> agy mở trình duyệt
+    time.sleep(1.5)
+    u = re.search(r"https://accounts\.google\.com/\S+", re.sub(r"[\r\n]+", "", term.buf))
+    cur["url"] = u.group(0) if u else ""
+    cur["code"] = True                    # trang web hiện ô dán mã
+    t0 = time.time()
+    while time.time() - t0 < 600 and term.alive():
+        if gemini_has_cred():
+            time.sleep(2)
+            return True
+        time.sleep(1.5)
+    return gemini_has_cred()
+
+
 def gemini_has_cred():
     """Máy đã có phiên đăng nhập Antigravity chưa (Windows Credential Manager hoặc file token)."""
+    if os.environ.get("FAKE_STATE"):
+        return Path(os.environ["FAKE_STATE"], "agy").exists()
     if (Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token").exists():
         return True
     if not IS_WIN:
@@ -913,11 +1027,23 @@ def ai_login(ai, switch=False):
                 # agy -p không tự hoàn tất đăng nhập được (không có chỗ dán mã) -> chỉ chạy ẩn khi máy đã có phiên lưu
                 ok = (not switch) and gemini_has_cred() and gemini_ping(exe, 120)[0]
                 if not ok:
-                    cur["window"] = "logout" if switch else "login"
-                    if IS_WIN:      # cửa sổ agy: đăng nhập trên trình duyệt, dán mã vào cửa sổ, rồi đóng
+                    if switch:
+                        gemini_forget()
+                    try:
+                        done = gemini_term_login(exe, d, cur)
+                    except Exception as e:           # không dựng được terminal ảo -> dùng cửa sổ như cũ
+                        done = None
+                        cur["msg"] = str(e)[:150]
+                    lg = LOGINS.pop("gemini", None)
+                    if lg:
+                        lg.kill()
+                    cur.pop("code", None)
+                    cur.pop("url", None)
+                    if done is None and IS_WIN:
+                        cur["window"] = "login"
                         subprocess.run(["cmd.exe", "/c", "start", "/wait", "AI Orchestrator - Gemini", exe],
                                        cwd=str(d), creationflags=NO_WINDOW)
-                    cur.pop("window", None)
+                        cur.pop("window", None)
                     ok = gemini_has_cred() and gemini_ping(exe, 120)[0]
                 cur.update(ok=ok, msg="" if ok else "Chưa đăng nhập được", email="")
         except Exception as e:
@@ -926,6 +1052,8 @@ def ai_login(ai, switch=False):
             LOGINS.pop(ai, None)
             cur.pop("pending", None)
             cur.pop("window", None)
+            cur.pop("code", None)
+            cur.pop("url", None)
             cur["at"] = now()
             save_cfg()
 
@@ -935,8 +1063,21 @@ def ai_login(ai, switch=False):
 
 def ai_cancel(ai):
     p = LOGINS.get(ai)
-    if p:
+    if isinstance(p, HiddenTerm):
+        p.kill()
+    elif p:
         kill_tree(p)
+    return {"ok": True}
+
+
+def ai_code(ai, code):
+    p = LOGINS.get(ai)
+    code = re.sub(r"\s+", "", code or "")
+    if not isinstance(p, HiddenTerm) or not p.alive() or not code:
+        return {"error": "Phiên đăng nhập đã hết, bấm Đăng nhập lại"}
+    p.send(code)
+    time.sleep(0.3)
+    p.send("\r")
     return {"ok": True}
 
 
@@ -1088,6 +1229,8 @@ class H(BaseHTTPRequestHandler):
     def route(self, path, d):
         if path == "/api/ai/login" and d.get("ai") in AIS:
             return ai_login(d["ai"], switch=bool(d.get("switch")))
+        if path == "/api/ai/code" and d.get("ai") in AIS:
+            return ai_code(d["ai"], str(d.get("code", "")))
         if path == "/api/ai/cancel" and d.get("ai") in AIS:
             return ai_cancel(d["ai"])
         if path == "/api/export-log":
