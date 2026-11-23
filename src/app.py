@@ -186,6 +186,7 @@ def refresh_path():
 _cfg_lock = threading.Lock()
 CFG = None
 TASKS_DIR = DATA / "tasks"
+CRIT_DIR = DATA / "criteria"      # tiêu chí art theo từng game: <game>.md + <game>/refs/ (ảnh mẫu đã duyệt)
 DEFAULT_INSTRUCTIONS = ""
 OLD_DEFAULT_PREFIX = "Xưng hô: tôi - bạn. Trả lời tiếng Việt, ngắn gọn"
 
@@ -385,10 +386,22 @@ cuộc trò chuyện), rồi chạy:
   "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2
 Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worker tạo). Sửa lỗi: giao lại cùng --out.
 
-## Tạo ảnh
-Thử tạo bằng codex ($imagegen) hoặc cách khác có sẵn. Chỉ khi không thể tạo được (lỗi, hết hạn mức, không đạt sau 2 lần sửa):
-viết prompt vào OUTPUT/prompts/, rồi hỏi người dùng (question.md): "Dán prompt trong <đường dẫn> vào ChatGPT, lưu ảnh vào
-OUTPUT/images/ rồi trả lời 'xong'". Khi được trả lời: kiểm tra ảnh, nêu chỗ cần sửa hoặc nghiệm thu.
+## Tạo ảnh / art (quy trình bắt buộc)
+Thư mục tiêu chí: {CRIT_DIR}  (mỗi game: <game>.md + <game>/refs/ chứa ảnh mẫu đã duyệt). Bạn được ghi vào thư mục này.
+1. TIÊU CHÍ: tìm file tiêu chí của game. Chưa có -> tự soạn từ yêu cầu + art gốc người dùng chỉ ra (style, tỉ lệ nhân vật,
+   nét, màu, nền, kích thước/định dạng, lỗi hay gặp; đánh dấu tiêu chí nào BẮT BUỘC), lưu lại, và tóm tắt trong câu trả lời
+   để người dùng chỉnh. Người dùng góp ý về style -> cập nhật file. Người dùng duyệt ảnh nào -> chép 2-5 ảnh tiêu biểu vào refs/.
+2. LÀM THỬ: lô từ 3 ảnh trở lên -> làm 1 ảnh mẫu trước, chấm đạt mới chạy cả lô (dùng đúng prompt/cách làm của ảnh mẫu).
+3. CHẤM ĐỘC LẬP: bạn không tự nghiệm thu ảnh. Sau khi check kỹ thuật (kích thước, alpha) đạt, gọi giám khảo:
+     "{py}" "{app}" judge --images <thư mục/file ảnh> --criteria "<file tiêu chí>" [--refs "<thư mục refs>"]
+        --brief "<yêu cầu riêng: pose, số áo, level...>" --out work/J1 [--model <model>]
+   Giám khảo là phiên Claude mới, chỉ thấy ảnh + tiêu chí. Kết quả: work/J1/vN/review.json (verdict, điểm, lỗi, cách sửa từng ảnh).
+   Ảnh fail -> giao sửa đúng lỗi giám khảo nêu rồi chấm lại (cùng --out), tối đa 2 vòng; vẫn fail -> báo người dùng kèm lỗi còn lại.
+   Không cãi hay bỏ qua kết quả giám khảo; nếu thấy giám khảo sai rõ ràng, nêu trong câu trả lời để người dùng quyết.
+4. Tạo ảnh bằng codex ($imagegen) hoặc cách khác có sẵn. Chỉ khi không thể tạo được (lỗi, hết hạn mức): viết prompt vào
+   OUTPUT/prompts/, rồi hỏi người dùng (question.md): "Dán prompt trong <đường dẫn> vào ChatGPT, lưu ảnh vào OUTPUT/images/
+   rồi trả lời 'xong'". Khi được trả lời: check + chấm độc lập như trên.
+Việc không phải art (code, CSV, research): không dùng giám khảo.
 
 ## Tối ưu chất lượng, thời gian, hạn mức
 - Model nhỏ/nhanh cho việc đơn giản; model mạnh cho việc khó. Áp dụng cho subagent và worker (--model).
@@ -398,7 +411,7 @@ OUTPUT/images/ rồi trả lời 'xong'". Khi được trả lời: kiểm tra �
 
 ## Nghiệm thu
 - status completed của worker chưa phải là xong. Luôn kiểm tra file thật.
-- Đo được: "{py}" "{app}" check files|png|csv|xlsx ... (xem --help). Hình ảnh/ngữ nghĩa: mở file xem trực tiếp.
+- Đo được: "{py}" "{app}" check files|png|csv|xlsx ... (xem --help). Ngữ nghĩa: mở file xem trực tiếp. Ảnh art: theo mục "Tạo ảnh / art".
 - Lỗi: giao sửa đúng phần lỗi, tối đa 2 lần mỗi sub-task; quá thì ghi partial.
 
 ## Tiến độ
@@ -489,7 +502,8 @@ def start_run(t):
     else:
         t["session"] = str(uuid.uuid4())
         args += ["--session-id", t["session"]]
-    for f in dict.fromkeys([str(out_dir(t))] + drives()):
+    CRIT_DIR.mkdir(parents=True, exist_ok=True)
+    for f in dict.fromkeys([str(out_dir(t)), str(CRIT_DIR)] + drives()):
         args += ["--add-dir", f]
     t.update(status="running", started=now(), _pause=False, _cancel=False, _quit=False, _redirect=None)
     t["wi"] = tmsg(t, "work", "", status="running", started=now(), started_ts=time.time(), steps=[])
@@ -1060,6 +1074,10 @@ class H(BaseHTTPRequestHandler):
             return ai_login(d["ai"], switch=bool(d.get("switch")))
         if path == "/api/ai/cancel" and d.get("ai") in AIS:
             return ai_cancel(d["ai"])
+        if path == "/api/open-criteria":
+            CRIT_DIR.mkdir(parents=True, exist_ok=True)
+            open_path(CRIT_DIR)
+            return {"ok": True}
         if path == "/api/export-log":
             return export_log()
         if path == "/api/update":
@@ -1462,10 +1480,103 @@ def cmd_check(argv):
     sys.exit(0 if ok else 1)
 
 
+# ---------------------------------------------------------------- judge (Claude gọi): giám khảo độc lập cho ảnh
+JUDGE_PROMPT = """Bạn là GIÁM KHẢO độc lập chấm ảnh art cho game. Bạn KHÔNG tham gia tạo ảnh và không biết quá trình làm.
+Nhiệm vụ: chấm khắt khe từng ảnh theo TIÊU CHÍ dưới đây. Người làm thường tự chấm dễ dãi; việc của bạn là tìm lỗi.
+Khi phân vân giữa đạt và chưa đạt: chấm CHƯA ĐẠT. Không khen xã giao.
+
+Cách làm:
+1. Dùng công cụ Read mở TỪNG ảnh cần chấm{ref_note}.
+2. Với mỗi ảnh, chấm từng tiêu chí 1-5 (5 = đạt hoàn toàn) và ghi lỗi cụ thể, nhìn thấy được (vị trí, chi tiết nào sai).
+3. Ảnh "fail" nếu vi phạm bất kỳ tiêu chí BẮT BUỘC nào, hoặc có tiêu chí nào <= 2.
+
+TIÊU CHÍ:
+{criteria}
+
+YÊU CẦU RIÊNG CỦA LẦN NÀY:
+{brief}
+
+ẢNH CẦN CHẤM:
+{images}
+{refs}
+Chỉ trả về MỘT khối JSON, không thêm chữ nào khác:
+{{"overall": "pass" | "fail", "images": [{{"file": "<tên file>", "verdict": "pass" | "fail",
+"scores": {{"<tiêu chí>": 1-5}}, "issues": ["<lỗi cụ thể>"], "fix": "<chỉ dẫn sửa ngắn>"}}], "summary": "<1-2 câu>"}}"""
+IMG_EXT = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def cmd_judge(argv):
+    import argparse
+    ap = argparse.ArgumentParser(prog="judge", description="Giám khảo độc lập (phiên Claude mới) chấm ảnh theo tiêu chí")
+    ap.add_argument("--images", required=True, nargs="+", help="thư mục hoặc file ảnh cần chấm (tối đa 12 ảnh/lần)")
+    ap.add_argument("--criteria", required=True, help="file .md tiêu chí của game")
+    ap.add_argument("--refs", help="thư mục ảnh mẫu đã duyệt (tùy chọn)")
+    ap.add_argument("--brief", default="(không)", help="yêu cầu riêng của lần này: pose, số áo, kích thước...")
+    ap.add_argument("--out", required=True, help="vd work/J1")
+    ap.add_argument("--model")
+    ap.add_argument("--timeout", type=int, default=600)
+    a = ap.parse_args(argv)
+    imgs = []
+    for p in a.images:
+        p = Path(p).resolve()
+        imgs += sorted(f for f in p.iterdir() if f.suffix.lower() in IMG_EXT) if p.is_dir() else [p]
+    imgs = [f for f in imgs if f.is_file()][:12]
+    refs = sorted(f for f in Path(a.refs).resolve().iterdir() if f.suffix.lower() in IMG_EXT)[:5] if a.refs and Path(a.refs).is_dir() else []
+    out = Path(a.out).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    n = 1
+    while (out / f"v{n}").exists():
+        n += 1
+    v = out / f"v{n}"
+    v.mkdir()
+    (v / "TASK.md").write_text(f"Chấm độc lập {len(imgs)} ảnh\n\n{a.brief}", encoding="utf-8")
+    st = {"worker": "judge", "model": a.model, "out_dir": str(v)}
+    wjson(v / "status.json", {**st, "status": "running"})
+    exe = find_bin("claude")
+    crit = Path(a.criteria)
+    if not exe or not crit.is_file() or not imgs:
+        st.update(status="failed", error="Chưa cài Claude" if not exe else f"Không thấy tiêu chí {crit}" if not crit.is_file() else "Không có ảnh để chấm")
+    else:
+        prompt = JUDGE_PROMPT.format(
+            criteria=crit.read_text(encoding="utf-8")[:12000], brief=a.brief,
+            images="\n".join(f"- {f}" for f in imgs),
+            ref_note=" và các ảnh MẪU ĐÃ DUYỆT (chuẩn để so style)" if refs else "",
+            refs=("\nẢNH MẪU ĐÃ DUYỆT (chỉ để so sánh, không chấm):\n" + "\n".join(f"- {f}" for f in refs) + "\n") if refs else "")
+        cmd = [exe, "-p", prompt, "--output-format", "json", "--allowedTools", "Read,Glob"]
+        for d in dict.fromkeys([str(f.parent) for f in imgs + refs]):
+            cmd += ["--add-dir", d]
+        if a.model:
+            cmd += ["--model", a.model]
+        t0 = time.time()
+        code, so, se, to = run_limited(cmd, v, a.timeout)
+        st.update(seconds=round(time.time() - t0), exit_code=code)
+        (v / "worker.log").write_text(f"--- stdout ---\n{so}\n--- stderr ---\n{se}\n", encoding="utf-8")
+        verdict = None
+        try:
+            text = json.loads(so).get("result", "")
+            verdict = json.loads(text[text.index("{"):text.rindex("}") + 1])
+        except Exception:
+            pass
+        if to:
+            st.update(status="timeout", error=f"Quá {a.timeout}s")
+        elif not isinstance(verdict, dict) or "images" not in verdict:
+            st.update(status="failed", error="Giám khảo không trả kết quả đọc được: " + (se or so).strip()[-300:])
+        else:
+            bad = [i for i in verdict["images"] if i.get("verdict") != "pass"]
+            verdict["overall"] = "fail" if bad or verdict.get("overall") != "pass" else "pass"
+            wjson(v / "review.json", verdict)
+            st.update(status="completed" if verdict["overall"] == "pass" else "rejected",
+                      error="" if not bad else f"{len(bad)}/{len(verdict['images'])} ảnh chưa đạt", review=verdict)
+    wjson(v / "status.json", {k: x for k, x in st.items() if k != "review"})
+    print(json.dumps(st, ensure_ascii=False))
+    sys.exit(0 if st["status"] == "completed" else 1)
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "worker":
         cmd_worker(sys.argv[2:])
     elif len(sys.argv) > 1 and sys.argv[1] == "check":
         cmd_check(sys.argv[2:])
+    elif len(sys.argv) > 1 and sys.argv[1] == "judge":
+        cmd_judge(sys.argv[2:])
     else:
         serve(background="--background" in sys.argv)
