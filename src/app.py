@@ -2520,9 +2520,6 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/ai/refresh":
             return refresh_status()
         if path == "/api/usage":
-            if d.get("ai") in ("claude", "codex") and "in_plan" in d:
-                CFG.setdefault("in_plan", {})[d["ai"]] = bool(d["in_plan"])
-                save_cfg()
             return usage_state(force=bool(d.get("force")))
         if path == "/api/memory":
             CFG["instructions"] = str(d.get("instructions") or "")[:20000]
@@ -3529,7 +3526,7 @@ def cmd_worker(argv):
     if bad_edit:
         st.update(status="failed", error=bad_edit)
     elif ub:
-        st.update(status="limit", reset=ub, error=("Gói đã dùng gần hết — Maestro không chạy để không dùng credit (bật 'Chỉ dùng trong gói'); "
+        st.update(status="limit", reset=ub, error=("Gói đã dùng gần hết — Maestro tạm dừng AI này để không dùng credit; "
                                                    "dùng lại lúc " + datetime.datetime.fromtimestamp(ub).strftime("%H:%M %d/%m")))
     elif not task.exists():
         st.update(status="failed", error=f"Không thấy {task}")
@@ -3848,8 +3845,8 @@ def usage_refresh(force=False, only=None):
 
 
 def in_plan_only(ai):
-    c = (CFG or rjson(CFG_FILE, {}) or {}).get("in_plan") or {}
-    return c.get(ai, True) is not False
+    """Luôn chỉ dùng trong gói: không bao giờ để AI tràn sang credit / extra usage (mặc định, không tắt được)."""
+    return True
 
 
 def usage_block(ai, fresh=False):

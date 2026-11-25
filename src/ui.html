@@ -1216,13 +1216,12 @@ async function openUsage(force) {
       ? `<div class="ur"><span>${k === "claude" ? "Extra usage" : "Credits"}</span><span>${k === "claude" ? "bật" : a.credits.unlimited ? "∞" : a.credits.balance}</span></div>` : "";
     const body = a.known ? leftRow("Phiên hiện tại", a.five_hour) + leftRow("Tuần này", a.week) + cr : `<div class="note">Chưa đọc được</div>`;
     const lim = a.limit_until ? `<div class="ur low"><span>Hết lượt</span><span>${new Date(a.limit_until * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</span></div>` : "";
-    const sw = k in (u.in_plan || {}) ? `<label class="sw" title="Gói còn ≤2% thì Maestro dừng AI này tới giờ làm mới, không dùng credit/extra usage"><input type="checkbox" data-inplan="${k}" ${u.in_plan[k] ? "checked" : ""}> Chỉ dùng trong gói</label>` : "";
+    const sw = "";                       // "chỉ dùng trong gói" luôn bật, không có công tắc
     return `<div class="ua"><div class="un">${esc(name)}${plan(k)}<span style="flex:1"></span>${MANAGE[k] ? `<a href="${MANAGE[k]}" target="_blank" rel="noopener" title="Quản lý trên trang ${esc(name)}" aria-label="Quản lý">${lu("external-link")}</a>` : ""}</div>${body}${lim}${sw}</div>`;
   };
   m.innerHTML = `<div class="uh"><b>Mức dùng</b><span style="flex:1"></span><button class="ghost icon" id="uRef" title="Kiểm tra lại · cập nhật ${new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}" aria-label="Kiểm tra lại">${I.refresh}</button></div>
     ${block("claude", "Claude")}${block("codex", "ChatGPT")}${block("gemini", "Gemini")}`;
   $("uRef").onclick = (e) => { e.stopPropagation(); $("uRef").innerHTML = '<span class="spin"></span>'; openUsage(true); };
-  m.querySelectorAll("[data-inplan]").forEach((c) => c.onchange = async () => { await api("/api/usage", { ai: c.dataset.inplan, in_plan: c.checked }); toast(c.checked ? "Chỉ dùng trong gói: bật" : "Đã tắt — khi hết gói, AI này có thể dùng credit/extra usage"); });
 }
 $("btnUse").onclick = (e) => { e.stopPropagation(); const m = $("uMenu"); if (m.classList.contains("show")) return m.classList.remove("show"); openUsage(false); };
 $("uMenu").onclick = (e) => e.stopPropagation();
