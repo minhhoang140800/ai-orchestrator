@@ -178,7 +178,7 @@ main{background:var(--bg)}
 .msel{position:relative}.mbtn{display:inline-flex;align-items:center;gap:2px;border:0;background:transparent;border-radius:999px;padding:7px 8px 7px 12px;font:inherit;font-weight:500;color:var(--mute);cursor:pointer}.mbtn:hover{background:rgba(31,31,31,.08)}.mbtn .i{width:18px;height:18px}
 .mmenu{display:none;position:absolute;right:0;bottom:calc(100% + 8px);min-width:300px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.16);padding:8px;z-index:20}.mmenu.show{display:block}
 .mmenu button{display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;border:0;background:transparent;border-radius:12px;padding:10px 12px;font:inherit;color:var(--ink);cursor:pointer}.mmenu button:hover{background:rgba(31,31,31,.06)}.mmenu button.on{outline:1.5px solid var(--ink)}
-.mmenu .ck{width:16px;flex:none}.mmenu b{display:block;font-weight:500}.mmenu small{display:block;color:var(--mute);font-size:13px;margin-top:2px}
+.mmenu .ck{width:20px;flex:none;margin-top:1px}.mmenu .ck .i{width:20px;height:20px}.mbtn{gap:6px}.mmenu b{display:block;font-weight:500}.mmenu small{display:block;color:var(--mute);font-size:13px;margin-top:2px}
 #oldModeSel{border:0;background:transparent;border-radius:999px;padding:6px 10px;font:inherit;color:var(--mute);cursor:pointer}#modeSel:hover{background:rgba(31,31,31,.08)}
 </style>
 </head>
@@ -320,12 +320,16 @@ function composer(id, ph) {
       <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="mmenu" id="modeMenu" role="menu"></div></span>
       <button class="pri icon" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
-const MODE = { fast: ["Nhanh", "Xong sớm nhất, dùng nhiều hạn mức hơn"], balanced: ["Cân bằng", "Mặc định: việc dễ dùng model nhỏ, việc khó dùng model mạnh"], saver: ["Tiết kiệm", "Chậm hơn, dùng ít hạn mức nhất"] };
+const MODE = { fast: ["Pro", "Model mạnh nhất, xong sớm nhất, tốn hạn mức hơn"], balanced: ["Balanced", "Mặc định: việc dễ dùng model nhỏ, việc khó dùng model mạnh"], saver: ["Eco", "Chậm hơn, dùng ít hạn mức nhất"] };
+const MICON = {
+  fast: '<svg class="i" viewBox="0 0 24 24"><path d="M9.5 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"/><path d="M12.5 9h2a2 2 0 0 0 2-2M12.5 14h3a2 2 0 0 1 2 2v1M16.5 11h3"/></svg>',
+  balanced: '<svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 4v11.8M18 8.2a8 8 0 0 1-8 8H8.2"/></svg>',
+  saver: '<svg class="i" viewBox="0 0 24 24"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg>' };
 let curMode = "balanced";
 function paintMode() {
   if (!$("modeBtn")) return;
-  $("modeBtn").innerHTML = `${MODE[curMode][0]}<svg class="i" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>`;
-  $("modeMenu").innerHTML = Object.entries(MODE).map(([k, [n, d]]) => `<button data-mode="${k}" class="${k === curMode ? "on" : ""}" role="menuitem"><span class="ck">${k === curMode ? "✓" : ""}</span><span><b>${n}</b><small>${d}</small></span></button>`).join("");
+  $("modeBtn").innerHTML = `${MICON[curMode]}${MODE[curMode][0]}<svg class="i" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>`;
+  $("modeMenu").innerHTML = Object.entries(MODE).map(([k, [n, d]]) => `<button data-mode="${k}" class="${k === curMode ? "on" : ""}" role="menuitem"><span class="ck">${MICON[k]}</span><span><b>${n}</b><small>${d}</small></span></button>`).join("");
 }
 document.addEventListener("click", () => $("modeMenu")?.classList.remove("show"));
 const STOP = '<svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>';

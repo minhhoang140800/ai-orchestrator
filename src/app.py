@@ -70,7 +70,7 @@ CPU, RAM_GB = machine()
 # mỗi task đang chạy cần khoảng 4 luồng + 4 GB (Claude Code + worker); tối thiểu 1, tối đa 4
 MAX_RUNNING = max(1, min(4, CPU // 4, int(RAM_GB // 4)))
 LOW_SPEC = MAX_RUNNING == 1
-MODES = {"fast": "Nhanh", "balanced": "Cân bằng", "saver": "Tiết kiệm"}
+MODES = {"fast": "Pro (nhanh, mạnh nhất)", "balanced": "Balanced (cân bằng)", "saver": "Eco (tiết kiệm hạn mức)"}
 BELOW_NORMAL = 0x00004000 if IS_WIN else 0     # ưu tiên thấp: máy vẫn mượt khi AI đang chạy
 PING = "Reply with the single word PONG and nothing else."
 
