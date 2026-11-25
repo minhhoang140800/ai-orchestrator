@@ -1,9 +1,10 @@
-# AI Orchestrator
+# Maestro
 
-Claude làm PM, giao việc cho ChatGPT (Codex CLI) và Gemini (Antigravity CLI) trên máy Windows.
+Claude điều phối, giao việc cho ChatGPT (Codex CLI) và Gemini (Antigravity CLI) ngay trên máy (Windows, Mac).
 
-- **Cài:** tải file `AI-Orchestrator_v<số mới nhất>.bat`, bấm đúp. Sau đó mở http://ai-orchestrator.localhost/ (app tự chạy nền khi bật máy).
-- **Cập nhật:** app tự lấy `app.py` mới từ repo này (kiểm tra `latest.json` mỗi 15 phút và khi bật máy), áp dụng khi không có task đang chạy.
-- Repo chỉ chứa code. Task, file, đăng nhập nằm trên máy người dùng (`%LOCALAPPDATA%\AIOrchestrator`).
+- **Cài Windows:** tải `Maestro_v<bản mới nhất>.bat`, bấm đúp. Mở http://ai-orchestrator.localhost/
+- **Cài Mac:** tải `Maestro_mac.zip`, giải nén, chuột phải `Maestro_setup.command` → Open.
+- **Cập nhật:** nút Cập nhật trong Cài đặt (app lấy `app.py` mới theo `latest.json`).
+- Repo chỉ chứa code. Task, file, đăng nhập nằm trên máy người dùng.
 
-`src/` là mã nguồn; `python src/build.py` (đặt `AIO_REPO=owner/repo`) tạo `app.py`, `latest.json`, `AI-Orchestrator.bat`.
+Phát triển: xem `CLAUDE.md`. `python src/release.py` để build và phát hành.
