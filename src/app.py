@@ -537,7 +537,7 @@ def write_claude_md(t):
     mode_rules = MODE_RULES[mode].format(n="1 (máy cấu hình thấp)" if LOW_SPEC else str(min(3, MAX_RUNNING + 1)))
     on = [w for w in ("codex", "gemini") if find_bin(AIS[w]["bin"]) and CFG["ais"].get(w, {}).get("ok") is not False]
     desc = {"codex": "codex — ChatGPT/Codex: code, CSV/Excel, script, tạo ảnh ($imagegen)",
-            "gemini": "gemini — Gemini/Antigravity: research, tổng hợp, phân tích, ý tưởng (chỉ trả văn bản)"}
+            "gemini": "gemini — Gemini/Antigravity: research web, tổng hợp, ý tưởng; tạo/sửa ảnh, tạo file khi thêm --write"}
     pj = project_of(t)
     brain_md = (f"""## Dự án: {pj['name']} — bộ nhớ dự án (người dùng đã duyệt, áp dụng cho mọi task của dự án)
 {pj.get('brain', '').strip() or '(chưa có)'}
@@ -580,8 +580,24 @@ Worker lỗi đăng nhập/không chạy: coi như không có, chuyển worker k
 Giao sub-task: viết yêu cầu đầy đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy
 cuộc trò chuyện), rồi chạy:
   "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--model <model>] [--timeout 900]
-  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2
+  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write]   (--write: cho Gemini tạo file/ảnh trong work/S2/vN)
 Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worker tạo). Sửa lỗi: giao lại cùng --out.
+
+## Chia việc (Gemini nhanh, GPT chính xác hơn) — "Gemini trước, lỗi mới GPT"
+- Research web, đối thủ, xu hướng: Gemini.
+- Idea, kịch bản, storyboard chữ, brief: Turbo/Eco: Gemini. Balanced: chia đều — Gemini phần cần nhanh/rộng, GPT phần
+  cần sắc (vd idea chính, câu chữ hook); KHÔNG dồn hết cho GPT. Pro: GPT.
+- Code, script, phân tích số liệu: GPT (việc rất đơn giản ở Turbo/Eco: Gemini).
+- Tạo/sửa ảnh: Gemini trước (nhanh, đẹp). Check kỹ thuật + tự xem 1 lần: sai yêu cầu (sai size, sai nội dung, chữ lỗi,
+  thiếu chi tiết bắt buộc) -> chỉ phần lỗi giao GPT sửa/tạo lại. Ở Pro: GPT ngay nếu cần độ chính xác cao.
+- Phần nào Gemini làm chưa đạt -> chỉ giao lại PHẦN đó cho GPT, không làm lại cả bài.
+- Việc phụ thuộc nhau (vd idea cần dựa trên research): giao research trước; còn lại chạy song song.
+
+## Tốc độ (quan trọng)
+- Sản phẩm là VĂN BẢN do worker viết: dặn worker ghi TOÀN BỘ nội dung vào câu trả lời cuối (result.md), không chỉ liệt kê file.
+- Không chép lại/viết lại dài nội dung worker đã viết đạt. Chỉ ghép + sửa chỗ cần. Không viết bản nháp riêng rồi viết lại
+  lần nữa ở câu trả lời: viết nội dung cuối MỘT lần (câu trả lời cuối hoặc 1 file trong OUTPUT).
+- Ít bước nhỏ lẻ: gộp nhiều lệnh đọc/kiểm tra vào một lần chạy.
 
 ## Quy trình nghiệm thu
 1. TIÊU CHÍ: trước khi làm, viết tasks/criteria.md từ chính yêu cầu của người dùng (sản phẩm phải có gì, đúng gì, định dạng/
@@ -620,7 +636,7 @@ gói Free/thiếu model thì tự lùi model có sẵn) và tự hạ khi sắp 
 KHÔNG truyền --model cho worker trừ khi có lý do rõ. {"Bước QUÁ khó (đã thử mà không ra): ghi xhigh vào tasks/effort.txt -> lượt sau bạn và worker chạy mức cao nhất (Gemini Neon high)." if t.get('mode') == 'fast' else ""}
 
 ## Tạo ảnh
-Tạo bằng codex ($imagegen) hoặc cách khác có sẵn. Chỉ khi không thể tạo được (lỗi, hết hạn mức): viết prompt vào
+Tạo bằng gemini trước (theo mục Chia việc), lỗi thì codex ($imagegen), hoặc cách khác có sẵn. Chỉ khi không thể tạo được (lỗi, hết hạn mức): viết prompt vào
 OUTPUT/prompts/, rồi hỏi người dùng (question.md): "Dán prompt trong <đường dẫn> vào ChatGPT, lưu ảnh vào OUTPUT/images/
 rồi trả lời 'xong'". Khi được trả lời: check + chấm độc lập như trên.
 
@@ -2539,6 +2555,7 @@ def cmd_worker(argv):
     ap.add_argument("--model")
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--vdir")
+    ap.add_argument("--write", action="store_true")
     a = ap.parse_args(argv)
     proj = Path.cwd()
     task = Path(a.task).resolve()
@@ -2575,7 +2592,8 @@ def cmd_worker(argv):
         if a.worker == "codex":
             prompt = ("Thực hiện đúng yêu cầu trong TASK.md ở thư mục hiện tại. "
                       f"File đầu vào (chỉ đọc): {os.environ.get('AIO_INPUT') or proj / 'input'}. Ghi mọi file kết quả vào thư mục hiện tại. "
-                      "Cuối cùng liệt kê file đã tạo và cách đã kiểm tra.")
+                      "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung sản phẩm (không chỉ tóm tắt); "
+                      "nếu tạo file thì liệt kê file đã tạo và cách đã kiểm tra.")
             cmd = [exe, "exec", "--skip-git-repo-check", *CODEX_SANDBOX, "-C", str(v),
                    "--output-last-message", str(v / "result.md")]
             mods, eff = pick_model("codex", os.environ.get("AIO_MODE", "balanced"), os.environ.get("AIO_HARD") == "1")
@@ -2586,17 +2604,27 @@ def cmd_worker(argv):
             cwd = v
         else:
             gm, _ = pick_model("gemini", os.environ.get("AIO_MODE", "balanced"), os.environ.get("AIO_HARD") == "1")
-            cmd = [exe, "-p", text, "--output-format", "json"]
-            cands = ([cmd + ["--model", a.model or gm]] if (a.model or gm) else []) + [cmd]
+            inp = os.environ.get("AIO_INPUT") or str(proj / "input")
+            gtext = (f"{text}\n\n---\nFile đầu vào (chỉ đọc): {inp}. Lưu mọi file kết quả (ảnh, tài liệu) vào thư mục hiện tại: {v}. "
+                     "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung; nếu tạo file thì liệt kê tên file.")
+            cmd = [exe, "-p", gtext, "--output-format", "json", "--add-dir", str(proj)]
+            if os.path.isdir(inp):
+                cmd += ["--add-dir", inp]
+            if a.write:                     # cho Gemini tự ghi file/ảnh không cần hỏi (chỉ dùng khi task cần tạo file)
+                cmd += ["--dangerously-skip-permissions"]
+            plain = [exe, "-p", gtext, "--output-format", "json"] + (["--dangerously-skip-permissions"] if a.write else [])
+            cands = ([cmd + ["--model", a.model or gm]] if (a.model or gm) else []) + [cmd, plain]   # cờ không hỗ trợ -> bản đơn giản
             cmd = cands[0]
-            cwd = proj
+            cwd = v
         t0 = time.time()
         for i_, cmd in enumerate(cands):
             code, so, se, to = run_limited(cmd, cwd, a.timeout)
             low_ = (so + se).lower()
-            bad_model = code != 0 and "model" in low_ and any(k in low_ for k in (
-                "not found", "not supported", "does not exist", "invalid", "unknown", "not available", "no access",
-                "flag provided but not defined"))
+            bad_flag = code != 0 and ("flag provided but not defined" in low_ or "unknown flag" in low_ or "unknown option" in low_)
+            bad_model = code != 0 and not bad_flag and "model" in low_ and any(k in low_ for k in (
+                "not found", "not supported", "does not exist", "invalid", "unknown", "not available", "no access"))
+            if bad_flag and i_ < len(cands) - 1:
+                continue
             if bad_model:                       # nhớ model không dùng được để lần sau không thử lại (đỡ chậm)
                 um = next((cmd[j + 1] for j in range(len(cmd) - 1) if cmd[j] in ("-m", "--model")), None)
                 if um:
