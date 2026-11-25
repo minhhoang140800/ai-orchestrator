@@ -858,7 +858,7 @@ def scheduler():
         time.sleep(1)
 
 
-def act(tid, action, text="", files=None):
+def act(tid, action, text="", files=None, template=""):
     t = TASKS.get(tid)
     if not t:
         return {"error": "Không tìm thấy task"}
@@ -881,7 +881,13 @@ def act(tid, action, text="", files=None):
         elif action == "resume" and s in ("paused", "failed"):
             t["status"] = "queued"
             t.setdefault("next", {"kind": "resume"})
-        elif action == "send" and (text or files):
+        elif action == "send" and (text or files or template):
+            tp = next((x for x in templates() if x["id"] == template), None)
+            if tp:                                     # chọn template trong task cũ: áp quy trình mẫu cho lượt này
+                t["template"] = tp
+                text = (f"[Dùng template: {tp['name']}] " + text).strip()
+                if wdir(t).exists():
+                    write_claude_md(t)
             tmsg(t, "user", text, files=files)
             if s == "running":                         # tin gấp: ngắt, Claude điều chỉnh rồi làm tiếp
                 t["_redirect"] = {"kind": "urgent", "text": text, "files": files}
@@ -1724,7 +1730,7 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/task/submit":
             return submit_task(d.get("id", ""), d.get("files", []))
         if path == "/api/task/act":
-            return act(d.get("id", ""), d.get("action", ""), d.get("text", ""), d.get("files"))
+            return act(d.get("id", ""), d.get("action", ""), d.get("text", ""), d.get("files"), d.get("template", ""))
         if path == "/api/task/file":
             return open_task_file(d.get("id", ""), d.get("path", ""))
         if path == "/api/quit":

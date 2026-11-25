@@ -384,10 +384,10 @@ function renderSide() {
 function composer(id, ph) {
   return `<div class="comp" id="${id}"><div class="atts" id="atts"></div>
     <textarea id="txt" placeholder="${ph}" aria-label="Tin nhắn"></textarea>
-    <div class="bar"><span class="msel"><button class="ghost" id="bFile" title="Đính kèm (hoặc dán / kéo thả)" aria-label="Đính kèm file">${I.attach}Đính kèm</button>${id === "homeComp" ? `<div class="pop tmenu" id="tplMenu" role="menu"></div>` : ""}</span>
+    <div class="bar"><span class="msel"><button class="ghost" id="bFile" title="Đính kèm (hoặc dán / kéo thả)" aria-label="Đính kèm file">${I.attach}Đính kèm</button><div class="pop tmenu" id="tplMenu" role="menu"></div></span>
       <span style="flex:1"></span><span class="hint" id="cHint"></span>
       <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="pop mmenu" id="modeMenu" role="menu"></div></span>
-      <button class="pri" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${id === "homeComp" ? "Chạy task" : ""}${I.send}</button></div></div>`;
+      <button class="pri sq" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
 const MODE = { fast: ["Pro", "Opus, chấm kỹ, tốn hạn mức hơn"], balanced: ["Balanced", "Sonnet, Opus cho bước khó"], saver: ["Eco", "Ít hạn mức nhất, chậm hơn"] };
 const MICON = {
@@ -403,7 +403,7 @@ function paintMode() {
 document.addEventListener("click", () => $("modeMenu")?.classList.remove("show"));
 const STOP = '<svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>';
 function stopMode() { return !!(T && $("taskComp") && T.status === "running" && !$("txt").value.trim() && !files.length); }
-function sendIcon() { const b = $("bSend"); if (!b || b.disabled) return; const st = stopMode(); b.innerHTML = st ? STOP : ($("homeComp") ? "Chạy task" : "") + I.send; b.classList.toggle("sq", !$("homeComp")); b.title = st ? "Dừng và hủy task đang làm" : "Gửi (Enter · Shift+Enter xuống dòng)"; }
+function sendIcon() { const b = $("bSend"); if (!b || b.disabled) return; const st = stopMode(); b.innerHTML = st ? STOP : I.send; b.classList.add("sq"); b.title = st ? "Dừng và hủy task đang làm" : "Gửi (Enter · Shift+Enter xuống dòng)"; }
 function bindComposer(onSend) {
   const c = document.querySelector(".comp"), ta = $("txt");
   $("bFile").onclick = () => $("fileIn").click();
@@ -456,7 +456,7 @@ function renderAtts() {
   paintTpl(); sendIcon();
 }
 $("fileIn").onchange = (e) => { files.push(...e.target.files); e.target.value = ""; renderAtts(); };
-function busy(on, label) { const b = $("bSend"); if (!b) return; b.disabled = on; b.innerHTML = on ? `<span class="spin"></span>` : ($("homeComp") ? "Chạy task" : "") + I.send; $("cHint").textContent = label || ""; if (!on) sendIcon(); }
+function busy(on, label) { const b = $("bSend"); if (!b) return; b.disabled = on; b.innerHTML = on ? `<span class="spin"></span>` : I.send; $("cHint").textContent = label || ""; if (!on) sendIcon(); }
 
 /* ---------------- lịch sử task + file kết quả ---------------- */
 const fsize = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
@@ -626,7 +626,7 @@ function renderTask() {
     $("main").innerHTML = `<div class="thead" id="thead"></div><div id="decbar"></div><div class="scroll"><div class="thread" id="thread"></div></div>
       <div class="compwrap">${composer("taskComp", PH_MORE)}</div>`;
     $("taskComp").dataset.t = t.id;
-    bindComposer(sendMore);
+    bindComposer(sendMore); curTpl = ""; bindTpl();
   }
   $("thead").innerHTML = `<span class="pill ${t.status}">${ST[t.status]}</span>
       <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1><button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
@@ -651,14 +651,14 @@ function startRename() {
   inp.onblur = () => done(true);
 }
 async function sendMore() {
-  const text = $("txt").value.trim(); if (!text && !files.length) return $("txt").focus();
+  const text = $("txt").value.trim(); if (!text && !files.length && !curTpl) return $("txt").focus();
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   busy(true);
   try {
     const names = [];
     for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(T.id, f)); }
-    const r = await api("/api/task/act", { id: T.id, action: "send", text, files: names }); if (r.error) throw new Error(r.error);
-    files = []; $("txt").value = ""; fit($("txt")); renderAtts(); busy(false); T = null; lastSnap = ""; await refresh(); kick();
+    const r = await api("/api/task/act", { id: T.id, action: "send", text, files: names, template: curTpl }); if (r.error) throw new Error(r.error);
+    files = []; curTpl = ""; $("txt").value = ""; $("txt").placeholder = PH_MORE; fit($("txt")); renderAtts(); busy(false); T = null; lastSnap = ""; await refresh(); kick();
   } catch (e) { toast(e.message); busy(false); }
 }
 setInterval(() => {   // đồng hồ "Đang làm"
@@ -686,7 +686,7 @@ document.addEventListener("click", async (e) => {
   }
   else if (d.savet) { const n = prompt("Tên template:", T.title); if (n === null) return; const r = await api("/api/template", { action: "save", task: T.id, name: n }); toast(r.error || "Đã lưu template. Gõ / ở Task mới để dùng."); T = null; lastSnap = ""; await refresh(); }
   else if (d.bacc || d.brej) { const r = await api("/api/project", { action: d.bacc ? "accept" : "reject", id: T.project, task: T.id, idx: +(d.bacc || d.brej) }); if (r.error) toast(r.error); T = null; lastSnap = ""; await refresh(); }
-  else if (d.untpl) { curTpl = ""; paintTpl(); if ($("txt")) $("txt").placeholder = PH_NEW; }
+  else if (d.untpl) { curTpl = ""; paintTpl(); if ($("txt")) $("txt").placeholder = $("homeComp") ? PH_NEW : PH_MORE; }
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
   else if (d.relogin) { await api("/api/ai/cancel", { ai: "claude" }); setTimeout(() => api("/api/ai/login", { ai: "claude" }), 1500); }
   else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; el.innerHTML = '<span class="spin"></span>'; const r = await api("/api/ai/code", { ai: d.code, code: v }); if (r.error) toast(r.error); setTimeout(() => { if (el.isConnected) { el.disabled = false; el.textContent = "Gửi"; toast("Mã chưa được chấp nhận — thử lại hoặc bấm Hủy rồi Đăng nhập lại"); } }, 12000); }
