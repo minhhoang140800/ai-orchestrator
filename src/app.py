@@ -191,26 +191,49 @@ def open_path(p):
 
 
 def refresh_path():
-    """Lấy PATH mới nhất từ registry (CLI vừa cài xong vẫn tìm thấy)."""
+    """Lấy PATH mới nhất từ registry (CLI vừa cài xong vẫn tìm thấy) + tìm Node.js ở các nơi hay cài
+    (Program Files, nvm, volta, fnm, scoop...) để Codex (chạy bằng node) luôn chạy được."""
     if not IS_WIN:
         return
-    extra = [os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "nodejs"),
-             os.path.join(os.environ.get("APPDATA", ""), "npm")]
-    os.environ["PATH"] = os.environ.get("PATH", "") + ";" + ";".join(x for x in extra if os.path.isdir(x))
+    import glob
     try:
         import winreg
-        parts = []
+        vals = {}
         for root, key in [(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
                           (winreg.HKEY_CURRENT_USER, "Environment")]:
             try:
                 with winreg.OpenKey(root, key) as k:
-                    parts.append(os.path.expandvars(winreg.QueryValueEx(k, "Path")[0]))
+                    for n in range(winreg.QueryInfoKey(k)[1]):
+                        name, v, _ = winreg.EnumValue(k, n)
+                        if isinstance(v, str):
+                            vals.setdefault(name.upper(), []).append(v)
             except OSError:
                 pass
+        for name, vs in vals.items():          # biến như NVM_SYMLINK, NVM_HOME phải có trước khi mở rộng PATH
+            if name != "PATH" and name not in (k.upper() for k in os.environ):
+                os.environ[name] = os.path.expandvars(vs[-1])
+        parts = [os.path.expandvars(v) for v in vals.get("PATH", [])]
         if parts:
             os.environ["PATH"] = ";".join(parts + [os.environ.get("PATH", "")])
     except Exception:
         pass
+    if shutil.which("node"):
+        return
+    E = os.environ.get
+    cands = [os.path.join(E("ProgramFiles", r"C:\Program Files"), "nodejs"), os.path.join(E("ProgramFiles(x86)", ""), "nodejs"),
+             os.path.join(E("LOCALAPPDATA", ""), "Programs", "nodejs"), E("NVM_SYMLINK", ""), os.path.join(E("LOCALAPPDATA", ""), "Volta", "bin"),
+             os.path.join(E("ProgramFiles", ""), "Volta"), os.path.join(E("USERPROFILE", ""), "scoop", "apps", "nodejs", "current"),
+             os.path.join(E("USERPROFILE", ""), "scoop", "apps", "nodejs-lts", "current"), r"C:\ProgramData\chocolatey\bin"]
+    cands += sorted(glob.glob(os.path.join(E("APPDATA", ""), "nvm", "v*")), reverse=True)
+    cands += sorted(glob.glob(os.path.join(E("LOCALAPPDATA", ""), "fnm_multishells", "*")), reverse=True)[:1]
+    try:
+        cands.insert(0, (HOME / "node_dir.txt").read_text("utf-8-sig").strip())     # file cài ghi lại chỗ node
+    except Exception:
+        pass
+    for d in cands:
+        if d and os.path.isfile(os.path.join(d, "node.exe")):
+            os.environ["PATH"] = d + ";" + os.environ.get("PATH", "")
+            return
 
 
 # ---------------------------------------------------------------- config
@@ -1486,7 +1509,9 @@ def ai_login(ai, switch=False):
                 ok = ai_status(ai).get("ok")
                 if not ok:
                     dlog(f"{ai} login failed rc={p.poll()}; output:\n" + logf.read_text("utf-8", "replace")[-1500:])
-                    cur["msg"] = "Đăng nhập chưa xong. Bấm Đăng nhập lại; nếu vẫn lỗi, Export log gửi tôi."
+                    lo = logf.read_text("utf-8", "replace").lower()
+                    cur["msg"] = ("Thiếu Node.js — chạy lại Maestro_setup.bat" if "node" in lo and "not recognized" in lo
+                                  else "Đăng nhập chưa xong. Bấm Đăng nhập lại; nếu vẫn lỗi, Export log gửi tôi.")
             else:
                 # agy -p không tự hoàn tất đăng nhập được (không có chỗ dán mã) -> chỉ chạy ẩn khi máy đã có phiên lưu
                 ok = (not switch) and gemini_has_cred() and gemini_ping(exe, 120)[0]

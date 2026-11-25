@@ -217,6 +217,9 @@ main{background:var(--bg)}
 .opv{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.opv a{display:flex;flex-direction:column;gap:4px;width:150px;color:var(--mute);font-size:12px;text-decoration:none}
 .opv img{width:150px;height:150px;object-fit:contain;background:var(--soft);border:1px solid var(--line);border-radius:6px}.opv a:hover img{border-color:#BDBDBD}
 .opv span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lb{position:fixed;inset:0;background:rgba(20,20,20,.72);display:none;align-items:center;justify-content:center;z-index:30;padding:32px}.lb.show{display:flex}
+.lb img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;background:#fff;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+.lbx{position:absolute;top:14px;right:18px;border:0;background:rgba(255,255,255,.15);color:#fff;font-size:22px;width:36px;height:36px;border-radius:6px;padding:0}
 .smenu{min-width:160px}.smenu button{align-items:center;font-size:13px}
 .claude.stage{margin-top:12px;color:var(--ink)}.claude.stage .txt{border-left:2px solid var(--line);padding-left:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -247,6 +250,7 @@ main{background:var(--bg)}
 <div id="toast" role="status"></div>
 <div class="pop pmenu" id="pMenu" role="menu" style="position:fixed"></div>
 <div class="pop smenu" id="sMenu" role="menu" style="position:fixed"></div>
+<div class="lb" id="lb"><img id="lbImg" alt=""><button class="lbx" aria-label="Đóng">×</button></div>
 <div class="pop smenu" id="cMenu" role="menu" style="position:fixed"><button data-co="open">Mở</button><button data-co="reveal">Mở vị trí file</button><button data-co="copy">Copy ảnh</button><button data-co="path">Copy đường dẫn</button></div>
 <input type="file" id="fileIn" multiple hidden>
 
@@ -377,6 +381,12 @@ $("tlist").addEventListener("click", (e) => {
   m.innerHTML = `<button data-sm="pin">${I.pin}${t && t.pinned ? "Bỏ ghim" : "Pin"}</button><button data-sm="rename">${I.edit}Rename</button><button data-sm="delete" style="color:var(--bad)">${I.trash}Delete</button>`;
   m.style.left = r.left + "px"; m.style.top = r.bottom + 4 + "px"; m.classList.add("show");
 }, true);
+document.addEventListener("click", (e) => {      // bấm ảnh kết quả: xem lớn ngay trong trang
+  const a = e.target.closest("[data-lb]"); if (!a) return; e.preventDefault(); e.stopPropagation();
+  $("lbImg").src = a.getAttribute("href"); $("lb").classList.add("show");
+}, true);
+$("lb").onclick = (e) => { if (e.target.id !== "lbImg") { $("lb").classList.remove("show"); $("lbImg").src = ""; } };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("lb").classList.remove("show"); });
 let cTarget = null;
 document.addEventListener("contextmenu", (e) => {
   const a = e.target.closest("[data-of]"); if (!a) return;
@@ -643,7 +653,7 @@ function renderTask() {
     const sv = i === lastC && t.status === "done" && nSubs >= 2
       ? (t.tpl_saved ? `<button class="savet" disabled>${I.tpl}Đã lưu template</button>` : `<button class="savet" data-savet="1">${I.tpl}Save Template</button>`) : "";
     const ims = n && n < 5 ? (m.files || []).filter((f) => /\.(png|jpe?g|gif|webp)$/i.test(f)) : [];
-    const pv = ims.length ? `<div class="opv">${ims.map((f) => { const q = `t=${T.id}&i=${i}&f=${encodeURIComponent(f)}`; return `<a href="/api/ofile?${q}&full=1" target="_blank" data-of="${esc(f)}" data-oi="${i}" title="${esc(f)}"><img src="/api/ofile?${q}" alt="${esc(f)}" loading="lazy"><span>${esc(f.split("/").pop())}</span></a>`; }).join("")}</div>` : "";
+    const pv = ims.length ? `<div class="opv">${ims.map((f) => { const q = `t=${T.id}&i=${i}&f=${encodeURIComponent(f)}`; return `<a href="/api/ofile?${q}&full=1" data-lb="1" data-of="${esc(f)}" data-oi="${i}" title="${esc(f)}"><img src="/api/ofile?${q}" alt="${esc(f)}" loading="lazy"><span>${esc(f.split("/").pop())}</span></a>`; }).join("")}</div>` : "";
     return `<div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>`;
   }).join("");
   const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Claude chưa đăng nhập. Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>Đang chuẩn bị…</span></div>` : "";

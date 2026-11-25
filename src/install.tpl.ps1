@@ -135,6 +135,7 @@ $null = Step 'Git' { Has git } { if ($UseWinget) { & winget @wg 'Git.Git' }; if 
 $ok = Step 'Python' { [bool](FindPy) } { if ($UseWinget) { & winget @wg 'Python.Python.3.12' '--scope' 'user' }; RefreshPath; if (-not (FindPy)) { InstallPythonDirect } }
 if (-not $ok) { Fail $M.no_python }
 $null = Step 'Node.js' { Has node } { if ($UseWinget) { & winget @wg 'OpenJS.NodeJS.LTS' }; RefreshPath; if (-not (Has node)) { InstallNodeDirect } }
+try { $nd = Split-Path -Parent (Get-Command node -ErrorAction Stop).Source; New-Item -ItemType Directory -Force -Path $AppHome | Out-Null; Set-Content -Path (Join-Path $AppHome 'node_dir.txt') -Value $nd -Encoding UTF8 } catch {}
 $ok = Step 'Claude Code' { Has claude } { & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Invoke-RestMethod https://claude.ai/install.ps1 | Invoke-Expression' }
 if (-not $ok) { Fail $M.no_claude }
 $null = Step 'ChatGPT (Codex)' { Has codex } { & npm.cmd install -g '@openai/codex' }
