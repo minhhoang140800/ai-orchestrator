@@ -594,7 +594,9 @@ ngắn gọn) vào ./stages/<số thứ tự>.md — giao diện hiện ngay cho
 đủ ý (gộp kết quả các chặng); các chặng sẽ được ẩn khi task xong.
 
 ## Model
-Bạn đang chạy {'Opus' if t.get('mode') == 'fast' else 'Sonnet'}. {'' if t.get('mode') in ('fast', 'turbo') else 'Bước khó cần suy luận sâu (phân tích chiến lược, lập kế hoạch phức tạp, gỡ lỗi khó): giao cho sub-agent (Task/Agent) với model opus, chỉ cho đúng bước đó.'}
+Bạn chạy Opus, mức suy nghĩ theo chế độ (Pro high, Balanced/Turbo medium, Eco low). App TỰ chọn model cho worker theo chế độ
+(ChatGPT: GPT-6.2 Astra/Sol + mức suy nghĩ; Gemini: Neon ở Pro, Hydrogen ở chế độ khác) và tự hạ khi sắp hết hạn mức —
+KHÔNG truyền --model cho worker trừ khi có lý do rõ. {"Bước QUÁ khó (đã thử mà không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if t.get('mode') == 'fast' else ""}
 
 ## Tạo ảnh
 Tạo bằng codex ($imagegen) hoặc cách khác có sẵn. Chỉ khi không thể tạo được (lỗi, hết hạn mức): viết prompt vào
@@ -712,7 +714,12 @@ def start_run(t):
     args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
             "--permission-mode", "acceptEdits",
             "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite"]
-    args += ["--model", "opus" if t.get("mode") == "fast" else "sonnet"]   # Balanced/Eco: Sonnet điều phối, bước khó gọi Opus
+    cm, ce = pick_model("claude", t.get("mode", "balanced"))
+    ef = (wdir(t) / "tasks" / "effort.txt")
+    if t.get("mode") == "fast" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh":
+        ce = "xhigh"                                  # Claude tự xin mức cao nhất cho bước quá khó (chỉ ở Pro)
+    args += ["--model", cm]
+    t["_effort"] = ce
     if t.get("session_started"):
         args += ["--resume", t["session"]]
     else:
@@ -726,7 +733,8 @@ def start_run(t):
     try:
         proc = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-                                env=dict(os.environ, AIO_INPUT=str(tdir(t) / "input"), AIO_MODE=t.get("mode", "balanced")),
+                                env=dict(os.environ, AIO_INPUT=str(tdir(t) / "input"), AIO_MODE=t.get("mode", "balanced"),
+                                         CLAUDE_CODE_EFFORT_LEVEL=t.pop("_effort", "medium") or "medium"),
                                 creationflags=NO_WINDOW | BELOW_NORMAL)
     except Exception as e:
         end_work(t, "failed")
@@ -872,6 +880,9 @@ def watch(t, p, nxt):
             for b in (ev.get("message") or {}).get("content") or []:
                 if b.get("type") == "text" and b.get("text", "").strip():
                     step(t, b["text"].strip().split("\n")[0])
+                    lo_ = b["text"].lower()
+                    if "limit" in lo_ and any(k in lo_ for k in ("approaching", "% of your", "remaining")):
+                        note_warn("claude", b["text"])
                 elif b.get("type") == "tool_use":
                     step(t, summarize_tool(b))
         elif typ == "result":
@@ -1662,6 +1673,7 @@ def ai_code(ai, code):
 
 def check_startup():
     """Mở app: chỉ kiểm tra AI nào chưa từng kiểm tra (lần đầu); còn lại dùng kết quả đã lưu."""
+    threading.Thread(target=gemini_models, daemon=True).start()
     for ai in ("claude", "codex"):
         if "ok" not in CFG["ais"].get(ai, {}):
             ai_status(ai)
@@ -2458,17 +2470,30 @@ def cmd_worker(argv):
                       "Cuối cùng liệt kê file đã tạo và cách đã kiểm tra.")
             cmd = [exe, "exec", "--skip-git-repo-check", *CODEX_SANDBOX, "-C", str(v),
                    "--output-last-message", str(v / "result.md")]
-            if a.model:
-                cmd += ["-m", a.model]
-            if os.environ.get("AIO_MODE") in ("turbo", "saver"):   # Turbo/Eco: Codex suy nghĩ ít -> nhanh, ít hạn mức
-                cmd += ["-c", 'model_reasoning_effort="low"']
-            cmd.append(prompt)
+            mods, eff = pick_model("codex", os.environ.get("AIO_MODE", "balanced"))
+            mods = [a.model] if a.model else list(mods)
+            base_cmd = cmd + ["-c", f'model_reasoning_effort="{eff}"']
+            cands = [base_cmd + ["-m", m_, prompt] for m_ in mods] + [base_cmd + [prompt]]   # model không dùng được -> thử model kế, cuối cùng mặc định
+            cmd = cands[0]
             cwd = v
         else:
+            gm, _ = pick_model("gemini", os.environ.get("AIO_MODE", "balanced"))
             cmd = [exe, "-p", text, "--output-format", "json"]
+            cands = ([cmd + ["--model", a.model or gm]] if (a.model or gm) else []) + [cmd]
+            cmd = cands[0]
             cwd = proj
         t0 = time.time()
-        code, so, se, to = run_limited(cmd, cwd, a.timeout)
+        for i_, cmd in enumerate(cands):
+            code, so, se, to = run_limited(cmd, cwd, a.timeout)
+            low_ = (so + se).lower()
+            bad_model = code != 0 and "model" in low_ and any(k in low_ for k in (
+                "not found", "not supported", "does not exist", "invalid", "unknown", "not available", "no access",
+                "flag provided but not defined"))
+            if not bad_model or i_ == len(cands) - 1:
+                break
+        st["model"] = next((cmd[j + 1] for j in range(len(cmd) - 1) if cmd[j] in ("-m", "--model")), "mặc định")
+        if any(k in (so + se).lower() for k in ("approaching", "less than half", "remaining", "% of your")) and "limit" in (so + se).lower():
+            note_warn(a.worker, se + so)
         st.update(seconds=round(time.time() - t0), exit_code=code)
         (v / "worker.log").write_text(f"--- stdout ---\n{so}\n--- stderr ---\n{se}\n", encoding="utf-8")
         if a.worker == "gemini" and so.strip():
@@ -2553,6 +2578,71 @@ def note_limit(ai, text):
 def limits():
     d = rjson(DATA / "limits.json", {}) or {}
     return {k: v for k, v in d.items() if isinstance(v, dict) and v.get("until", 0) > time.time()}
+
+
+# ---------------------------------------------------------------- model theo chế độ (người dùng chốt; app tự hạ khi sắp/đã hết hạn mức)
+EFFORTS = ["low", "medium", "high", "xhigh"]
+MODEL_PLAN = {
+    "claude": {"fast": ("opus", "high"), "balanced": ("opus", "medium"), "turbo": ("opus", "medium"), "saver": ("opus", "low")},
+    "codex": {"fast": (["gpt-6.2-astra", "gpt-6.2-sol"], "high"), "balanced": (["gpt-6.2-astra", "gpt-6.2-sol"], "medium"),
+              "turbo": (["gpt-6.2-sol", "gpt-6-astra"], "low"), "saver": (["gpt-6.2-sol", "gpt-6-astra"], "low")},
+    "gemini": {"fast": "neon", "balanced": "hydrogen", "turbo": "hydrogen", "saver": "hydrogen"},
+}
+
+
+def pressure(ai):
+    """Sắp hết hạn mức (cảnh báo) hoặc vừa hết trong 6 giờ qua -> hạ 1 bậc để còn dùng được lâu hơn."""
+    d = (rjson(DATA / "limits.json", {}) or {}).get(ai) or {}
+    return bool(d) and ((d.get("warn") and time.time() - d.get("warn_at", 0) < 6 * 3600)
+                        or time.time() - d.get("until", 0) < 6 * 3600)
+
+
+def pick_model(ai, mode):
+    m, eff = MODEL_PLAN[ai].get(mode) or MODEL_PLAN[ai]["balanced"]
+    if ai == "gemini":
+        if pressure(ai):
+            m = "hydrogen"
+        return (rjson(DATA / "config.json", {}) or {}).get("gemini_models", {}).get(m), None
+    if pressure(ai) and eff != "low":
+        eff = EFFORTS[max(0, EFFORTS.index(eff) - 1)]
+        if ai == "codex":
+            m = m[1:] + m[:1] if mode in ("fast", "balanced") else m
+    return m, eff
+
+
+def note_warn(ai, text):
+    f = DATA / "limits.json"
+    d = rjson(f, {}) or {}
+    cur = d.get(ai) or {"until": 0}
+    cur.update(warn=True, warn_at=int(time.time()), msg=(text or "")[-200:])
+    d[ai] = cur
+    try:
+        wjson(f, d)
+    except Exception:
+        pass
+
+
+def gemini_models():
+    """Lấy tên model Gemini thật của tài khoản (agy models) để chọn Neon/Hydrogen."""
+    exe = find_bin("agy")
+    if not exe:
+        return
+    try:
+        out = _run_hidden([exe, "models"], 40).stdout or ""
+    except Exception:
+        return
+    found = {}
+    for line in out.splitlines():
+        low = line.lower()
+        for key in ("neon", "hydrogen", "carbon"):
+            if key in low and key not in found:
+                ids = re.findall(r"[a-z0-9][a-z0-9.\-]*" + key + r"[a-z0-9.\-]*", low)
+                q = re.findall(r'"([^"]+)"', line)
+                found[key] = ids[0] if ids else (q[0] if q else line.strip().split("  ")[0].strip(" -*•"))
+    if found:
+        CFG["gemini_models"] = found
+        save_cfg()
+    dlog(f"agy models -> {found}; raw: {out[:400]}")
 
 
 def wait_status(v, limit=1200):
