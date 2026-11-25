@@ -11,6 +11,8 @@
 Maestro = web app chạy trên máy người dùng (Windows chính, có bản Mac) tại http://ai-orchestrator.localhost/
 (cổng 80, lỗi thì :8765). Claude Code (headless `claude -p`) làm PM, giao việc cho worker ChatGPT (Codex CLI)
 và Gemini (Antigravity CLI `agy`), dùng gói Claude Max / ChatGPT Plus / Google AI Pro sẵn có, không API key.
+Không có Claude trả phí: ChatGPT (Codex) làm PM (`pick_pm`, hướng dẫn ghi vào AGENTS.md). Không có gói trả phí nào: chế độ Free
+(`free_setup`, `FREE_RULES`) + Gemini API key tuỳ chọn (`api_worker`, key chỉ lưu trong `data/config.json`). Worker sửa file thẳng: `--edit`.
 
 ## Mã nguồn (`src/`)
 - `app.py` — toàn bộ backend 1 file (Python stdlib; tuỳ chọn pillow/openpyxl/pywinpty). Gồm: HTTP server + API,

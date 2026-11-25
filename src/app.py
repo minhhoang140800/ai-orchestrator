@@ -163,14 +163,14 @@ def kill_orphan(pid):
     if not IS_WIN:
         try:
             r = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=10)
-            if "claude" in (r.stdout or "").lower():
+            if any(k in (r.stdout or "").lower() for k in ("claude", "codex")):
                 os.kill(pid, 9)
         except Exception:
             pass
         return
     r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True,
                        text=True, creationflags=NO_WINDOW)
-    if "claude" in (r.stdout or "").lower():
+    if any(k in (r.stdout or "").lower() for k in ("claude", "codex")):
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, creationflags=NO_WINDOW)
 
 
@@ -351,6 +351,7 @@ def load_cfg():
         a.pop("code", None)
         a.pop("url", None)
         a.pop("note", None)
+        a.pop("auto", None)
     return c
 
 
@@ -591,9 +592,16 @@ def write_claude_md(t):
     mode = norm_mode(t.get("mode"))
     mode_name = MODES[mode]
     mode_rules = MODE_RULES[mode].format(n="1 (máy cấu hình thấp)" if LOW_SPEC else str(min(3, MAX_RUNNING + 1)))
-    on = [w for w in ("codex", "gemini") if find_bin(AIS[w]["bin"]) and CFG["ais"].get(w, {}).get("ok") is not False]
+    pm = t.get("pm") or "claude"
+    agy_ok = bool(find_bin("agy")) and CFG["ais"].get("gemini", {}).get("ok") is not False
+    can = {"codex": bool(find_bin("codex")) and CFG["ais"].get("codex", {}).get("ok") is not False,
+           "gemini": agy_ok or bool(CFG.get("gemini_key"))}
+    on = [w for w in ("codex", "gemini") if w != pm and can[w]]
     desc = {"codex": "codex — ChatGPT/Codex: code, CSV/Excel/Word/PowerPoint, script, sửa file, tạo ảnh ($imagegen)",
-            "gemini": "gemini — Gemini/Antigravity: research web, tổng hợp, ý tưởng; tạo/sửa ảnh, tạo/sửa file (--write / --edit)"}
+            "gemini": "gemini — Gemini/Antigravity: research web, tổng hợp, ý tưởng; tạo/sửa ảnh, tạo/sửa file (--write / --edit)"
+            + (" (hết lượt/lỗi thì app tự chuyển sang Gemini API key: chỉ trả lời chữ)" if CFG.get("gemini_key") else "")
+            if agy_ok else "gemini — Gemini qua API key: CHỈ trả lời bằng chữ (research web, tổng hợp, ý tưởng, viết, đọc ảnh/PDF "
+            "gửi kèm: ghi đúng tên file đính kèm trong tasks/<ID>.md); KHÔNG tạo/sửa file -> không dùng --write/--edit"}
     pj = project_of(t)
     brain_md = (f"""## Dự án: {pj['name']} — bộ nhớ dự án (người dùng đã duyệt, áp dụng cho mọi task của dự án)
 {pj.get('brain', '').strip() or '(chưa có)'}
@@ -751,7 +759,53 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
     wdir(t).mkdir(parents=True, exist_ok=True)
     if IS_WIN and wdir(t).name == ".work":
         subprocess.run(["attrib", "+h", str(wdir(t))], creationflags=NO_WINDOW, capture_output=True)
-    (wdir(t) / "CLAUDE.md").write_text(txt, encoding="utf-8")
+    if "codex" not in on:
+        txt = "\n".join(x for x in txt.split("\n") if '" worker codex ' not in x)
+    if pm == "codex":
+        txt = pm_codex_md(txt)
+    if free_setup():
+        txt = txt.replace("\n## Cấm\n", "\n" + FREE_RULES + "\n## Cấm\n", 1)
+    (wdir(t) / ("AGENTS.md" if pm == "codex" else "CLAUDE.md")).write_text(txt, encoding="utf-8")
+
+
+FREE_RULES = """## Chế độ Free (người dùng không có tài khoản AI trả phí — áp dụng THAY mọi luật chế độ ở trên khi mâu thuẫn)
+- Hạn mức rất ít: làm tuần tự, 1 worker tại một thời điểm; không gọi giám khảo, không làm mẫu thử, tối đa 1 vòng sửa.
+- Ưu tiên giao Gemini (Antigravity hoặc API key) cho research, ý tưởng, viết; tự làm phần code/file bằng lệnh/script.
+- Worker báo "limit": chuyển ngay sang worker/cách khác còn dùng được, không chờ; hết cả thì trả phần đã xong + nói rõ phần còn thiếu.
+- Câu trả lời ngắn, đủ ý; không làm thêm ngoài yêu cầu.
+"""
+
+
+def _section(txt, title, body):
+    """Thay nội dung 1 mục '## <title>' (tới mục kế tiếp) trong hướng dẫn."""
+    return re.sub(r"(?ms)^## " + re.escape(title) + r"\n.*?(?=^## )", lambda m: f"## {title}\n{body.strip()}\n\n", txt, count=1)
+
+
+def pm_codex_md(txt):
+    """Hướng dẫn khi ChatGPT (Codex) làm quản lý thay Claude: không có giám khảo Claude, không có công cụ Google Drive."""
+    txt = re.sub(r"(?ms)^- Chấm chất lượng .*?^  Bỏ qua khi hỏi đáp[^\n]*\n",
+                 "- Chấm chất lượng: không có giám khảo riêng — tự mở lại file thật, đối chiếu từng mục BẮT BUỘC trong criteria.md;\n"
+                 "  văn bản dài có thể giao gemini đọc soát theo criteria.md. Lô lớn (từ 5 sản phẩm): làm 1 mẫu, tự xem rồi mới chạy cả lô.\n", txt)
+    txt = _section(txt, "Google Drive / Sheets / Docs / Slides", """
+Bạn KHÔNG có công cụ Google Drive. Link Google người dùng gửi:
+- File chia sẻ "Bất kỳ ai có đường liên kết": tự tải bản xuất bằng lệnh (curl/python) — Sheets:
+  https://docs.google.com/spreadsheets/d/<ID>/export?format=xlsx, Docs: .../document/d/<ID>/export?format=docx,
+  Slides: .../presentation/d/<ID>/export/pptx — rồi đọc/sửa bản tải về, lưu kết quả vào OUTPUT.
+- Không tải được (file riêng tư): hỏi người dùng (question.md) tải file về rồi gửi kèm. Sửa xong: chỉ cách thay trên Drive
+  (File > Import > Upload > Replace). Không đổi quyền chia sẻ file.""")
+    txt = _section(txt, "Model", """
+Bạn là ChatGPT (Codex) làm quản lý thay Claude. App tự chọn model cho worker Gemini theo chế độ và tự hạ khi sắp hết hạn mức —
+KHÔNG truyền --model cho worker trừ khi có lý do rõ. Không có sub-agent: việc code/file nhỏ thì tự làm bằng lệnh.""")
+    txt = txt.replace("Tạo theo mục Chia việc (Gemini trước, lỗi thì codex $imagegen)", "Tạo bằng gemini, lỗi thì tự tạo ($imagegen)")
+    if IS_WIN:      # Codex chạy lệnh bằng PowerShell: chương trình có đường dẫn trong ngoặc kép phải gọi bằng "&"
+        cmd = f'"{py_console()}" "{APP}"'
+        txt = txt.replace(cmd, "& " + cmd).replace("## Worker sẵn có trên máy\n",
+                          "## Worker sẵn có trên máy\n(Lệnh chạy trong PowerShell: giữ dấu & ở đầu mỗi lệnh gọi app.)\n", 1)
+    return txt
+
+
+def md_name(t):
+    return "AGENTS.md" if t.get("pm") == "codex" else "CLAUDE.md"
 
 
 def build_prompt(t, nxt):
@@ -763,24 +817,24 @@ def build_prompt(t, nxt):
         base = f"Task mới. Yêu cầu của người dùng:\n\n{t['text']}\n"
         if kind != "start" and text:
             base += f"\nBổ sung của người dùng:\n{text}\n"
-        return base + fl + "\nLàm theo CLAUDE.md."
+        return base + fl + f"\nLàm theo {md_name(t)}."
     if t.get("session_started"):        # app có thể vừa cập nhật: luật mới trong CLAUDE.md áp dụng cho lượt này
-        fl += "\nCLAUDE.md có thể vừa được cập nhật: đọc lại ./CLAUDE.md và áp dụng bản mới nhất (thay cho quy tắc cũ trong phiên)."
+        fl += f"\n{md_name(t)} có thể vừa được cập nhật: đọc lại ./{md_name(t)} và áp dụng bản mới nhất (thay cho quy tắc cũ trong phiên)."
     if kind == "answer":
         return f"Người dùng trả lời:\n\n{text}\n{fl}\nTiếp tục task."
     if kind == "urgent":
         return (f"Người dùng vừa gửi tin nhắn trong lúc bạn đang làm (bạn đã bị ngắt):\n\n{text}\n{fl}\n"
-                "Đọc tasks/plan.json, điều chỉnh kế hoạch theo tin nhắn này rồi tiếp tục. Làm theo CLAUDE.md.")
+                f"Đọc tasks/plan.json, điều chỉnh kế hoạch theo tin nhắn này rồi tiếp tục. Làm theo {md_name(t)}.")
     if kind == "followup":
-        return f"Tin nhắn mới của người dùng:\n\n{text}\n{fl}\nLàm theo CLAUDE.md."
-    return "Task bị dừng giữa chừng. Đọc tasks/plan.json và chạy tiếp từ bước đang dở. Làm theo CLAUDE.md."
+        return f"Tin nhắn mới của người dùng:\n\n{text}\n{fl}\nLàm theo {md_name(t)}."
+    return f"Task bị dừng giữa chừng. Đọc tasks/plan.json và chạy tiếp từ bước đang dở. Làm theo {md_name(t)}."
 
 
 def gen_title(t):
     """Đặt tên task ngắn như Claude (model nhỏ, tốn rất ít hạn mức). Lỗi thì giữ tên tạm."""
     exe = find_bin("claude")
     try:
-        if exe and CFG["ais"].get("claude", {}).get("ok"):
+        if exe and claude_usable():          # không có Claude trả phí: giữ tên tạm (không tốn hạn mức ChatGPT)
             p = subprocess.run([exe, "-p", "Đặt tiêu đề 3-7 từ, cùng ngôn ngữ, cho yêu cầu dưới đây. "
                                 "Chỉ trả về tiêu đề, không dấu ngoặc, không giải thích.\n\n" + t["text"][:2000],
                                 "--model", "haiku"], cwd=str(tdir(t)), stdin=subprocess.DEVNULL, capture_output=True,
@@ -796,12 +850,17 @@ def gen_title(t):
 
 
 def start_run(t):
-    exe = find_bin("claude")
+    if not t.get("session_started"):
+        t["pm"] = pick_pm() or "claude"         # chọn khi bắt đầu; phiên đã mở thì giữ AI quản lý cũ để nối tiếp được
+    t.setdefault("pm", "claude")                # task của bản cũ: phiên Claude
+    pm = t["pm"]
+    exe = find_bin(pm)
     nxt = t.pop("next", None) or {"kind": "start"}
     d = tdir(t)
     if not exe or not CFG.get("output"):
         t["status"] = "failed"
-        tmsg(t, "claude", "Chưa cài Claude Code" if not exe else "Chưa chọn thư mục kết quả (Cài đặt → Set up)", kind="error")
+        tmsg(t, "claude", ("Chưa cài Claude Code" if pm == "claude" else "Chưa cài ChatGPT (Codex)") if not exe
+             else "Chưa chọn thư mục kết quả (Cài đặt → Set up)", kind="error")
         return tsave(t)
     if not t.get("folder"):                   # <dự án>/<ngày>/<HH_MM> <tên task> — dễ theo dõi theo dự án và thời gian
         pj = project_of(t)
@@ -819,22 +878,30 @@ def start_run(t):
     q = d / "question.md"
     if q.exists():
         q.unlink()
-    args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
-            "--permission-mode", "acceptEdits",
-            "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite,"
-                              "mcp__claude_ai_Google_Drive"]
     ef = (wdir(t) / "tasks" / "effort.txt")
     hard = t.get("mode") == "pro" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh"
-    cm, ce = pick_model("claude", t.get("mode", "balanced"), hard)   # Pro + bước quá khó: mức cao nhất
-    args += ["--model", cm]
+    cm, ce = pick_model(pm, t.get("mode", "balanced"), hard)   # Pro + bước quá khó: mức cao nhất
     t["_effort"], t["_hard"] = ce, hard
-    if t.get("session_started"):
-        args += ["--resume", t["session"]]
+    if pm == "codex":
+        # ChatGPT làm quản lý: không sandbox (như Claude: cần gọi worker, ghi OUTPUT, mạng); model mặc định của tài khoản
+        # (gói Free/Plus tự đúng), chỉ chỉnh mức suy nghĩ. Câu trả lời cuối ghi ra .pm_last.md.
+        last = d / ".pm_last.md"
+        last.unlink(missing_ok=True)
+        args = [exe, "exec"] + (["resume", t["session"]] if t.get("session_started") else []) + [
+            "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", str(last),
+            "-c", f'model_reasoning_effort="{ce}"'] + ([] if t.get("session_started") else ["-C", str(d)]) + [build_prompt(t, nxt)]
     else:
-        t["session"] = str(uuid.uuid4())
-        args += ["--session-id", t["session"]]
-    for f in dict.fromkeys([str(out_dir(t))] + drives()):
-        args += ["--add-dir", f]
+        args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
+                "--permission-mode", "acceptEdits",
+                "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite,"
+                                  "mcp__claude_ai_Google_Drive", "--model", cm]
+        if t.get("session_started"):
+            args += ["--resume", t["session"]]
+        else:
+            t["session"] = str(uuid.uuid4())
+            args += ["--session-id", t["session"]]
+        for f in dict.fromkeys([str(out_dir(t))] + drives()):
+            args += ["--add-dir", f]
     t.update(status="running", started=now(), _pause=False, _cancel=False, _quit=False, _redirect=None)
     t["wi"] = tmsg(t, "work", "", status="running", started=now(), started_ts=time.time(), steps=[])
     tsave(t)
@@ -982,12 +1049,37 @@ def new_files(t, since, text=""):
     return [], ""
 
 
+def codex_event(t, ev, cx):
+    """1 dòng sự kiện JSON của `codex exec --json` (ChatGPT làm quản lý) -> bước hiển thị; trả kết quả khi lượt xong."""
+    typ, it = ev.get("type"), ev.get("item") or {}
+    if typ == "thread.started" and ev.get("thread_id") and not t.get("session_started"):
+        t["session_started"], t["session"] = True, ev["thread_id"]
+        tsave(t)
+    elif typ == "item.started" and it.get("type") == "command_execution":
+        step(t, summarize_tool({"name": "Bash", "input": {"command": str(it.get("command") or "")}}))
+    elif typ == "item.completed" and it.get("type") == "agent_message" and str(it.get("text") or "").strip():
+        cx["last"] = str(it["text"]).strip()
+        step(t, cx["last"].split("\n")[0])
+    elif typ == "item.completed" and it.get("type") == "file_change":
+        names = [re.split(r"[\\/]", str(c.get("path", "")))[-1] for c in it.get("changes") or [] if isinstance(c, dict)]
+        step(t, "Sửa: " + ", ".join(names[:5]) if names else "Sửa file")
+    elif typ == "turn.completed":
+        return {"result": cx["last"]}
+    elif typ == "turn.failed":
+        return {"is_error": True, "result": str((ev.get("error") or {}).get("message") or cx["err"] or "ChatGPT dừng giữa chừng")}
+    elif typ == "error" and ev.get("message"):
+        cx["err"] = str(ev["message"])
+    return None
+
+
 def watch(t, p, nxt):
     raw = open(wdir(t) / "run.log", "a", encoding="utf-8")
     raw.write(f"\n===== {now()} {nxt.get('kind')} =====\n")
     result = None
     w = work(t)
     since = (w or {}).get("started_ts", time.time())
+    pm = t.get("pm") or "claude"
+    cx = {"last": "", "err": ""}               # ChatGPT làm quản lý: câu trả lời/lỗi gần nhất
     for line in p.stdout:
         raw.write(line)
         raw.flush()
@@ -996,6 +1088,9 @@ def watch(t, p, nxt):
         except Exception:
             continue
         typ = ev.get("type")
+        if pm == "codex":
+            result = codex_event(t, ev, cx) or result
+            continue
         if ev.get("session_id") and not t.get("session_started"):
             t["session_started"] = True
             t["session"] = ev["session_id"]
@@ -1016,6 +1111,11 @@ def watch(t, p, nxt):
         raw.write("--- stderr ---\n" + err)
     raw.close()
     p.wait()
+    if pm == "codex" and result and not result.get("is_error"):
+        f = wdir(t) / ".pm_last.md"
+        result["result"] = (f.read_text("utf-8", "replace").strip() if f.is_file() else "") or cx["last"] or "Xong."
+    elif pm == "codex" and not result and cx["err"]:
+        result = {"is_error": True, "result": cx["err"]}
     PROCS.pop(t["id"], None)
     with _tlock:
         q = wdir(t) / "question.md"
@@ -1048,14 +1148,14 @@ def watch(t, p, nxt):
             threading.Thread(target=finish_clean, args=(t,), daemon=True).start()
         else:
             msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {p.returncode}"
-            if is_limit(msg[-1500:]) or is_limit(err):          # Claude hết hạn mức: chờ tới giờ reset rồi tự chạy tiếp
-                lm = note_limit("claude", msg + "\n" + err[-2000:])
+            if is_limit(msg[-1500:]) or is_limit(err):          # AI quản lý hết hạn mức: chờ tới giờ reset rồi tự chạy tiếp
+                lm = note_limit(pm, msg + "\n" + err[-2000:])
                 end_work(t, "limit")
                 t["status"] = "queued"
                 t["hold_until"] = lm["until"]
                 t["next"] = {"kind": "resume"}
                 hh = datetime.datetime.fromtimestamp(lm["until"]).strftime("%H:%M")
-                tmsg(t, "claude", f"Claude hết hạn mức. Tự chạy tiếp lúc **{hh}**{'' if lm['known'] else ' (ước tính, thử lại mỗi 30 phút)'}.", kind="error")
+                tmsg(t, "claude", f"{'Claude' if pm == 'claude' else 'ChatGPT'} hết hạn mức. Tự chạy tiếp lúc **{hh}**{'' if lm['known'] else ' (ước tính, thử lại mỗi 30 phút)'}.", kind="error")
             else:
                 end_work(t, "failed")
                 t["status"] = "failed"
@@ -1068,23 +1168,31 @@ def watch(t, p, nxt):
         pass
 
 
-_ready = {"t": 0.0, "ok": False}
+_ready = {"t": 0.0}
 
 
-def claude_ready(t):
-    """Claude chưa đăng nhập: tự mở trang đăng nhập 1 lần cho task này, task chờ rồi tự chạy."""
-    if time.time() - _ready["t"] > (60 if _ready["ok"] else 5):
-        _ready["t"] = time.time()
-        cur = CFG["ais"].get("claude", {})
-        _ready["ok"] = bool(cur.get("ok")) if cur.get("pending") else bool(ai_status("claude").get("ok"))
-    if _ready["ok"]:
+def pm_ready(t):
+    """Có AI làm quản lý chưa. Chưa: tự mở đăng nhập Claude 1 lần cho task này, task chờ rồi tự chạy."""
+    if time.time() - _ready["t"] > 60 or (t.get("need_login") and time.time() - _ready["t"] > 10):
+        _ready["t"] = time.time()          # kiểm tra đăng nhập ở nền (lệnh chạy vài giây, không giữ khóa task)
+
+        def chk():
+            with _status_lock:
+                for ai in ("claude", "codex"):
+                    if not CFG["ais"].get(ai, {}).get("pending"):
+                        ai_status(ai)
+                save_cfg()
+        threading.Thread(target=chk, daemon=True).start()
+    pm = (t.get("pm") or "claude") if t.get("session_started") else pick_pm()
+    if pm and (pm != "codex" or codex_usable()) and (pm != "claude" or claude_usable()):
         if t.pop("need_login", None):
             tsave(t)
         return True
     if not t.get("need_login"):
         t["need_login"] = True
         tsave(t)
-        ai_login("claude")
+        if not CFG["ais"].get("claude", {}).get("ok") and not CFG["ais"].get("codex", {}).get("ok"):
+            ai_login("claude")
     return False
 
 
@@ -1111,16 +1219,16 @@ def sched_tick():
     try:
         running = sum(1 for t in TASKS.values() if t["status"] == "running")
         queued = sorted((t for t in TASKS.values() if t["status"] == "queued"), key=lambda x: x["created"])
-        cl = limits().get("claude")
+        lm = limits()
         for t in queued:
             if running >= MAX_RUNNING:
                 break
-            if t.get("hold_until", 0) > time.time() or cl:
-                continue          # Claude hết hạn mức: chờ tới giờ reset (mọi task xếp hàng cùng chờ)
+            if t.get("hold_until", 0) > time.time() or lm.get(t.get("pm") or pick_pm() or "claude"):
+                continue          # AI quản lý hết hạn mức: chờ tới giờ reset (mọi task cùng quản lý cùng chờ)
             if t.pop("hold_until", None):
                 tsave(t)
-            if not claude_ready(t):
-                continue          # chờ đăng nhập Claude (đã tự mở trang đăng nhập)
+            if not pm_ready(t):
+                continue          # chờ đăng nhập (đã tự mở trang đăng nhập Claude)
             if t.get("titling") and time.time() - t.get("created_ts", 0) < 30:
                 continue          # chờ đặt tên xong để thư mục kết quả có tên đẹp
             try:
@@ -1380,13 +1488,37 @@ def submit_task(tid, files):
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
-def _jwt_email(tok):
+def _jwt(tok):
     try:
         part = tok.split(".")[1]
         part += "=" * (-len(part) % 4)
-        return json.loads(base64.urlsafe_b64decode(part)).get("email", "")
+        return json.loads(base64.urlsafe_b64decode(part)) or {}
     except Exception:
-        return ""
+        return {}
+
+
+def _jwt_email(tok):
+    return _jwt(tok).get("email", "")
+
+
+PAID_CLAUDE = {"pro", "max", "team", "enterprise"}
+
+
+def claude_plan(j):
+    """Gói Claude từ `claude auth status --json` -> (tên gói, trả phí?). None = không rõ (bản CLI cũ) -> coi như trước đây."""
+    if not j.get("loggedIn"):
+        return "", None
+    plan = j.get("subscriptionType") or ""
+    if j.get("authMethod") not in (None, "claude.ai") or "storedClaudeAiLogin" not in j and "subscriptionType" not in j:
+        return plan, None                     # đăng nhập kiểu khác / CLI không báo gói
+    return plan or "free", plan in PAID_CLAUDE
+
+
+def codex_plan():
+    """Gói ChatGPT ghi trong file đăng nhập Codex (free, plus, pro, team...). '' = không rõ."""
+    f = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "auth.json"
+    toks = (rjson(f) or {}).get("tokens") or {}
+    return str((_jwt(toks.get("id_token", "")).get("https://api.openai.com/auth") or {}).get("chatgpt_plan_type") or "").lower()
 
 
 def ai_email(ai):
@@ -1421,6 +1553,54 @@ def ai_email(ai):
     return ""
 
 
+def claude_usable():
+    c = CFG["ais"].get("claude", {})
+    return bool(find_bin("claude")) and bool(c.get("ok")) and c.get("paid") is not False
+
+
+def codex_usable():
+    c = CFG["ais"].get("codex", {})
+    return bool(find_bin("codex")) and bool(c.get("ok"))
+
+
+def pick_pm():
+    """Ai làm quản lý (PM): Claude gói trả phí như cũ; không có thì ChatGPT (Codex, kể cả gói Free); không có ai -> ''."""
+    return "claude" if claude_usable() else "codex" if codex_usable() else ""
+
+
+def free_setup():
+    """Không có tài khoản trả phí nào (Claude/ChatGPT) -> chế độ Free: tiết kiệm tối đa + mời thêm Gemini API key."""
+    a = CFG["ais"]
+    return not claude_usable() and a.get("codex", {}).get("paid") is not True
+
+
+def setup_state():
+    pm = pick_pm()
+    return {"pm": pm, "free": free_setup(), "gemini_key": bool(CFG.get("gemini_key")),
+            "gemini_api_models": len(CFG.get("gemini_api_models") or [])}
+
+
+def set_gemini_key(key):
+    """Lưu Gemini API key (chỉ trên máy này, data/config.json). Kiểm tra key bằng cách lấy danh sách model."""
+    key = re.sub(r"\s+", "", key)
+    if not key:
+        CFG.pop("gemini_key", None)
+        CFG.pop("gemini_api_models", None)
+        save_cfg()
+        return {"ok": True, "msg": "Đã xoá Gemini API key"}
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{30,80}", key):
+        return {"error": "Không giống API key của Google (thường bắt đầu bằng AIza…)"}
+    try:
+        models = gemini_api_models(key)
+    except Exception as e:
+        return {"error": f"Key chưa dùng được: {e}"[:200]}
+    if not models:
+        return {"error": "Key hợp lệ nhưng không có model Gemini nào dùng được"}
+    CFG["gemini_key"], CFG["gemini_api_models"] = key, models
+    save_cfg()
+    return {"ok": True, "msg": f"Đã lưu key · {len(models)} model Gemini dùng được"}
+
+
 def ai_state():
     lm = limits()
     return {k: {"installed": bool(find_bin(v["bin"])), **CFG["ais"].get(k, {}),
@@ -1450,7 +1630,8 @@ def ai_status(ai):
             p = _run_hidden([exe, "auth", "status", "--json"], 20)
             j = json.loads(p.stdout[p.stdout.index("{"):]) if "{" in (p.stdout or "") else {}
             ok = bool(j.get("loggedIn"))
-            cur.update(ok=ok, msg="", email=(j.get("email") or ai_email(ai)) if ok else "")
+            plan, paid = claude_plan(j)
+            cur.update(ok=ok, msg="", email=(j.get("email") or ai_email(ai)) if ok else "", plan=plan, paid=paid)
         elif ai == "codex":
             p = _run_hidden([exe, "login", "status"], 45)
             out = ((p.stdout or "") + (p.stderr or "")).lower()
@@ -1469,7 +1650,9 @@ def ai_status(ai):
                            if not shutil.which("node") else "Codex lỗi khi chạy — bấm Export log gửi lại")
                 elif (Path.home() / ".codex" / "auth.json").exists():
                     ok = True
-            cur.update(ok=ok, msg=msg, email=ai_email(ai) if ok else "")
+            plan = codex_plan() if ok else ""
+            cur.update(ok=ok, msg=msg, email=ai_email(ai) if ok else "", plan=plan,
+                       paid=(plan != "free") if plan else None)
     except Exception as e:
         cur.setdefault("ok", False)
         cur["msg"] = str(e)[:150]
@@ -1670,8 +1853,11 @@ def ai_login(ai, switch=False):
                 if ai == "codex" and IS_WIN:          # phiên đăng nhập cũ còn giữ cổng 1455 -> codex login thoát ngay
                     _run_hidden(["powershell", "-NoProfile", "-Command",
                                  "Get-NetTCPConnection -LocalPort 1455 -State Listen -EA 0 | % { Stop-Process -Id $_.OwningProcess -Force -EA 0 }"], 20)
-                if ai == "claude":                   # Claude: không tự mở tab, web mở link trong cửa sổ nhỏ + dán mã
-                    return claude_term_login(exe, d, cur, dict(os.environ, BROWSER="none"))
+                if ai == "claude":                   # Claude tự mở trình duyệt, đăng nhập xong tự nhận (không cần dán mã)
+                    env = dict(os.environ)
+                    if env.get("BROWSER") == "none":
+                        env.pop("BROWSER")
+                    return claude_term_login(exe, d, cur, env)
                 env = dict(os.environ)                  # ChatGPT: để Codex tự mở trình duyệt (đặt BROWSER làm hỏng đăng nhập)
                 logf = d / f"{ai}.out"
                 fh = open(logf, "w", encoding="utf-8", errors="replace")
@@ -1737,6 +1923,7 @@ def ai_login(ai, switch=False):
             cur.pop("pending", None)
             cur.pop("code", None)
             cur.pop("url", None)
+            cur.pop("auto", None)
             cur["at"] = now()
             save_cfg()
 
@@ -1745,7 +1932,8 @@ def ai_login(ai, switch=False):
 
 
 def claude_term_login(exe, d, cur, env):
-    """Claude: chạy 'claude auth login' trong terminal ẩn; người dùng đăng nhập ở cửa sổ nhỏ rồi dán mã vào web."""
+    """Claude: chạy 'claude auth login' trong terminal ẩn. Claude tự mở trình duyệt với trang đăng nhập trả kết quả thẳng về
+    máy (localhost) -> bấm Authorize là xong. Dự phòng (trình duyệt không mở): link trên màn hình + dán mã vào web."""
     p = HiddenTerm([exe, "auth", "login", "--claudeai"], str(d), env)
     LOGINS["claude"] = p
     t0 = time.time()
@@ -1756,6 +1944,7 @@ def claude_term_login(exe, d, cur, env):
             if m:
                 cur["url"] = m.group(0)
                 cur["code"] = True
+                cur["auto"] = "Opening browser" in p.buf
         if time.time() - t0 > 8 and int(time.time() - t0) % 4 == 0 and ai_status("claude").get("ok"):
             break
     time.sleep(1)
@@ -1819,13 +2008,18 @@ def expected_secs(mode):
     return max(60, _exp["v"].get(mode) or {"turbo": 240, "balanced": 420, "pro": 600, "eco": 600}.get(mode, 420))
 
 
+def pm_limit(t):
+    """Hạn mức của AI đang làm quản lý cho task ({} = còn dùng được)."""
+    return limits().get(t.get("pm") or pick_pm() or "claude") or {}
+
+
 def task_detail(t):
     d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished", "mode")}
     if t.get("need_login") and t["status"] == "queued":
         d["status"] = "login"
-    if t["status"] == "queued" and (t.get("hold_until", 0) > time.time() or "claude" in limits()):
+    if t["status"] == "queued" and (t.get("hold_until", 0) > time.time() or pm_limit(t)):
         d["status"] = "limit"
-        d["hold_until"] = max(t.get("hold_until", 0), limits().get("claude", {}).get("until", 0))
+        d["hold_until"] = max(t.get("hold_until", 0), pm_limit(t).get("until", 0))
     msgs = [dict(m) for m in t.get("messages", [])]
     subs = subtasks(t)
     works = [m for m in msgs if m["role"] == "work"]
@@ -1946,7 +2140,7 @@ class H(BaseHTTPRequestHandler):
                 threading.Thread(target=scheduler, daemon=True).start()
             with _tlock:
                 ts = [{**{k: t.get(k) for k in ("id", "title", "status", "created", "pinned")},
-           **({"status": "limit"} if t["status"] == "queued" and (t.get("hold_until", 0) > time.time() or "claude" in limits()) else {})}
+           **({"status": "limit"} if t["status"] == "queued" and (t.get("hold_until", 0) > time.time() or pm_limit(t)) else {})}
                       for t in TASKS.values() if t["status"] != "draft"]
                 for x in ts:
                     if TASKS[x["id"]].get("need_login") and x["status"] == "queued":
@@ -1967,7 +2161,7 @@ class H(BaseHTTPRequestHandler):
                                    "projects": [{"id": p["id"], "name": p["name"]} for p in projects()],
                                    "templates": [{"id": x["id"], "name": x["name"], "steps": len(x.get("steps", []))} for x in templates()], "instructions": CFG["instructions"],
                                    "tasks": ts, "version": VERSION, "release": RELEASE, "autostart": autostart_on(), "os": "mac" if IS_MAC else "win" if IS_WIN else "other", "updated": upd, "update_fail": fail,
-                                   "machine": {"cpu": CPU, "ram": RAM_GB, "max": MAX_RUNNING}})
+                                   "machine": {"cpu": CPU, "ram": RAM_GB, "max": MAX_RUNNING}, "setup": setup_state()})
         if u.path == "/api/registry":
             return self.send(200, registry(force=q.get("force", [""])[0] == "1"))
         if u.path == "/api/task":
@@ -2029,6 +2223,8 @@ class H(BaseHTTPRequestHandler):
             return export_log()
         if path == "/api/ai/refresh":
             return refresh_status()
+        if path == "/api/gemini-key":
+            return set_gemini_key(str(d.get("key") or ""))
         if path == "/api/update":
             return update_now()
         if path == "/api/pick":
@@ -2557,6 +2753,114 @@ def run_limited(cmd, cwd, timeout):
         return -1, so, se, True
 
 
+GEMINI_API = os.environ.get("AIO_GEMINI_BASE") or "https://generativelanguage.googleapis.com"
+API_SKIP = ("embedding", "tts", "image", "live", "audio", "aqa", "robotics", "computer-use", "native", "learnlm", "gemma")
+
+
+def gemini_api_call(key, path, body=None, timeout=30):
+    """Gọi Gemini API bằng key của người dùng (key gửi trong header, không nằm trong đường dẫn) -> (mã HTTP, JSON)."""
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(GEMINI_API + path, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"x-goog-api-key": key, "Content-Type": "application/json", "User-Agent": "maestro"})
+    try:
+        r = urllib.request.urlopen(req, timeout=timeout)
+        return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except Exception:
+            return e.code, {}
+
+
+def api_err(j):
+    return str(((j or {}).get("error") or {}).get("message") or "")[:300]
+
+
+def gemini_api_models(key):
+    """Danh sách model Gemini mà key dùng được (mới nhất trước). Key sai -> ValueError."""
+    code, j = gemini_api_call(key, "/v1beta/models?pageSize=1000", timeout=20)
+    if code != 200:
+        raise ValueError(api_err(j) or f"HTTP {code}")
+    names = []
+    for m in j.get("models") or []:
+        n = str(m.get("name", "")).split("/")[-1]
+        if n.startswith("gemini") and "generateContent" in (m.get("supportedGenerationMethods") or []) and not any(x in n for x in API_SKIP):
+            names.append(n)
+
+    def ver(n):
+        m = re.search(r"gemini-(\d+(?:\.\d+)?)", n)
+        return float(m.group(1)) if m else 0.0
+    return sorted(dict.fromkeys(names), key=lambda n: (-ver(n), "preview" in n or "exp" in n, n))
+
+
+def api_order(models, hard):
+    """Thứ tự thử model: thường Flash -> Flash-Lite -> Pro; việc khó Pro trước. Mỗi nhóm: bản mới nhất trước."""
+    flash = [m for m in models if "flash" in m and "lite" not in m]
+    lite = [m for m in models if "lite" in m]
+    pro = [m for m in models if "pro" in m]
+    rest = [m for m in models if m not in flash + lite + pro]
+    return (pro + flash + lite if hard else flash + lite + pro) + rest
+
+
+API_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+            ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/plain", ".csv": "text/csv", ".json": "application/json",
+            ".html": "text/html"}
+
+
+def api_worker(st, v, key, text, a):
+    """Worker Gemini qua API key: chỉ trả lời bằng chữ (đọc được ảnh/PDF/file chữ trong input mà task nhắc tên)."""
+    inp = Path(os.environ.get("AIO_INPUT") or Path.cwd() / "input")
+    parts, total = [{"text": text + "\n\n---\nTrả lời đầy đủ bằng chữ (markdown). Bạn không tạo/sửa được file."}], 0
+    if inp.is_dir():
+        for f in sorted(inp.iterdir()):
+            mime = API_MIME.get(f.suffix.lower())
+            if f.is_file() and mime and f.name in text and total + f.stat().st_size < 15 * 2 ** 20:
+                total += f.stat().st_size
+                parts.append({"text": f"[File đính kèm: {f.name}]"})
+                parts.append({"inline_data": {"mime_type": mime, "data": base64.b64encode(f.read_bytes()).decode()}})
+    models = (rjson(CFG_FILE, {}) or {}).get("gemini_api_models") or []
+    t0, log, limited, err, m = time.time(), [], False, "", ""
+    try:
+        models = models or gemini_api_models(key)
+        hard = a.hard or os.environ.get("AIO_HARD") == "1" or v.name != "v1"
+        for m in api_order([x for x in models if x not in bad_models("gemini_api")], hard)[:5]:
+            body = {"contents": [{"role": "user", "parts": parts}], "tools": [{"google_search": {}}]}
+            code, j = gemini_api_call(key, f"/v1beta/models/{m}:generateContent", body, a.timeout)
+            if code == 400 and "tool" in api_err(j).lower() or code == 400 and "search" in api_err(j).lower():
+                body.pop("tools")                  # model không hỗ trợ tìm kiếm Google -> gọi không kèm
+                code, j = gemini_api_call(key, f"/v1beta/models/{m}:generateContent", body, a.timeout)
+            log.append(f"{m}: HTTP {code} {api_err(j)}")
+            if code == 200:
+                out = "".join(p_.get("text", "") for c in j.get("candidates") or [] for p_ in (c.get("content") or {}).get("parts") or [])
+                if out.strip():
+                    (v / "result.md").write_text(out, encoding="utf-8")
+                    st.update(status="completed", model="api:" + m, via="api", seconds=round(time.time() - t0), error="", exit_code=0)
+                    st.pop("reset", None)
+                    break
+                err = "Gemini API không trả nội dung (có thể bị bộ lọc an toàn chặn)"
+            elif code == 429:
+                limited, err = True, api_err(j) or "Gemini API hết lượt (429)"
+            elif code in (401, 403) or code == 400 and "api key" in api_err(j).lower():
+                err = "Gemini API key không dùng được: " + api_err(j)
+                break
+            elif code == 404:
+                mark_bad_model("gemini_api", m)
+            else:
+                err = api_err(j) or f"HTTP {code}"
+    except Exception as e:
+        err = f"Không gọi được Gemini API: {e}"[:300]
+    if st.get("via") != "api" or st.get("status") != "completed":
+        if limited:
+            lm = note_limit("gemini_api", err)
+            st.update(status="limit", reset=lm["until"], via="api", model="api:" + (m or "?"),
+                      error="Gemini API hết lượt, dùng lại lúc " + datetime.datetime.fromtimestamp(lm["until"]).strftime("%H:%M"))
+        else:
+            st.update(status="failed", via="api", model="api:" + (m or "?"), error=err or "Gemini API lỗi")
+    with open(v / "worker.log", "a", encoding="utf-8") as fh:
+        fh.write("--- gemini api ---\n" + "\n".join(log) + "\n")
+
+
 def edit_refused(p):
     """Thư mục quá rộng/nguy hiểm để cho worker sửa thẳng -> lý do từ chối ('' = được phép)."""
     if not p.is_dir():
@@ -2664,6 +2968,13 @@ def cmd_worker(argv):
         return wait_status(v, a.timeout + 180)
     exe = find_bin("codex" if a.worker == "codex" else "agy")
     bad_edit = edit_refused(edit) if edit else ""
+    cfgd = rjson(CFG_FILE, {}) or {}
+    key = cfgd.get("gemini_key", "") if a.worker == "gemini" else ""
+    # Gemini: không có Antigravity / chưa đăng nhập / đang hết lượt -> dùng Gemini API key (nếu người dùng đã thêm)
+    use_api = bool(key) and not edit and (not exe or ((cfgd.get("ais") or {}).get("gemini") or {}).get("ok") is False
+                                          or bool(limits().get("gemini")))
+    if key and edit and not exe:
+        bad_edit = bad_edit or "Gemini qua API key không sửa file được: giao codex hoặc tự sửa"
     if edit and not bad_edit:
         st["edit_dir"] = str(edit)
         st["backup"] = backup_dir(edit, v / "_backup")
@@ -2671,8 +2982,12 @@ def cmd_worker(argv):
         st.update(status="failed", error=bad_edit)
     elif not task.exists():
         st.update(status="failed", error=f"Không thấy {task}")
-    elif not exe:
+    elif not exe and not use_api:
         st.update(status="failed", error="Worker chưa cài")
+    elif use_api:
+        text = task.read_text(encoding="utf-8")
+        (v / "TASK.md").write_text(text, encoding="utf-8")
+        api_worker(st, v, key, text, a)
     else:
         text = task.read_text(encoding="utf-8")
         (v / "TASK.md").write_text(text, encoding="utf-8")
@@ -2756,6 +3071,9 @@ def cmd_worker(argv):
             st.update(status="failed", error="Worker không trả kết quả")
         else:
             st["status"] = "completed"
+    if key and not use_api and not edit and "exit_code" in st and st.get("status") in ("limit", "failed"):   # Antigravity hết lượt/lỗi -> thử API
+        st["agy_error"] = st.pop("error", "")[:300]
+        api_worker(st, v, key, (v / "TASK.md").read_text(encoding="utf-8") if (v / "TASK.md").exists() else "", a)
     st["files"] = sorted(str(f.relative_to(v)).replace("\\", "/") for f in v.rglob("*")
                          if f.is_file() and f.name not in ("TASK.md", "worker.log", "status.json", "result.md")
                          and "_backup" not in f.relative_to(v).parts)

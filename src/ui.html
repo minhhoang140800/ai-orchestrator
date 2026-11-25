@@ -110,6 +110,9 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .accrow{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .accrow .n{flex:1;min-width:0}.accrow small{display:block;color:var(--mute);font-size:12px;overflow-wrap:anywhere}
 .accrow small.bad{color:var(--bad)}
+.plan{display:inline-block;margin-left:6px;padding:0 6px;border:1px solid var(--line);border-radius:6px;font-size:11px;color:var(--mute);font-weight:500}
+.freebar{margin:0 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fafaf9;font-size:13px;color:var(--mute);display:flex;gap:10px;align-items:center}
+.freebar b{color:var(--ink,#222)}.freebar .grow{flex:1}
 .path{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:7px 10px;background:var(--soft);border-radius:8px}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 14px;border-radius:8px;display:none;z-index:9;max-width:90vw}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:s .8s linear infinite;flex:none}
@@ -397,7 +400,7 @@ async function refresh() {
   renderSide();
   if (sel && !S.tasks.find((t) => t.id === sel)) sel = "";
   if (view === "lib") { /* đang xem thư viện */ } else if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
-  if ($("ov").classList.contains("show") && !$("mUpd")?.disabled && !(document.activeElement?.id || "").startsWith("code_") && !Object.entries(S.ais).some(([k, x]) => x.code && document.querySelector(`[data-code=${k}]:disabled`))) renderSettings();
+  if ($("ov").classList.contains("show") && !$("mUpd")?.disabled && !(document.activeElement?.id || "").startsWith("code_") && document.activeElement?.id !== "gKey" && !Object.entries(S.ais).some(([k, x]) => x.code && document.querySelector(`[data-code=${k}]:disabled`))) renderSettings();
   feedLoginWin();
   if (!firstRun) { firstRun = true; if (!S.output || !S.ais.claude.ok) openSettings(); }
 }
@@ -735,12 +738,18 @@ function bindTpl() {
     curTpl = b.dataset.tpl; ta.value = ""; m.classList.remove("show"); paintTpl(); ta.placeholder = "Yêu cầu lần này"; ta.focus();
   };
 }
+function freeBar() {        // gói miễn phí: ChatGPT làm quản lý, mời thêm Gemini API key
+  const st = S.setup || {};
+  if (!st.pm) return Object.values(S.ais).some((a) => a.pending) ? "" : `<div class="freebar"><span class="grow">Cần đăng nhập <b>ChatGPT</b> (gói nào cũng được) hoặc <b>Claude</b> (gói trả phí) để Maestro làm việc.</span><button class="pri" data-opset="1">Đăng nhập</button></div>`;
+  if (!st.free) return "";
+  return `<div class="freebar"><span class="grow"><b>Chế độ Free</b> — ChatGPT làm quản lý, chạy tiết kiệm lượt dùng.${st.gemini_key ? "" : " Thêm <b>Gemini API key</b> (miễn phí) để có thêm lượt."}</span>${st.gemini_key ? "" : `<button class="pri" data-opset="1">Thêm key</button>`}</div>`;
+}
 function renderHome() {
   T = null; lastSnap = "";
   const rec = S.tasks.slice(0, 5);
   $("main").innerHTML = `<div class="crumb"><span>Workspace / Task mới</span><span class="grow"></span>${projBtn()}</div>
     <div class="home"><div class="in"><h2>Hôm nay làm gì?</h2>
-    ${composer("homeComp", PH_NEW)}
+    ${freeBar()}${composer("homeComp", PH_NEW)}
     ${rec.length ? `<div class="recent"><div class="k">Task gần đây</div>${rec.map((t) => `<button data-sel="${t.id}"><span>${esc(t.title)}</span><small>${esc(whenTxt(t.created))}</small></button>`).join("")}</div>` : ""}</div></div>`;
   bindComposer(sendNew); bindProj(); bindTpl(); paintTpl();
   $("txt").focus();
@@ -887,7 +896,7 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec]");
+  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec],[data-opset],[data-paste],[data-fb]");
   if (!el) return;
   const d = el.dataset;
   if (d.libtab) { libTab = d.libtab; return renderLib(); }
@@ -919,8 +928,11 @@ document.addEventListener("click", async (e) => {
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
   else if (d.relogin) { await api("/api/ai/cancel", { ai: "claude" }); setTimeout(() => api("/api/ai/login", { ai: "claude" }), 1500); }
   else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; el.innerHTML = '<span class="spin"></span>'; const r = await api("/api/ai/code", { ai: d.code, code: v }); if (r.error) toast(r.error); setTimeout(() => { if (el.isConnected) { el.disabled = false; el.textContent = "Gửi"; toast("Mã chưa được chấp nhận — thử lại hoặc bấm Hủy rồi Đăng nhập lại"); } }, 12000); }
+  else if (d.opset) openSettings();
+  else if (d.fb) { e.preventDefault(); fb[d.fb] = 1; renderSettings(); }
+  else if (d.paste) { try { const v = (await navigator.clipboard.readText()).trim(); if (v) { $("code_" + d.paste).value = v; document.querySelector(`[data-code=${d.paste}]`)?.click(); } } catch (e) { toast("Trình duyệt chặn đọc bộ nhớ tạm — bấm chuột phải vào ô rồi chọn Dán"); } }
   else if (d.cancel) { await api("/api/ai/cancel", { ai: d.cancel }); try { if (loginWin && !loginWin.closed) loginWin.close(); } catch (e) {} loginWin = null; }
-  else if (d.login) { openLoginWin(d.login); S.ais[d.login].pending = "login"; renderSettings(); const r = await api("/api/ai/login", { ai: d.login, switch: !!d.switch }); if (r.error) toast(r.error); }
+  else if (d.login) { if (d.login !== "claude") openLoginWin(d.login); S.ais[d.login].pending = "login"; renderSettings(); const r = await api("/api/ai/login", { ai: d.login, switch: !!d.switch }); if (r.error) toast(r.error); }
 });
 $("btnLib").onclick = () => openLib();
 $("btnNew").onclick = () => { view = ""; sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
@@ -949,19 +961,33 @@ function autoLogin() {      // tự mở lần lượt trang đăng nhập của
   if (!next) { chain = false; return; }
   tried.add(next[0]); S.ais[next[0]].pending = "login"; api("/api/ai/login", { ai: next[0] });
 }
+function planTxt(p) {
+  if (!p) return "";
+  const n = { free: "Free", plus: "Plus", pro: "Pro", max: "Max", team: "Team", enterprise: "Enterprise", business: "Business", edu: "Edu", go: "Go" }[p] || p;
+  return `<span class="plan">${esc(n)}</span>`;
+}
 function accState(k, a) {
   if (a.limit_until && !a.pending) return `<small class="bad">${esc(limTxt(a))}</small>`;
   if (!a.installed) return `<small class="bad">Chưa cài — bấm đúp lại file cài Maestro (.bat)</small>`;
-  if (a.code && k === "claude") return `<small>1. Trong cửa sổ đăng nhập bấm <b>Authorize</b> → copy mã hiện ra${a.url ? ` (<a href="${esc(a.url)}" target="aio_login">mở lại</a>)` : ""}. 2. Dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Dán mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`;
-  if (a.code) return `<small>1. Đăng nhập Google trên tab vừa mở${a.url ? ` (<a href="${esc(a.url)}" target="_blank">mở lại</a>)` : ""} → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Dán mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`;
+  const codeBox = `<span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Dán mã xác nhận"><button data-paste="${k}">Dán</button><button class="pri" data-code="${k}">Gửi</button></span>`;
+  if (a.code && k === "claude" && a.auto) return `<small>Trang đăng nhập Claude đã mở trên trình duyệt: đăng nhập rồi bấm <b>Authorize</b> — xong tự nhận, không cần làm gì thêm.</small>${fb[k] ? `<small>${a.url ? `<a href="${esc(a.url)}" target="aio_login">Mở trang đăng nhập</a> → bấm <b>Authorize</b> → bấm copy mã → quay lại đây (Maestro tự dán).` : ""}</small>${codeBox}` : `<small><a href="#" data-fb="${k}">Không thấy trang đăng nhập?</a></small>`}`;
+  if (a.code && k === "claude") return `<small>1. ${a.url ? `<a href="${esc(a.url)}" target="aio_login">Mở trang đăng nhập</a>` : "Trong cửa sổ đăng nhập"} → bấm <b>Authorize</b> → bấm copy mã. 2. Quay lại đây — Maestro tự dán mã (hoặc bấm Dán).</small>${codeBox}`;
+  if (a.code) return `<small>1. Đăng nhập Google trên tab vừa mở${a.url ? ` (<a href="${esc(a.url)}" target="_blank">mở lại</a>)` : ""} → bấm <b>Copy to Clipboard</b>. 2. Quay lại đây — Maestro tự dán mã (hoặc bấm Dán).</small>${codeBox}`;
   if (a.pending) return `<small>Đăng nhập trong cửa sổ vừa mở${a.url ? ` · <a href="${esc(a.url)}" target="aio_login">mở lại trang đăng nhập</a>` : "…"}</small>`;
-  if (a.ok) return `<small>${a.email ? esc(a.email) : "Đã đăng nhập"}</small>`;
+  if (a.ok && k === "claude" && a.paid === false) return `<small class="bad">${a.email ? esc(a.email) + " · " : ""}gói miễn phí — Claude Code cần gói trả phí; ChatGPT sẽ làm quản lý thay</small>`;
+  if (a.ok) return `<small>${a.email ? esc(a.email) : "Đã đăng nhập"}${planTxt(a.plan)}</small>`;
   return `<small class="bad">${esc(a.msg || "Chưa đăng nhập")}</small>`;
 }
 function renderSettings() {
   const acc = Object.entries(S.ais).map(([k, a]) => `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${accState(k, a)}</span>
       ${a.pending ? `<button data-cancel="${k}">Hủy</button>` : `<button class="${a.ok ? "" : "pri"}" data-login="${k}" data-switch="${a.ok ? 1 : ""}" ${a.installed ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button>`}</div>`).join("");
-  $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI</span>${acc}</div>
+  const st = S.setup || {};
+  const gk = st.gemini_key
+    ? `<div class="row"><span class="path">Đã có key · ${st.gemini_api_models} model Gemini</span><button id="gDel">Xoá key</button></div>`
+    : `<div class="row"><input type="password" id="gKey" placeholder="Dán API key (AIza…)" autocomplete="off" style="flex:1"><button id="gGet">Lấy key ↗</button><button class="pri" id="gSave">Lưu</button></div>`;
+  const gkBox = `<div class="f"><span class="k">Gemini API key ${st.free ? "(nên thêm — miễn phí)" : "(tuỳ chọn)"}</span>${gk}
+    <small style="display:block;color:var(--mute);font-size:12px;margin-top:6px">Dùng khi Gemini hết lượt hoặc chưa đăng nhập. Bấm <b>Lấy key</b> → <b>Create API key</b> → copy → quay lại đây, Maestro tự dán và lưu. Key chỉ lưu trên máy này.<br>Lưu ý: dữ liệu gửi qua key miễn phí có thể được Google dùng để cải thiện sản phẩm — không dùng cho tài liệu mật.</small></div>`;
+  $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI${st.free ? ` <span class="plan">Chế độ Free</span>` : st.pm === "codex" ? ` <span class="plan">ChatGPT làm quản lý</span>` : ""}</span>${acc}</div>${gkBox}
     <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>
     <div class="f"><span class="k">Ứng dụng</span><div class="row"><label class="sw"><input type="checkbox" id="oAuto" ${S.autostart ? "checked" : ""}><span>Mở Maestro khi đăng nhập máy</span></label><span style="flex:1"></span><button id="oQuit" title="Tắt hẳn Maestro. Task đang chạy sẽ tự chạy tiếp khi mở lại.">Thoát Maestro</button></div></div>`;
   $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><button class="icon" id="mBell" title="Thông báo" aria-label="Thông báo"><svg class="i" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button><button id="mLog" title="Lưu log (.zip) vào thư mục kết quả">Export log</button><button id="mClr" title="Xóa file nháp, file trùng. Giữ lịch sử.">Clear cache</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
@@ -979,6 +1005,10 @@ function renderSettings() {
     await api("/api/quit", {}); closeSettings(); window.QUIT = true;
     document.body.innerHTML = `<div style="display:grid;place-items:center;height:100vh;font:15px system-ui;color:#555;text-align:center">Đã thoát Maestro.<br>Mở lại từ ${S.os === "mac" ? "Launchpad / Applications" : "Start Menu"} (Maestro).</div>`;
   };
+  const saveKey = async (v) => { const r = await api("/api/gemini-key", { key: v }); toast(r.error || r.msg); if (!r.error) { await refresh(); renderSettings(); } return !r.error; };
+  if ($("gSave")) $("gSave").onclick = () => { const v = $("gKey").value.trim(); if (v) saveKey(v); else $("gKey").focus(); };
+  if ($("gGet")) $("gGet").onclick = () => { window.open("https://aistudio.google.com/apikey", "_blank"); keyWait = true; };
+  if ($("gDel")) $("gDel").onclick = () => { if (confirm("Xoá Gemini API key khỏi máy này?")) saveKey(""); };
   $("mLog").onclick = async () => { const r = await api("/api/export-log", {}); toast(r.error || r.msg); };
   $("oPick").onclick = async () => { const r = await api("/api/pick", {}); if (r.path) { form.output = r.path; const s = await api("/api/setup", form); if (s.error) toast(s.error); else S.output = form.output; renderSettings(); } };
   $("mDone").onclick = () => { if (!S.output) return toast("Chọn thư mục nhận kết quả"); closeSettings(); };
@@ -989,7 +1019,23 @@ function renderSettings() {
     renderSettings();
   };
 }
-function closeSettings() { $("ov").classList.remove("show"); chain = false; kick(); }
+let keyWait = false, lastClip = "", fb = {};
+async function clipCheck() {   // quay lại tab Maestro: tự dán mã đăng nhập / API key vừa copy
+  if (!$("ov").classList.contains("show") || !navigator.clipboard?.readText) return;
+  const box = document.querySelector("[id^=code_]"), kb = $("gKey");
+  if (!box && !(kb && keyWait)) return;
+  let v = ""; try { v = (await navigator.clipboard.readText()).trim(); } catch (e) { return; }
+  if (!v || v === lastClip || v.length > 900 || /\s/.test(v)) return;
+  if (kb && keyWait && /^AIza[\w-]{30,}$/.test(v)) { lastClip = v; keyWait = false; kb.value = v; $("gSave").click(); return; }
+  if (box && !box.value && !/^https?:/.test(v) && !/^AIza/.test(v) && v.length >= 20) { lastClip = v; box.value = v; document.querySelector(`[data-code=${box.id.slice(5)}]`)?.click(); }
+}
+addEventListener("focus", clipCheck);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) clipCheck(); });
+function closeSettings() {
+  $("ov").classList.remove("show"); chain = false;
+  if ($("homeComp") && !$("txt").value.trim()) renderHome();   // banner chế độ Free/đăng nhập đổi theo tài khoản vừa sửa
+  kick();
+}
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("ov").classList.contains("show")) closeSettings(); });
 
 refresh();
