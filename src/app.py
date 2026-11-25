@@ -1409,6 +1409,8 @@ class H(BaseHTTPRequestHandler):
         q = parse_qs(u.query)
         if u.path in ("/favicon.ico", "/icon.svg"):
             return self.send(200, ICON_SVG, "image/svg+xml")
+        if u.path == "/ping":                       # bộ khởi động kiểm tra đúng tiến trình vừa chạy đã lên
+            return self.send(200, {"pid": os.getpid(), "release": RELEASE})
         if u.path == "/":
             if q.get("t"):
                 return self.send(302, b"", "text/plain", {"Location": "/"})
@@ -1436,8 +1438,16 @@ class H(BaseHTTPRequestHandler):
             upd = CFG.pop("updated_to", "")
             if upd:
                 save_cfg()
+            fail = ""
+            bj = DATA / "boot.json"
+            if bj.exists():
+                b = rjson(bj, {}) or {}
+                upd = upd or b.pop("updated_to", "")
+                fail = b.pop("update_fail", "")
+                if upd or fail:
+                    wjson(bj, b)
             return self.send(200, {"ais": ai_state(), "output": CFG["output"], "instructions": CFG["instructions"],
-                                   "tasks": ts, "version": VERSION, "release": RELEASE, "updated": upd,
+                                   "tasks": ts, "version": VERSION, "release": RELEASE, "updated": upd, "update_fail": fail,
                                    "machine": {"cpu": CPU, "ram": RAM_GB, "max": MAX_RUNNING}})
         if u.path == "/api/registry":
             return self.send(200, registry(force=q.get("force", [""])[0] == "1"))
@@ -1580,6 +1590,7 @@ def shutdown():
 
 
 UPDATED = {"pending": None, "done": ""}
+VERS = HOME / "versions"
 
 
 _reg = {"t": 0.0, "data": None}
@@ -1769,11 +1780,21 @@ def fetch_update():
             base = f"https://raw.githubusercontent.com/{m.group(1)}/{sha}/"
     except Exception:
         pass
-    meta = json.loads(urllib.request.urlopen(base + "latest.json", timeout=20).read())
+    try:      # đọc latest.json qua API (không bị bộ đệm), lỗi thì đọc theo commit
+        req = urllib.request.Request(f"https://api.github.com/repos/{m.group(1)}/contents/latest.json?ref={m.group(2)}",
+                                     headers={"Accept": "application/vnd.github.raw", "User-Agent": "ai-orchestrator"})
+        meta = json.loads(urllib.request.urlopen(req, timeout=15).read())
+    except Exception:
+        meta = json.loads(urllib.request.urlopen(base + "latest.json", timeout=20).read())
     if meta.get("version", "") > VERSION:
         body = urllib.request.urlopen(base + "app.py", timeout=60).read()
+        if meta["version"] in ((rjson(DATA / "boot.json", {}) or {}).get("bad_versions") or []):
+            return ""                                  # bản này đã lỗi khi khởi động trên máy này -> bỏ qua
         if hashlib.sha256(body).hexdigest() == meta.get("sha256"):
-            (HOME / "app.py.new").write_bytes(body)
+            vd = VERS / meta["version"]
+            vd.mkdir(parents=True, exist_ok=True)
+            (vd / "app.py.part").write_bytes(body)
+            os.replace(vd / "app.py.part", vd / "app.py")
             UPDATED["pending"] = meta["version"]
             m = re.search(rb'^RELEASE = "([^"]+)"', body, re.M)
             UPDATED["release"] = m.group(1).decode() if m else ""
@@ -1809,17 +1830,81 @@ def check_update():
 
 
 def apply_update():
-    new = HOME / "app.py.new"
-    if not new.exists():
+    """Giao cho bộ khởi động (HOME/app.py): chạy thử bản mới, lên được mới dùng, không thì quay về bản cũ."""
+    v = UPDATED["pending"]
+    if not v or not (VERS / v / "app.py").exists():
         return
-    os.replace(new, APP)
-    (HOME / "version.txt").write_text(UPDATED["pending"], encoding="ascii")
-    CFG["updated_to"] = UPDATED["pending"]
-    save_cfg()
-    env = dict(os.environ, AIO_RESTART="1")
-    subprocess.Popen([sys.executable, str(APP), "--background"], cwd=str(HOME), env=env,
-                     creationflags=NO_WINDOW)
+    (HOME / "next.txt").write_text(v, encoding="ascii")
+    boot = HOME / "app.py"
+    env = {k: x for k, x in os.environ.items() if k not in ("AIO_CHILD",)}
+    env["AIO_RESTART"] = "1"
+    subprocess.Popen([sys.executable, str(boot), "--background"], cwd=str(HOME), env=env, creationflags=NO_WINDOW)
     os._exit(0)
+
+
+def _healthy(timeout, proc=None):
+    import urllib.request
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if proc is not None and proc.poll() is not None:
+            return False
+        for p in PORTS:
+            try:
+                ok = b"<" in urllib.request.urlopen(f"http://127.0.0.1:{p}/", timeout=3).read()[:50]
+                if proc is not None:
+                    ok = ok and json.loads(urllib.request.urlopen(f"http://127.0.0.1:{p}/ping", timeout=2).read()).get("pid") == proc.pid
+                if ok:
+                    return True
+            except Exception:
+                pass
+        time.sleep(0.5)
+    return False
+
+
+def boot(argv):
+    """Bộ khởi động: luôn là HOME/app.py (chỉ đổi khi cài lại bằng file .bat).
+    Chạy bản trong versions/ (current.txt), thử bản mới (next.txt) trước; bản nào không lên trong 40 giây thì bỏ."""
+    cfgf = DATA / "boot.json"            # file riêng: bản đang chạy không ghi đè lên
+    def cfg_set(**kw):
+        c = rjson(cfgf, {}) or {}
+        for k, v in kw.items():
+            if k == "bad":
+                c["bad_versions"] = (c.get("bad_versions") or [])[-9:] + [v]
+            else:
+                c[k] = v
+        wjson(cfgf, c)
+    if os.environ.get("AIO_RESTART"):          # chờ bản cũ tắt hẳn
+        for _ in range(20):
+            if running_port() is None:
+                break
+            time.sleep(0.5)
+    elif running_port():                        # đã chạy rồi -> để bản đang chạy mở trình duyệt
+        return False
+    nxt = (HOME / "next.txt").read_text("ascii").strip() if (HOME / "next.txt").exists() else ""
+    cur = (HOME / "current.txt").read_text("ascii").strip() if (HOME / "current.txt").exists() else ""
+    (HOME / "next.txt").unlink(missing_ok=True)
+    for v in [x for x in dict.fromkeys([nxt, cur]) if x and x > VERSION]:   # bản cài lại bằng .bat mới hơn -> dùng nó
+        f = VERS / v / "app.py"
+        if not f.exists():
+            continue
+        env = dict(os.environ, AIO_CHILD="1", AIO_HOME=str(HOME), AIO_RESTART="1")
+        p = subprocess.Popen([sys.executable, str(f)] + argv, cwd=str(HOME), env=env, creationflags=NO_WINDOW)
+        if _healthy(90, p) and p.poll() is None:
+            if v != cur:
+                (HOME / "current.txt").write_text(v, encoding="ascii")
+                cfg_set(updated_to=v)
+                keep = {v, cur}
+                for d in VERS.iterdir():                 # chỉ giữ bản đang dùng + bản trước đó
+                    if d.is_dir() and d.name not in keep:
+                        shutil.rmtree(d, ignore_errors=True)
+            return True
+        kill_tree(p)
+        if v != cur:
+            shutil.rmtree(VERS / v, ignore_errors=True)
+        cfg_set(bad=v, update_fail=f"Bản mới ({v}) không khởi động được nên đã quay về bản trước.")
+        if v == cur:
+            (HOME / "current.txt").unlink(missing_ok=True)
+    return None                                  # không có bản nào trong versions/ chạy được -> chạy chính file này
 
 
 def running_port():
@@ -2141,4 +2226,11 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "judge":
         cmd_judge(sys.argv[2:])
     else:
+        if not os.environ.get("AIO_CHILD") and APP.parent == HOME and VERSION != "dev":
+            r = boot(sys.argv[1:])
+            if r is not None:
+                if r is False and "--background" not in sys.argv:
+                    webbrowser.open(app_url(running_port()))
+                sys.exit(0)
+            os.environ["AIO_RESTART"] = "1"
         serve(background="--background" in sys.argv)

@@ -37,6 +37,8 @@ del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\AI Orchestrator.
 del /q "%USERPROFILE%\Desktop\AI Orchestrator.lnk" >nul 2>&1
 del /q "%APPDIR%\app.py" "%APPDIR%\app.py.new" "%APPDIR%\app.py.old" "%APPDIR%\version.txt" "%APPDIR%\icon.ico" "%APPDIR%\install.log" >nul 2>&1
 if exist "%APPDIR%\__pycache__" rd /s /q "%APPDIR%\__pycache__"
+if exist "%APPDIR%\versions" rd /s /q "%APPDIR%\versions"
+del /q "%APPDIR%\current.txt" "%APPDIR%\next.txt" "%APPDIR%\data\boot.json" >nul 2>&1
 del /q "%APPDIR%\data\config.json" "%APPDIR%\data\debug.log" >nul 2>&1
 if exist "%APPDIR%\data\.login" rd /s /q "%APPDIR%\data\.login"
 rem giu lai %APPDIR%\data\tasks (lich su cua ban cu, neu con)

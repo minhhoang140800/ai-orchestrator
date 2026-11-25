@@ -41,6 +41,26 @@ built = built.replace('RELEASE = "dev"', f'RELEASE = "{rel}"', 1)
 built = built.replace('VERSION = "dev"', f'VERSION = "{ver}"', 1).replace('UPDATE_BASE = ""', f'UPDATE_BASE = "{base}"', 1)
 (d / "dist").mkdir(exist_ok=True)
 (d / "dist" / "app.py").write_bytes(built.encode("utf-8"))
+# ---- kiểm tra trước khi phát hành: thiếu địa chỉ cập nhật / lỗi cú pháp / không khởi động được -> dừng
+assert base, "Thiếu địa chỉ cập nhật (UPDATE_BASE)"
+import py_compile, subprocess, tempfile, time, urllib.request, sys as _s
+py_compile.compile(str(d / "dist" / "app.py"), doraise=True)
+_h = tempfile.mkdtemp()
+_p = subprocess.Popen([_s.executable, str(d / "dist" / "app.py"), "--background"],
+                      env=dict(os.environ, AIO_HOME=_h, AIO_PORT="18765", AIO_NO_BROWSER="1", AIO_CHILD="1"),
+                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+_ok = False
+for _ in range(40):
+    time.sleep(0.5)
+    try:
+        _ok = b"<svg" in urllib.request.urlopen("http://127.0.0.1:18765/icon.svg", timeout=2).read()[:200] and \
+              b"<" in urllib.request.urlopen("http://127.0.0.1:18765/", timeout=3).read()[:50]
+        if _ok:
+            break
+    except Exception:
+        pass
+_p.kill()
+assert _ok, "Bản build không khởi động được: " + (_p.stderr.read() or b"").decode(errors="replace")[-800:]
 (d / "dist" / "latest.json").write_text(json.dumps({"version": ver, "sha256": hashlib.sha256(built.encode("utf-8")).hexdigest()}), encoding="utf-8")
 ps = (d / "install.tpl.ps1").read_text(encoding="utf-8")
 ps = (ps.replace("__APP_B64__", base64.b64encode(built.encode("utf-8")).decode())

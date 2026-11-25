@@ -273,6 +273,7 @@ async function refresh() {
   }
   $("ver").textContent = S.release && S.release !== "dev" ? "v" + S.release : "";
   if (S.updated) toast("Đã cập nhật lên v" + S.release);
+  if (S.update_fail) toast(S.update_fail);
   const w = S.tasks.filter((t) => t.status === "waiting").length;
   document.title = (w ? `(${w}) ` : "") + "AI Orchestrator";
   renderSide();
