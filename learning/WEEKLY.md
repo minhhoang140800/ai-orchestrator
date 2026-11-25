@@ -8,8 +8,9 @@ Bạn là Claude chạy tự động, không có người trả lời. Làm hế
 - Đọc `CLAUDE.md` của repo trước. Không sửa phần code nào ngoài các mục nêu dưới đây.
 
 ## 1. Lấy bài học mới
-- `src/learn_form.json` có `"sheet"` (link Google Sheet nhận câu trả lời của Google Form) thì đọc bằng công cụ Google Drive.
-  Chưa có -> bỏ qua bước 1–2, chỉ làm bước 3.
+- `src/learn_form.json` có `"sheet"` (link Google Sheet nhận câu trả lời của Google Form, chia sẻ "bất kỳ ai có link đều xem")
+  thì tải bản CSV: `https://docs.google.com/spreadsheets/d/<ID>/export?format=csv` (curl/python). Không tải được mà có công cụ
+  Google Drive thì đọc bằng công cụ đó. Chưa có link / không tải được -> ghi rõ trong trả lời cuối, bỏ qua bước 1–2, làm bước 3.
 - Mỗi dòng: thời điểm + 1 ô JSON (báo cáo ẩn danh: `category`, `lessons`, `subtasks` [worker, model, status, seconds],
   `mode`, `pm`, `plans`, `models`, `release`, `os`). Chỉ lấy dòng mới hơn `learning/state.json` → `last_at`.
 
