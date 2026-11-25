@@ -614,6 +614,11 @@ Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worke
    - Giám khảo dùng model nhỏ (sonnet/haiku) trừ chế độ Pro.
    Bỏ qua hết khi hỏi đáp/tra cứu hoặc người dùng bảo làm nhanh/nháp.
 
+## Google Drive / Sheets / Docs / Slides
+Link Google: dùng công cụ Google Drive có sẵn (mcp__claude_ai_Google_Drive: tìm, đọc, tải file, tạo/cập nhật file).
+Sửa: tải về (xlsx/docx/pptx), sửa đúng yêu cầu (giữ định dạng), lưu vào OUTPUT; nếu công cụ Drive cho cập nhật file thì
+cập nhật bản trên Drive, nếu không thì nói rõ một câu và chỉ cách thay (File > Import > Upload > Replace).
+
 ## Storyboard
 Storyboard viết dạng BẢNG CHỮ (cảnh, thời lượng, hình ảnh, chữ trên màn hình, âm thanh, CTA) trong câu trả lời hoặc tài liệu.
 KHÔNG tự tạo ảnh/khung hình storyboard, trừ khi người dùng yêu cầu rõ (vẽ/minh hoạ/render storyboard).
@@ -752,7 +757,8 @@ def start_run(t):
         q.unlink()
     args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
             "--permission-mode", "acceptEdits",
-            "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite"]
+            "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite,"
+                              "mcp__claude_ai_Google_Drive"]
     ef = (wdir(t) / "tasks" / "effort.txt")
     hard = t.get("mode") == "fast" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh"
     cm, ce = pick_model("claude", t.get("mode", "balanced"), hard)   # Pro + bước quá khó: mức cao nhất

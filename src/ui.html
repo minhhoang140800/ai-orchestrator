@@ -238,6 +238,18 @@ main{position:relative}
 .edbar .edc{min-width:18px;width:18px;height:18px;padding:0;border-radius:50%;border:2px solid #1f1f1f;box-shadow:0 0 0 1px #555}.edbar .edc.on{box-shadow:0 0 0 2px #fff}
 .edwd{display:block;width:18px;background:#ddd;border-radius:4px}
 .edbar .edsave{background:#fff;color:#111;font-weight:600;padding:0 14px}.edbar .edsave:hover{background:#e8e8e8;color:#111}
+.mwrap{position:relative}.mwrap.u{display:flex;flex-direction:column;align-items:flex-end}
+.macts{display:flex;align-items:center;gap:2px;height:26px;margin-top:2px;opacity:0;transition:opacity var(--t);color:var(--mute);font-size:12px}
+.mwrap:hover .macts,.macts:focus-within{opacity:1}.macts .mt{margin-right:4px}
+.macts button{border:0;background:transparent;padding:4px;border-radius:6px;line-height:0;color:var(--mute)}.macts button:hover{background:var(--hover);color:var(--ink)}.macts .i{width:15px;height:15px}
+main.withact .scroll,main.withact .compwrap,main.withact #decbar{margin-right:320px}
+.actp{display:none}main.withact .actp{display:block;position:absolute;right:0;top:57px;bottom:0;width:320px;border-left:1px solid var(--line);background:#fff;overflow:auto;padding:0 0 20px}
+.actp .ah{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff}
+.actp .as{padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}.actp .ak{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mute);margin-bottom:6px}
+.asub{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center;padding:4px 0}.asub small{grid-column:1;color:var(--mute);font-size:11px}.asub .pill{grid-row:1/3;grid-column:2}
+.asteps{margin:6px 0 0;padding-left:18px;color:var(--mute);font-size:12px}.asteps li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:1px 0}
+.afile{display:flex;gap:6px;align-items:center;font-size:12px;padding:2px 0}.afile .i{width:14px;height:14px;flex:none}.afile span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#bAct.on{background:var(--acc2)}
 .smenu{min-width:160px}.smenu button{align-items:center;font-size:13px}
 .claude.stage{margin-top:12px;color:var(--ink)}.claude.stage .txt{border-left:2px solid var(--line);padding-left:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -751,6 +763,28 @@ function attHtml(fs) {
     (rest.length ? `<div class="att">📎 ${rest.map(esc).join(", ")}</div>` : "");
 }
 let decOpen = false;
+/* ---------------- Activity panel + thao tác trên tin nhắn ---------------- */
+let actOpen = !!localStorage.getItem("act");
+function ago(ts) { if (!ts) return ""; const s = Math.max(0, Date.now() / 1000 - ts); return s < 60 ? "vừa xong" : s < 3600 ? Math.floor(s / 60) + " phút trước" : s < 86400 ? Math.floor(s / 3600) + " giờ trước" : Math.floor(s / 86400) + " ngày trước"; }
+function mts(m) { return m.ts || (m.time ? new Date(String(m.time).replace(" ", "T")).getTime() / 1000 : 0); }
+function mActs(m, i, who) {
+  const busy = ["running", "queued", "login"].includes(T.status);
+  return `<div class="macts"><span class="mt" title="${esc(m.time || "")}">${esc(ago(mts(m)))}</span>
+    ${!busy ? `<button data-mretry="${i}" title="${who === "user" ? "Gửi lại yêu cầu này" : "Làm lại câu trả lời này"}"><svg class="i" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg></button>` : ""}
+    ${who === "user" ? `<button data-medit="${i}" title="Sửa và gửi lại">${I.edit}</button>` : ""}
+    <button data-mcopy="${i}" title="Copy"><svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button></div>`;
+}
+function actHtml(t) {
+  const ws = t.messages.map((m, i) => [m, i]).filter(([m]) => m.role === "work").reverse();
+  const files = [...new Set(t.messages.filter((m) => m.role === "claude").flatMap((m) => m.files || []))];
+  const live = ws[0] && ws[0][0].status === "running";
+  return `<div class="ah"><b>Activity</b><button class="ghost icon" data-actx="1" aria-label="Đóng">×</button></div>
+    <div class="as"><div class="ak">Trạng thái</div><div>${ST[t.status] || t.status}${live && ws[0][0].progress != null ? ` · Process ${ws[0][0].progress}%` : ""}</div></div>
+    ${ws.map(([m], n) => `<div class="as"><div class="ak">${m.status === "running" ? "Đang làm" : "Lượt " + (ws.length - n)} · ${esc(m.started || "")}</div>
+      ${(m.subtasks || []).map((x) => `<div class="asub"><span>${esc(x.title || x.id)}</span><small>${esc((x.worker === "codex" ? "ChatGPT" : x.worker === "gemini" ? "Gemini" : x.worker) + (x.model ? " · " + x.model : ""))}${x.seconds ? " · " + dur(x.seconds) : ""}</small><span class="pill ${x.status}">${ST[x.status] || x.status}</span></div>`).join("")}
+      ${(m.steps || []).length ? `<ol class="asteps">${m.steps.map((x) => `<li title="${esc(x)}">${esc(x)}</li>`).join("")}</ol>` : m.status === "running" ? `<ol class="asteps"><li>Đang khởi động…</li></ol>` : ""}</div>`).join("")}
+    ${files.length ? `<div class="as"><div class="ak">File kết quả · ${files.length}</div>${files.slice(0, 40).map((f) => `<div class="afile" title="${esc(f)}">${ficon(f)}<span>${esc(f)}</span></div>`).join("")}</div>` : ""}`;
+}
 function decHtml(t) {
   const sg = t.brain_suggest || [], pn = (S.projects.find((p) => p.id === t.project) || {}).name;
   const sug = sg.length && pn ? `<div class="dec" style="margin-bottom:8px"><div style="padding:9px 14px;font-weight:600">Đề xuất thêm vào bộ nhớ dự án ${esc(pn)}</div>${sg.map((x, i) => `<div class="g row"><span style="flex:1">${esc(x)}</span><button data-bacc="${i}">Thêm</button><button class="ghost" data-brej="${i}">Bỏ</button></div>`).join("")}</div>` : "";
@@ -768,12 +802,13 @@ function renderTask() {
   const t = T, live = ["running", "queued", "login"].includes(t.status);
   const sc0 = document.querySelector(".scroll"), wasBottom = !sc0 || sc0.scrollHeight - sc0.scrollTop - sc0.clientHeight < 80;
   const acts = [];
+  acts.push(`<button class="ghost icon ${actOpen ? "on" : ""}" id="bAct" title="Activity" aria-label="Activity"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></button>`);
   acts.push(projBtn());
   if (["paused", "failed"].includes(t.status)) acts.push(`<button class="pri" data-act="resume">Tiếp tục</button>`);
   const lastC = t.messages.map((m) => m.role).lastIndexOf("claude");
   const nSubs = t.messages.reduce((a, m) => a + (m.subtasks || []).length, 0);
   const body = t.messages.map((m, i) => {
-    if (m.role === "user") return `<div class="msg user">${esc(m.text)}${attHtml(m.files || [])}</div>`;
+    if (m.role === "user") return `<div class="mwrap u"><div class="msg user">${esc(m.text)}${attHtml(m.files || [])}</div>${mActs(m, i, "user")}</div>`;
     if (m.role === "work") return workBlock(m, i);
     const n = (m.files || []).length;
     const fl = n ? `<button class="openf" data-act="open" data-dir="${esc(m.dir || "")}" title="${esc(m.dir || T.output)}">${I.folder}Open folder · ${n} file</button>` : "";
@@ -781,13 +816,13 @@ function renderTask() {
       ? (t.tpl_saved ? `<button class="savet" disabled>${I.tpl}Đã lưu template</button>` : `<button class="savet" data-savet="1">${I.tpl}Save Template</button>`) : "";
     const ims = n && n < 5 ? (m.files || []).filter((f) => /\.(png|jpe?g|gif|webp)$/i.test(f)) : [];
     const pv = ims.length ? `<div class="opv">${ims.map((f) => { const q = `t=${T.id}&i=${i}&f=${encodeURIComponent(f)}`; return `<a href="/api/ofile?${q}&full=1" data-lb="1" data-of="${esc(f)}" data-oi="${i}" title="${esc(f)}"><img src="/api/ofile?${q}" alt="${esc(f)}" loading="lazy"><span>${esc(f.split("/").pop())}</span></a>`; }).join("")}</div>` : "";
-    return `<div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>`;
+    return `<div class="mwrap c"><div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>${mActs(m, i, "claude")}</div>`;
   }).join("");
   const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Claude chưa đăng nhập. Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>${esc(t.wait || "Đang chuẩn bị…")}</span></div>` : "";
   const comp = $("taskComp");
   if (!comp || comp.dataset.t !== t.id) {          // chỉ tạo ô nhập 1 lần cho mỗi task
     $("main").innerHTML = `<div class="thead" id="thead"></div><div id="decbar"></div><div class="scroll"><div class="thread" id="thread"></div></div>
-      <div class="compwrap">${composer("taskComp", PH_MORE)}</div>`;
+      <div class="compwrap">${composer("taskComp", PH_MORE)}</div><aside class="actp" id="actp"></aside>`;
     $("taskComp").dataset.t = t.id;
     bindComposer(sendMore); curTpl = ""; bindTpl();
   }
@@ -798,6 +833,8 @@ function renderTask() {
   sendIcon(); if (curMode !== (t.mode || "balanced") && !$("modeMenu").classList.contains("show")) { curMode = t.mode || "balanced"; paintMode(); }
   $("thread").innerHTML = body + queued;
   $("bRename").onclick = startRename; bindProj();
+  $("bAct").onclick = () => { actOpen = !actOpen; localStorage.setItem("act", actOpen ? "1" : ""); renderTask(); };
+  $("main").classList.toggle("withact", actOpen); $("actp").innerHTML = actOpen ? actHtml(t) : "";
   const sc = document.querySelector(".scroll"); if (wasBottom) sc.scrollTop = sc.scrollHeight;
 }
 function startRename() {
@@ -830,7 +867,7 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec]");
+  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec]");
   if (!el) return;
   const d = el.dataset;
   if (d.libtab) { libTab = d.libtab; return renderLib(); }
@@ -846,6 +883,14 @@ document.addEventListener("click", async (e) => {
     const r = await api("/api/task/act", { id: T.id, action: d.act, text: d.dir || "" }); if (r.error) toast(r.error);
     if (d.act === "delete") { sel = ""; sessionStorage.removeItem("sel"); }
     T = null; lastSnap = ""; refresh();
+  }
+  else if (d.actx) { actOpen = false; localStorage.setItem("act", ""); renderTask(); }
+  else if (d.mcopy) { const m = T.messages[+d.mcopy]; try { await navigator.clipboard.writeText(m.text || ""); toast("Đã copy"); } catch { toast("Không copy được"); } }
+  else if (d.medit) { const m = T.messages[+d.medit]; $("txt").value = m.text || ""; fit($("txt")); $("txt").focus(); sendIcon(); toast("Sửa rồi bấm gửi"); }
+  else if (d.mretry) {
+    const k = +d.mretry, m = T.messages[k];
+    const text = m.role === "user" ? m.text : "Làm lại câu trả lời trước theo cách tốt hơn (giữ đúng yêu cầu ban đầu).";
+    const r = await api("/api/task/act", { id: T.id, action: "send", text, files: m.role === "user" ? (m.files || []) : [] }); if (r.error) toast(r.error); T = null; lastSnap = ""; await refresh();
   }
   else if (d.dechide) { localStorage.setItem("dechide:" + T.id, d.dechide); $("decbar").innerHTML = decHtml(T); }
   else if (d.savet) { const n = prompt("Tên template:", T.title); if (n === null) return; const r = await api("/api/template", { action: "save", task: T.id, name: n }); toast(r.error || "Đã lưu template. Gõ / ở Task mới để dùng."); T = null; lastSnap = ""; await refresh(); }
