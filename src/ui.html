@@ -214,6 +214,9 @@ main{background:var(--bg)}
  background:linear-gradient(90deg,rgba(239,239,239,0),var(--hover) 55%)}
 .titem.on::after{background:linear-gradient(90deg,rgba(228,228,228,0),var(--acc2) 55%)}
 .titem:hover::after,.titem.menu::after{opacity:1}.tmore{z-index:1}
+.opv{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.opv a{display:flex;flex-direction:column;gap:4px;width:150px;color:var(--mute);font-size:12px;text-decoration:none}
+.opv img{width:150px;height:150px;object-fit:contain;background:var(--soft);border:1px solid var(--line);border-radius:6px}.opv a:hover img{border-color:#BDBDBD}
+.opv span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .smenu{min-width:160px}.smenu button{align-items:center;font-size:13px}
 .claude.stage{margin-top:12px;color:var(--ink)}.claude.stage .txt{border-left:2px solid var(--line);padding-left:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -244,6 +247,7 @@ main{background:var(--bg)}
 <div id="toast" role="status"></div>
 <div class="pop pmenu" id="pMenu" role="menu" style="position:fixed"></div>
 <div class="pop smenu" id="sMenu" role="menu" style="position:fixed"></div>
+<div class="pop smenu" id="cMenu" role="menu" style="position:fixed"><button data-co="open">Mở</button><button data-co="reveal">Mở vị trí file</button><button data-co="copy">Copy ảnh</button><button data-co="path">Copy đường dẫn</button></div>
 <input type="file" id="fileIn" multiple hidden>
 
 <script>
@@ -373,6 +377,26 @@ $("tlist").addEventListener("click", (e) => {
   m.innerHTML = `<button data-sm="pin">${I.pin}${t && t.pinned ? "Bỏ ghim" : "Pin"}</button><button data-sm="rename">${I.edit}Rename</button><button data-sm="delete" style="color:var(--bad)">${I.trash}Delete</button>`;
   m.style.left = r.left + "px"; m.style.top = r.bottom + 4 + "px"; m.classList.add("show");
 }, true);
+let cTarget = null;
+document.addEventListener("contextmenu", (e) => {
+  const a = e.target.closest("[data-of]"); if (!a) return;
+  e.preventDefault(); cTarget = { t: T.id, i: +a.dataset.oi, f: a.dataset.of, href: a.getAttribute("href") };
+  const m = $("cMenu"); m.style.left = Math.min(e.clientX, innerWidth - 180) + "px"; m.style.top = Math.min(e.clientY, innerHeight - 170) + "px"; m.classList.add("show");
+});
+document.addEventListener("click", (e) => { if (!e.target.closest("#cMenu")) $("cMenu").classList.remove("show"); });
+$("cMenu").onclick = async (e) => {
+  const b = e.target.closest("[data-co]"); if (!b || !cTarget) return; $("cMenu").classList.remove("show");
+  const op = b.dataset.co, c = cTarget;
+  try {
+    if (op === "copy") {
+      const blob = await (await fetch(c.href)).blob();
+      const png = blob.type === "image/png" ? blob : await new Promise((ok) => { const im = new Image(); im.onload = () => { const cv = document.createElement("canvas"); cv.width = im.naturalWidth; cv.height = im.naturalHeight; cv.getContext("2d").drawImage(im, 0, 0); cv.toBlob(ok, "image/png"); }; im.src = URL.createObjectURL(blob); });
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]); toast("Đã copy ảnh");
+    } else if (op === "path") {
+      const r = await api("/api/ofile", { ...c, op }); if (r.error) return toast(r.error); await navigator.clipboard.writeText(r.path); toast("Đã copy đường dẫn");
+    } else { const r = await api("/api/ofile", { ...c, op }); if (r.error) toast(r.error); }
+  } catch (err) { toast("Không copy được: " + err.message); }
+};
 function renderSide() {
   const ls = [...S.tasks.filter((t) => t.pinned), ...S.tasks.filter((t) => !t.pinned)];
   $("tlist").innerHTML = ls.length ? ls.map((t) => `<div class="titem ${t.id === sel ? "on" : ""} ${sMenuFor === t.id ? "menu" : ""}" data-sel="${t.id}" title="${esc(ST[t.status])}" role="button" tabindex="0"><span class="sd ${t.status}"></span><span class="t">${esc(t.title)}</span>${t.pinned ? `<span class="pin">${I.pin}</span>` : ""}<button class="tmore" data-more="${t.id}" aria-label="Tùy chọn">${I.more}</button></div>`).join("")
@@ -618,7 +642,9 @@ function renderTask() {
     const fl = n ? `<button class="openf" data-act="open" data-dir="${esc(m.dir || "")}" title="${esc(m.dir || T.output)}">${I.folder}Open folder · ${n} file</button>` : "";
     const sv = i === lastC && t.status === "done" && nSubs >= 2
       ? (t.tpl_saved ? `<button class="savet" disabled>${I.tpl}Đã lưu template</button>` : `<button class="savet" data-savet="1">${I.tpl}Save Template</button>`) : "";
-    return `<div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>`;
+    const ims = n && n < 5 ? (m.files || []).filter((f) => /\.(png|jpe?g|gif|webp)$/i.test(f)) : [];
+    const pv = ims.length ? `<div class="opv">${ims.map((f) => { const q = `t=${T.id}&i=${i}&f=${encodeURIComponent(f)}`; return `<a href="/api/ofile?${q}&full=1" target="_blank" data-of="${esc(f)}" data-oi="${i}" title="${esc(f)}"><img src="/api/ofile?${q}" alt="${esc(f)}" loading="lazy"><span>${esc(f.split("/").pop())}</span></a>`; }).join("")}</div>` : "";
+    return `<div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>`;
   }).join("");
   const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Claude chưa đăng nhập. Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>Đang chuẩn bị…</span></div>` : "";
   const comp = $("taskComp");
@@ -709,7 +735,10 @@ function openLoginWin(ai) {   // mở cửa sổ nhỏ ngay khi bấm (tránh b�
 function feedLoginWin() {
   const a = S && S.ais[loginAi]; if (!a || !loginWin) return;
   if (a.url && a.url !== loginUrl && !loginWin.closed) { loginUrl = a.url; try { loginWin.location.href = a.url; } catch (e) {} }
-  if (!a.pending && a.ok && !loginWin.closed) { try { loginWin.close(); } catch (e) {} loginWin = null; }
+  if (!a.pending && !loginWin.closed) {          // xong (hoặc lỗi): đóng cửa sổ nhỏ
+    try { loginWin.close(); } catch (e) {} loginWin = null;
+    if (!a.ok) toast(a.msg || "Đăng nhập chưa xong, thử lại");
+  }
 }
 function autoLogin() {      // tự mở lần lượt trang đăng nhập của các AI chưa đăng nhập
   if (!chain || Object.values(S.ais).some((a) => a.pending)) return;
@@ -725,7 +754,7 @@ function accState(k, a) {
   if (a.window) return `<small>1. Đăng nhập Google trên trình duyệt → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào <b>cửa sổ Gemini</b> (chuột phải hoặc Ctrl+V) rồi Enter. 3. Thấy email hiện lên thì đóng cửa sổ.${a.note ? `<br><span class="bad" style="color:var(--bad)">Không chạy ẩn được: ${esc(a.note)}</span>` : ""}</small>`;
   if (a.pending) return `<small>Đăng nhập trong cửa sổ vừa mở${a.url ? ` · <a href="${esc(a.url)}" target="aio_login">mở lại trang đăng nhập</a>` : "…"}</small>`;
   if (a.ok) return `<small>${a.email ? esc(a.email) : "Đã đăng nhập"}</small>`;
-  return `<small class="bad">Chưa đăng nhập</small>`;
+  return `<small class="bad">${esc(a.msg || "Chưa đăng nhập")}</small>`;
 }
 function renderSettings() {
   const acc = Object.entries(S.ais).map(([k, a]) => `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${accState(k, a)}</span>

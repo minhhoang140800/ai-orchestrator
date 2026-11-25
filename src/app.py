@@ -194,6 +194,9 @@ def refresh_path():
     """Lấy PATH mới nhất từ registry (CLI vừa cài xong vẫn tìm thấy)."""
     if not IS_WIN:
         return
+    extra = [os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "nodejs"),
+             os.path.join(os.environ.get("APPDATA", ""), "npm")]
+    os.environ["PATH"] = os.environ.get("PATH", "") + ";" + ";".join(x for x in extra if os.path.isdir(x))
     try:
         import winreg
         parts = []
@@ -734,6 +737,64 @@ def path_in_text(text):
     return None
 
 
+def out_file(tid, idx, name):
+    """File kết quả gắn với 1 câu trả lời (chỉ trong thư mục của câu trả lời đó)."""
+    t = TASKS.get(tid)
+    try:
+        m = t["messages"][int(idx)]
+    except Exception:
+        return None
+    if name not in (m.get("files") or []):
+        return None
+    base = Path(m["dir"]) if m.get("dir") else out_dir(t)
+    f = (base / name).resolve()
+    try:
+        f.relative_to(base.resolve())
+    except ValueError:
+        return None
+    return f if f.is_file() else None
+
+
+_thumbs = {}
+
+
+def thumb(f, size=360):
+    key = (str(f), f.stat().st_mtime)
+    if key in _thumbs:
+        return _thumbs[key]
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(f)
+        im.thumbnail((size, size))
+        b = io.BytesIO()
+        im.save(b, "PNG")
+        data = b.getvalue()
+    except Exception:
+        return None
+    if len(_thumbs) > 200:
+        _thumbs.clear()
+    _thumbs[key] = data
+    return data
+
+
+def ofile_act(d):
+    f = out_file(d.get("t", ""), d.get("i", ""), d.get("f", ""))
+    if not f:
+        return {"error": "Không còn file"}
+    op = d.get("op")
+    if op == "open":
+        open_path(f)
+    elif op == "reveal":
+        if IS_WIN:
+            subprocess.Popen(["explorer.exe", "/select,", str(f)])
+        else:
+            open_path(f.parent)
+    elif op == "path":
+        return {"ok": True, "path": str(f)}
+    return {"ok": True}
+
+
 def new_files(t, since, text=""):
     """File mới tạo trong lượt làm; trả (danh sách, thư mục để mở)."""
     fs = _scan(out_dir(t), since) if CFG.get("output") and t.get("folder") else []
@@ -1171,10 +1232,17 @@ def ai_status(ai):
             ok = bool(j.get("loggedIn"))
             cur.update(ok=ok, msg="", email=(j.get("email") or ai_email(ai)) if ok else "")
         elif ai == "codex":
-            p = _run_hidden([exe, "login", "status"], 20)
+            p = _run_hidden([exe, "login", "status"], 45)
             out = ((p.stdout or "") + (p.stderr or "")).lower()
             ok = p.returncode == 0 and "not logged" not in out
-            cur.update(ok=ok, msg="", email=ai_email(ai) if ok else "")
+            msg = ""
+            if not ok and "not logged" not in out:   # lệnh lỗi (không phải chưa đăng nhập) -> không coi là bị văng
+                dlog(f"codex login status rc={p.returncode}: {out[-600:]}")
+                if "node" in out and ("not recognized" in out or "not found" in out or "không" in out):
+                    msg = "Thiếu Node.js — chạy lại Maestro_setup.bat"
+                elif (Path.home() / ".codex" / "auth.json").exists():
+                    ok = True
+            cur.update(ok=ok, msg=msg, email=ai_email(ai) if ok else "")
     except Exception as e:
         cur.setdefault("ok", False)
         cur["msg"] = str(e)[:150]
@@ -1385,9 +1453,9 @@ def ai_login(ai, switch=False):
                 if ai == "codex" and IS_WIN:          # phiên đăng nhập cũ còn giữ cổng 1455 -> codex login thoát ngay
                     _run_hidden(["powershell", "-NoProfile", "-Command",
                                  "Get-NetTCPConnection -LocalPort 1455 -State Listen -EA 0 | % { Stop-Process -Id $_.OwningProcess -Force -EA 0 }"], 20)
-                env = dict(os.environ, BROWSER="none")   # không để CLI tự mở tab mới: web mở link trong cửa sổ nhỏ
-                if ai == "claude":
-                    return claude_term_login(exe, d, cur, env)
+                if ai == "claude":                   # Claude: không tự mở tab, web mở link trong cửa sổ nhỏ + dán mã
+                    return claude_term_login(exe, d, cur, dict(os.environ, BROWSER="none"))
+                env = dict(os.environ)                  # ChatGPT: để Codex tự mở trình duyệt (đặt BROWSER làm hỏng đăng nhập)
                 logf = d / f"{ai}.out"
                 fh = open(logf, "w", encoding="utf-8", errors="replace")
                 p = subprocess.Popen(args, cwd=str(d), stdin=subprocess.PIPE, stdout=fh, stderr=subprocess.STDOUT,
@@ -1604,6 +1672,14 @@ class H(BaseHTTPRequestHandler):
             if q.get("t"):
                 return self.send(302, b"", "text/plain", {"Location": "/"})
             return self.send(200, ui_html(), "text/html")
+        if u.path == "/api/ofile":        # ảnh xem trước của file kết quả (thu nhỏ)
+            f = out_file(q.get("t", [""])[0], q.get("i", [""])[0], q.get("f", [""])[0])
+            if not f or f.suffix.lower() not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+                return self.send(404, {"error": "not found"})
+            mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg"}.get(f.suffix.lower()[1:], "image/" + f.suffix.lower()[1:])
+            data = None if q.get("full", [""])[0] == "1" else thumb(f)
+            return self.send(200, data or f.read_bytes(), "image/png" if data else mime,
+                             {"X-Content-Type-Options": "nosniff", "Cache-Control": "max-age=60"})
         if u.path == "/api/input":        # ảnh người dùng đính kèm (thẻ <img> không gửi được header riêng)
             t = TASKS.get(q.get("t", [""])[0])
             name = Path(q.get("name", [""])[0]).name
@@ -1723,6 +1799,8 @@ class H(BaseHTTPRequestHandler):
             return {"ok": True}
         if path == "/api/task/new":
             return new_task(d.get("text", ""), d.get("mode", "balanced"), d.get("project", ""), d.get("template", ""))
+        if path == "/api/ofile":
+            return ofile_act(d)
         if path == "/api/project":
             return project_api(d)
         if path == "/api/template":
