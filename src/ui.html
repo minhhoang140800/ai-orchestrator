@@ -116,6 +116,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .wbtn:hover{color:var(--ink,#222)}.wbtn.on{background:var(--ink,#222);border-color:var(--ink,#222);color:#fff}
 .wbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;top:calc(100% + 6px);right:0;white-space:nowrap;background:#222;color:#fff;font-size:12px;padding:5px 8px;border-radius:6px;z-index:30;pointer-events:none}
 .umenu{position:fixed;left:12px;bottom:56px;width:300px;padding:10px 12px;z-index:40}
+.acost{font-size:12px;color:var(--mute);margin:2px 0 4px}
 .umenu .ur2{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;font-size:13px;padding:4px 0 0}
 .umenu .ur2 .ul{display:flex;flex-direction:column;min-width:0}.umenu .ur2 .ul small{font-size:11.5px;color:var(--mute);line-height:16px}
 .umenu .ur2 .uu{color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}.umenu .ur2.low .uu{color:var(--bad);font-weight:600}
@@ -966,7 +967,7 @@ function workBlock(m, i) {
     cancelled: ["circle-x", "Đã hủy"], failed: ["circle-x", "Lỗi"], limit: ["circle-pause", "Hết hạn mức"] }[m.status] || ["circle-check", "Xong"];
   const head = live ? `<span class="spin"></span><b>Đang làm</b>` : `<span class="wic ${m.status}">${lu(ST2[0])}</span><b>${ST2[1]}</b>`;
   const right = live ? `${m.progress != null ? `<span class="wpct">${m.progress}%</span>` : ""}<span class="wtime" data-timer="${m.started_ts}">${clock(el)}</span>` : `<span class="wtime">${dur(el)}</span>`;
-  const subs = m.subtasks || [], who = (w, mdl) => String(mdl || "").startsWith("gpt:") ? "ChatGPT" : WN[w] || w || "";
+  const subs = m.subtasks || [], who = (w, mdl) => String(mdl || "").startsWith("gpt:") ? "ChatGPT" : String(mdl || "").startsWith("gemini:") ? "Gemini" : WN[w] || w || "";
   let rows = [];
   if (live) {
     const narr = (m.steps || []).filter((s) => !TOOL_STEP.test(s));
@@ -1014,13 +1015,19 @@ function mActs(m, i, who) {
     ${who === "user" ? `<button data-medit="${i}" title="Sửa và gửi lại">${I.edit}</button>` : ""}
     <button data-mcopy="${i}" title="Copy"><svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button></div>`;
 }
+function costTxt(c) {          // mức dùng lượt này tốn (≈): phần % tăng của phiên 5 giờ / tuần
+  if (!c || !Object.keys(c).length) return "";
+  const n = { claude: "Claude", codex: "ChatGPT" };
+  return `<div class="acost" title="Ước tính: đo mức dùng trước và sau lượt; task khác chạy cùng lúc cũng được tính vào">Tốn ≈ ${Object.entries(c).map(([k, v]) =>
+    `${n[k] || k} ${v.five_hour != null ? "+" + v.five_hour + "% phiên" : ""}${v.week != null ? " · +" + v.week + "% tuần" : ""}`).join(" · ")}</div>`;
+}
 function actHtml(t) {
   const ws = t.messages.map((m, i) => [m, i]).filter(([m]) => m.role === "work").reverse();
   const files = [...new Set(t.messages.filter((m) => m.role === "claude").flatMap((m) => m.files || []))];
   const live = ws[0] && ws[0][0].status === "running";
   return `<div class="ah"><b>Activity</b><button class="ghost icon" data-actx="1" aria-label="Đóng">×</button></div>
     <div class="as"><div class="ak">Trạng thái</div><div>${ST[t.status] || t.status}${live && ws[0][0].progress != null ? ` · Process ${ws[0][0].progress}%` : ""}</div></div>
-    ${ws.map(([m], n) => `<div class="as"><div class="ak">${m.status === "running" ? "Đang làm" : "Lượt " + (ws.length - n)} · ${esc(m.started || "")}</div>
+    ${ws.map(([m], n) => `<div class="as"><div class="ak">${m.status === "running" ? "Đang làm" : "Lượt " + (ws.length - n)} · ${esc(m.started || "")}</div>${costTxt(m.cost)}
       ${(m.subtasks || []).map((x) => `<div class="asub"><span>${esc(x.title || x.id)}</span><small>${esc((x.worker === "codex" ? "ChatGPT" : x.worker === "gemini" ? "Gemini" : x.worker) + (x.model ? " · " + x.model : ""))}${x.seconds ? " · " + dur(x.seconds) : ""}</small><span class="pill ${x.status}">${ST[x.status] || x.status}</span></div>`).join("")}
       ${(m.steps || []).length ? `<ol class="asteps">${m.steps.map((x) => `<li title="${esc(x)}">${esc(x)}</li>`).join("")}</ol>` : m.status === "running" ? `<ol class="asteps"><li>Đang khởi động…</li></ol>` : ""}</div>`).join("")}
     ${files.length ? `<div class="as"><div class="ak">File kết quả · ${files.length}</div>${files.slice(0, 40).map((f) => `<div class="afile" title="${esc(f)}">${ficon(f)}<span>${esc(f)}</span></div>`).join("")}</div>` : ""}`;

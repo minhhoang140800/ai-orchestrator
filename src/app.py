@@ -756,8 +756,9 @@ Tiêu chí đã dùng:
 {CFG.get('instructions', '').strip() or '(không)'}
 
 ## Vai trò
-Bạn là PM. Phân tích yêu cầu, tự quyết cách làm, chia sub-task, chọn worker, giao việc, nghiệm thu trên file thật,
-sửa đúng phần lỗi, báo cáo. Task là cuộc trò chuyện nhiều lượt.
+Bạn là PM: lên kế hoạch, giao việc, kiểm tra, tổng hợp. Bạn VẪN tự viết/biên tập văn bản (ý tưởng, kịch bản, báo cáo, câu chữ).
+Việc làm thật khác — vẽ/xử lý ảnh, xử lý file/bảng tính/tài liệu, code/script, research web dài, đọc nhiều tài liệu lớn — giao
+GPT/Gemini; chỉ tự làm khi rất nhỏ (1–2 lệnh). Nghiệm thu trên file thật, sửa đúng phần lỗi. Task là cuộc trò chuyện nhiều lượt.
 
 ## Đường dẫn
 - Thư mục hiện tại: nháp/brief/log, bị XÓA khi task xong -> không để sản phẩm ở đây. File người dùng gửi: {tdir(t) / "input"}
@@ -767,7 +768,7 @@ sửa đúng phần lỗi, báo cáo. Task là cuộc trò chuyện nhiều lư�
 
 ## Worker
 {chr(10).join('- ' + desc[w] for w in on) or '- (không có — tự làm)'}
-Việc nhỏ hoặc cần phán đoán: tự làm. Worker lỗi/không chạy: coi như không có. Giao việc: viết yêu cầu đủ ngữ cảnh vào
+Worker lỗi/không chạy: coi như không có. Giao việc: viết yêu cầu đủ ngữ cảnh vào
 tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy cuộc trò chuyện), rồi chạy:
   "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--edit <thư mục>] [--drive] [--timeout 900]
   "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>] [--hard]
@@ -775,8 +776,9 @@ tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy cuộc trò chuy
   --edit / --drive: xem mục sửa file / Google Drive.
 NHIỀU VIỆC: giao hết cả lô liền một lượt bằng --bg (trả về ngay, worker chạy nền), rồi chờ MỘT lần cho cả lô:
   "{py}" "{app}" wait work/S1 work/S2 work/S3      (in kết quả từng việc; không chờ/kiểm tra từng cái một)
-Gemini lỗi / hết lượt / báo xong mà không ra ảnh: app TỰ giao GPT làm lại ngay trong cùng lệnh (status via=gpt-fallback) —
-KHÔNG cần tự kiểm tra rồi giao lại. Kết quả: work/<ID>/vN/ (result.md, status.json, file worker tạo; GPT làm thay thì ở vN/gpt/).
+Worker lỗi / hết lượt / không vẽ ra ảnh: app TỰ giao bên kia làm lại ngay trong cùng lệnh (Gemini→GPT mọi việc; GPT→Gemini việc
+vẽ; status via=gpt-fallback/gemini-fallback) — KHÔNG tự kiểm tra rồi giao lại. Bên nào không vẽ được: 30 phút tới app giao thẳng
+bên kia. Kết quả: work/<ID>/vN/ (result.md, status.json, file worker tạo; bên làm thay ở vN/gpt/ hoặc vN/gemini/).
 Sửa lỗi: giao lại cùng --out. App tự chọn model — không truyền --model.
 
 ## Chia việc (Gemini nhanh, GPT chính xác hơn)
@@ -875,11 +877,35 @@ def md_name(t):
     return "AGENTS.md" if t.get("pm") == "codex" else "CLAUDE.md"
 
 
+SESS_TURNS = 6                 # sau 6 lượt trong cùng phiên: tóm tắt rồi mở phiên mới
+
+
+def hist_summary(t):
+    """Tóm tắt task cho phiên mới (không gọi AI): yêu cầu gốc, các lượt gần đây, quyết định đã chốt, file đã tạo."""
+    msgs = [m for m in t.get("messages", []) if m.get("role") in ("user", "claude")]
+    lines = [f"Yêu cầu ban đầu: {t.get('text', '')[:1500]}", "", "Các lượt gần đây:"]
+    for m in msgs[-12:]:
+        txt = re.sub(r"\s+", " ", m.get("text", ""))
+        lines.append(("- Người dùng: " + txt[:500]) if m["role"] == "user" else ("- Kết quả: " + txt[:900]))
+    dec = rjson(wdir(t) / "tasks" / "decisions.json", None) or t.get("decisions") or []
+    ch = [i.get("text", "") for g in dec if isinstance(g, dict) for i in g.get("items", []) if isinstance(i, dict) and i.get("type") == "decision"]
+    if ch:
+        lines += ["", "Quyết định đã chốt:"] + [f"- {x[:200]}" for x in ch[:20]]
+    fs = [f for m in msgs[-6:] for f in (m.get("files") or [])][-25:]
+    if fs:
+        lines += ["", f"File đã tạo (trong {out_dir(t)}): " + ", ".join(fs)]
+    lines += ["", "Thư mục làm việc (work/, tasks/) vẫn còn nguyên từ các lượt trước."]
+    return "\n".join(lines)
+
+
 def build_prompt(t, nxt):
     kind = nxt.get("kind")
     files = nxt.get("files") or []
     fl = f"\nFile mới trong {tdir(t) / 'input'}: {', '.join(files)}." if files else ""
     text = nxt.get("text", "")
+    if t.get("hist") and not t.get("session_started") and kind != "start":
+        return (f"Task đang làm dở — mở phiên mới cho nhanh (đã tóm tắt các lượt trước):\n\n{t['hist']}\n\n"
+                f"Tin nhắn mới của người dùng:\n{text}\n{fl}\nLàm theo {md_name(t)}.")
     if kind == "start" or not t.get("session_started"):
         base = f"Task mới. Yêu cầu của người dùng:\n\n{t['text']}\n"
         if kind != "start" and text:
@@ -919,8 +945,17 @@ def gen_title(t):
 
 
 def start_run(t):
+    nxt0 = t.get("next") or {}
+    if (t.get("session_started") and t.get("sess_turns", 0) >= SESS_TURNS and nxt0.get("kind") in ("followup", "answer")
+            and t.get("kind") != "code"):
+        t["hist"] = hist_summary(t)              # task dài: tóm tắt rồi mở phiên mới (đỡ đọc lại cả lịch sử mỗi lượt)
+        t["session_started"] = False
     if not t.get("session_started"):
-        t["pm"] = pick_pm() or "claude"         # chọn khi bắt đầu; phiên đã mở thì giữ AI quản lý cũ để nối tiếp được
+        t["pm"] = pick_pm(t.get("mode")) or "claude"   # chọn khi bắt đầu phiên; phiên đã mở thì giữ AI quản lý cũ
+        t["sess_turns"] = 0
+        if t["pm"] == "codex" and claude_usable():
+            t["_bal_note"] = f"Claude còn {round(week_left('claude') or 0)}% tuần — ChatGPT điều phối để giữ hạn mức Claude"
+    t["sess_turns"] = t.get("sess_turns", 0) + 1
     t.setdefault("pm", "claude")                # task của bản cũ: phiên Claude
     pm = t["pm"]
     exe = find_bin(pm)
@@ -979,8 +1014,12 @@ def start_run(t):
         for f in dict.fromkeys([str(out_dir(t))] + ([t["pdir"]] if code else []) + drives()):
             args += ["--add-dir", f]
     t.pop("md_changed", None)                   # đã nhắc trong prompt của lượt này
+    t.pop("hist", None)
     t.update(status="running", started=now(), _pause=False, _cancel=False, _quit=False, _redirect=None)
     t["wi"] = tmsg(t, "work", "", status="running", started=now(), started_ts=time.time(), steps=[])
+    if t.get("_bal_note"):
+        step(t, t.pop("_bal_note"))
+    threading.Thread(target=usage_mark, args=(t, work(t), "u0"), daemon=True).start()   # đo mức dùng trước lượt
     tsave(t)
     try:
         proc = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -1256,6 +1295,11 @@ def watch(t, p, nxt):
         registry(force=True)
     except Exception:
         pass
+    try:
+        usage_mark(t, w, "u1")              # đo mức dùng sau lượt -> mức lượt này tốn (≈, task khác chạy cùng lúc cũng tính vào)
+        tsave(t)
+    except Exception as e:
+        dlog(f"usage_mark: {e}")
 
 
 _ready = {"t": 0.0}
@@ -1836,9 +1880,28 @@ def codex_usable():
     return bool(find_bin("codex")) and bool(c.get("ok"))
 
 
-def pick_pm():
-    """Ai làm quản lý (PM): Claude gói trả phí như cũ; không có thì ChatGPT (Codex, kể cả gói Free); không có ai -> ''."""
-    return "claude" if claude_usable() else "codex" if codex_usable() else ""
+BALANCE_LEFT = 50          # Claude còn dưới 50% tuần -> task Turbo/Eco do ChatGPT điều phối (nếu ChatGPT còn nhiều hơn)
+
+
+def week_left(ai):
+    w = ((rjson(USAGE_F, {}) or {}).get(ai) or {}).get("week") or {}
+    return w.get("left")
+
+
+def balance_to_codex(mode):
+    """Cân tải: Turbo/Eco + Claude còn < 50% tuần + ChatGPT còn nhiều hơn và dùng được -> ChatGPT làm quản lý."""
+    if norm_mode(mode) not in ("turbo", "eco") or not codex_usable() or usage_block("codex"):
+        return False
+    cl, cx = week_left("claude"), week_left("codex")
+    return cl is not None and cx is not None and cl < BALANCE_LEFT and cx > cl
+
+
+def pick_pm(mode=None):
+    """Ai làm quản lý (PM): Claude gói trả phí như cũ (Turbo/Eco: nhường ChatGPT khi Claude còn < 50% tuần);
+    không có Claude thì ChatGPT (Codex, kể cả gói Free); không có ai -> ''."""
+    if claude_usable():
+        return "codex" if mode and balance_to_codex(mode) else "claude"
+    return "codex" if codex_usable() else ""
 
 
 def free_setup():
@@ -2791,6 +2854,8 @@ def export_log():
                 elif m["role"] == "work":
                     dur = (m.get("ended_ts") or time.time()) - m.get("started_ts", time.time())
                     lines.append(f"- {m.get('started', '')}  LƯỢT LÀM: {fmt(dur)} — {m.get('status')} — {len(m.get('steps', []))} bước")
+                    if m.get("cost"):
+                        lines.append("    mức dùng ≈ " + "; ".join(f"{k} +{v.get('five_hour', 0)}% phiên +{v.get('week', 0)}% tuần" for k, v in m["cost"].items()))
                     for s in m.get("subtasks", []):
                         lines.append(f"    - sub-task {s['id']}: {s['worker'] or '?'} {s['model']}  lần {s['attempt']}  "
                                      f"{fmt(s['seconds']) if s.get('seconds') is not None else '?'}  {s['status']}  {s['error']}")
@@ -3209,33 +3274,57 @@ GOOGLE_LINK = re.compile(r"https?://(?:docs|drive|sheets)\.google\.com/", re.I)
 IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
 
-def gemini_fallback(st, v, a, edit, want_img):
-    """Gemini lỗi / hết lượt / báo xong mà không ra ảnh -> app tự giao GPT làm lại NGAY trong cùng lệnh
-    (không phải quay về Claude, đỡ một vòng suy nghĩ). Gemini không vẽ được ảnh -> nhớ 3 giờ, lần sau giao thẳng GPT."""
+IMG_MAKE = re.compile(r"vẽ|tạo (?:ảnh|hình|asset|icon|banner|keyframe|storyboard|sprite|logo|thumbnail)|render|imagegen|keyframe|"
+                      r"sprite|\.png|\.jpe?g|\.webp|minh ho[ạa]|thumbnail|poster|banner|artwork|background|\bbg\b|logo|asset", re.I)
+IMG_FAIL_F = "img_fail.json"
+IMG_FAIL_TTL = 30 * 60          # 1 bên không vẽ được: 30 phút tới giao thẳng bên kia (chỉ thử 1 lần)
+
+
+def img_failed_recent(worker):
+    return time.time() - float((rjson(DATA / IMG_FAIL_F, {}) or {}).get(worker, 0)) < IMG_FAIL_TTL
+
+
+def mark_img_fail(worker):
+    d = rjson(DATA / IMG_FAIL_F, {}) or {}
+    d[worker] = int(time.time())
+    wjson(DATA / IMG_FAIL_F, d)
+
+
+def worker_fallback(st, v, a, edit, want_img):
+    """Worker lỗi / hết lượt / báo xong mà không ra ảnh -> app tự giao worker kia làm lại NGAY trong cùng lệnh
+    (không quay về Claude). Gemini -> GPT cho mọi việc; GPT -> Gemini chỉ cho việc vẽ ảnh.
+    Bên nào không vẽ được ảnh -> nhớ 30 phút, việc vẽ sau giao thẳng bên kia (chỉ thử 1 lần)."""
+    src = a.worker
+    dst = "codex" if src == "gemini" else "gemini"
     no_img = want_img and st.get("status") == "completed" and not any(
         f.suffix.lower() in IMG_EXT for f in v.rglob("*") if "_backup" not in f.parts) and not any(
         str(x).lower().endswith(IMG_EXT) for x in st.get("edited") or [])
-    if no_img:
-        wjson(DATA / "gem_img_fail.json", {"at": int(time.time())})
-    if st.get("status") not in ("limit", "failed", "timeout") and not no_img:
+    failed = st.get("status") in ("limit", "failed", "timeout")
+    if want_img and (no_img or failed) and "giao thẳng" not in st.get("error", ""):
+        mark_img_fail(src)                       # thật sự đã thử mà không vẽ được (không tính lần bỏ qua)
+    if not (no_img or failed) or (src == "codex" and not want_img):
         return
     cfgd = rjson(CFG_FILE, {}) or {}
-    if not find_bin("codex") or ((cfgd.get("ais") or {}).get("codex") or {}).get("ok") is False or usage_block("codex", fresh=True):
-        return                                   # không có GPT dùng được -> để Claude quyết
-    gv = v / "gpt"
+    ok = ((cfgd.get("ais") or {}).get(dst) or {}).get("ok") is not False
+    if not find_bin("codex" if dst == "codex" else "agy") or not ok or usage_block(dst, fresh=dst == "codex") \
+            or (want_img and img_failed_recent(dst) and st.get("error", "").find("giao thẳng") < 0):
+        return                                   # bên kia không dùng được / cũng vừa không vẽ được -> để Claude quyết
+    gv = v / ("gpt" if dst == "codex" else "gemini")
     gv.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, str(APP), "worker", "codex", "--task", str(v / "TASK.md"), "--out", str(v / "gpt_out"),
-           "--vdir", str(gv), "--timeout", str(a.timeout)] + (["--edit", str(edit)] if edit else [])
+    cmd = [sys.executable, str(APP), "worker", dst, "--task", str(v / "TASK.md"), "--out", str(v / (gv.name + "_out")),
+           "--vdir", str(gv), "--timeout", str(a.timeout)] + (["--edit", str(edit)] if edit else []) + \
+          (["--write"] if dst == "gemini" and want_img and not edit else [])
     try:
         subprocess.run(cmd, cwd=str(Path.cwd()), env=dict(os.environ, AIO_WCHILD="1", AIO_NOFALLBACK="1"),
                        stdin=subprocess.DEVNULL, capture_output=True, timeout=a.timeout + 180, creationflags=NO_WINDOW)
     except Exception as e:
-        dlog(f"gemini_fallback: {e}")
+        dlog(f"worker_fallback: {e}")
     gs = rjson(gv / "status.json", {}) or {}
     if (gv / "result.md").is_file():
         shutil.copy2(gv / "result.md", v / "result.md")
-    st["gemini_error"] = ("Gemini không tạo ra ảnh" if no_img else st.get("error", ""))[:300]
-    st.update(status=gs.get("status") or "failed", model="gpt:" + str(gs.get("model") or "?"), via="gpt-fallback",
+    st[src + "_error"] = (("Gemini" if src == "gemini" else "GPT") + " không tạo ra ảnh" if no_img else st.get("error", ""))[:300]
+    tag = "gpt" if dst == "codex" else "gemini"
+    st.update(status=gs.get("status") or "failed", model=f"{tag}:" + str(gs.get("model") or "?"), via=f"{tag}-fallback",
               error=gs.get("error", ""), seconds=(st.get("seconds") or 0) + (gs.get("seconds") or 0))
     if gs.get("edited"):
         st["edited"] = gs["edited"]
@@ -3555,8 +3644,8 @@ def cmd_worker(argv):
         return wait_status(v, a.timeout + 180)
     exe = find_bin("codex" if a.worker == "codex" else "agy")
     task_txt = task.read_text(encoding="utf-8") if task.exists() else ""
-    want_img = a.worker == "gemini" and (a.write or bool(edit)) and bool(IMG_RE.search(task_txt))
-    skip_gem = want_img and time.time() - float((rjson(DATA / "gem_img_fail.json", {}) or {}).get("at", 0)) < 3 * 3600
+    want_img = (a.worker == "codex" or a.write or bool(edit)) and bool(IMG_MAKE.search(task_txt))
+    skip_gem = want_img and img_failed_recent(a.worker)       # bên này vừa không vẽ được (30 phút) -> giao thẳng bên kia
     bad_edit = edit_refused(edit) if edit else ""
     cfgd = rjson(CFG_FILE, {}) or {}
     key = cfgd.get("gemini_key", "") if a.worker == "gemini" else ""
@@ -3578,7 +3667,7 @@ def cmd_worker(argv):
         st.update(status="failed", error=f"Không thấy {task}")
     elif skip_gem and not os.environ.get("AIO_NOFALLBACK"):
         (v / "TASK.md").write_text(task_txt, encoding="utf-8")
-        st.update(status="failed", error="Gemini vừa không tạo được ảnh (trong 3 giờ qua) — giao thẳng GPT")
+        st.update(status="failed", error=("Gemini" if a.worker == "gemini" else "GPT") + " vừa không tạo được ảnh (30 phút qua) — giao thẳng bên kia")
     elif not exe and not use_api:
         st.update(status="failed", error="Worker chưa cài")
     elif use_api:
@@ -3674,8 +3763,8 @@ def cmd_worker(argv):
     if key and not use_api and not edit and "exit_code" in st and st.get("status") in ("limit", "failed"):   # Antigravity hết lượt/lỗi -> thử API
         st["agy_error"] = st.pop("error", "")[:300]
         api_worker(st, v, key, (v / "TASK.md").read_text(encoding="utf-8") if (v / "TASK.md").exists() else "", a)
-    if a.worker == "gemini" and not os.environ.get("AIO_NOFALLBACK"):
-        gemini_fallback(st, v, a, edit, want_img)
+    if not os.environ.get("AIO_NOFALLBACK"):
+        worker_fallback(st, v, a, edit, want_img)
     st["files"] = sorted(str(f.relative_to(v)).replace("\\", "/") for f in v.rglob("*")
                          if f.is_file() and f.name not in ("TASK.md", "worker.log", "status.json", "result.md")
                          and "_backup" not in f.relative_to(v).parts)
@@ -3913,6 +4002,37 @@ def usage_block(ai, fresh=False):
         if w.get("left") is not None and w["left"] <= IN_PLAN_LEFT and not w.get("stale"):
             worst = max(worst, w.get("resets_at") or int(time.time() + 1800))
     return worst if worst > time.time() else 0
+
+
+def usage_snap():
+    d = usage_refresh(force=True)
+    out = {}
+    for ai in ("claude", "codex"):
+        u = d.get(ai) or {}
+        if u.get("known"):
+            out[ai] = {k: round(100 - u[k]["left"], 1) for k in ("five_hour", "week") if (u.get(k) or {}).get("left") is not None}
+    return out
+
+
+def usage_mark(t, w, key):
+    """Ghi mức dùng trước (u0) / sau (u1) một lượt làm; đủ cả hai thì tính cost = phần tăng (% phiên 5 giờ, % tuần)."""
+    if w is None:
+        return
+    try:
+        w[key] = usage_snap()
+    except Exception as e:
+        dlog(f"usage_snap: {e}")
+        return
+    if key == "u1" and w.get("u0") is not None:
+        cost = {}
+        for ai, v1 in (w.get("u1") or {}).items():
+            v0 = (w.get("u0") or {}).get(ai) or {}
+            dd = {k: round(v1[k] - v0[k], 1) for k in v1 if k in v0 and v1[k] - v0[k] >= 0}
+            if dd and any(x > 0 for x in dd.values()):
+                cost[ai] = dd
+        w["cost"] = cost
+        w.pop("u0", None)
+        w.pop("u1", None)
 
 
 def usage_counts():
