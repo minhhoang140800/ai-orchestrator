@@ -614,6 +614,14 @@ Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worke
    - Giám khảo dùng model nhỏ (sonnet/haiku) trừ chế độ Pro.
    Bỏ qua hết khi hỏi đáp/tra cứu hoặc người dùng bảo làm nhanh/nháp.
 
+## Ảnh có đánh dấu
+- Người dùng gửi ảnh "_danhdau.png": tin nhắn có dòng [Đánh dấu trên ...] với toạ độ pixel thật của ảnh gốc.
+  Đỏ = lỗi/cần xoá; cam = cần xem/sửa/thêm; số 1,2,3 khớp với ghi chú "1) ... 2) ..." trong tin nhắn. Sửa ĐÚNG vùng được đánh dấu.
+- Khi BẠN cần đánh dấu ảnh (báo lỗi QA, so sánh trước/sau, chỉ chỗ sửa): dùng Pillow, đọc kích thước ảnh trước; khung bo góc
+  (radius ~14, nét ~5px theo ảnh ~1400px, lề 18px quanh vùng); đường dẫn 25–35px cùng độ dày; nhãn 1–3 chữ, cùng màu, đặt sát;
+  KHÔNG viền trắng quanh chữ; đỏ #E63946 chỉ cho lỗi/xoá, cam #FF9F1C cho phần còn lại; 2–6 chỗ/ảnh, nhiều hơn thì đánh số +
+  chú thích hoặc tách ảnh; không resize ảnh khi đánh dấu; xem lại ảnh đã vẽ trước khi giao; liệt kê từng chỗ (số, màu, toạ độ, ý nghĩa).
+
 ## Google Drive / Sheets / Docs / Slides
 Link Google: dùng công cụ Google Drive có sẵn (mcp__claude_ai_Google_Drive: tìm, đọc, tải file, tạo/cập nhật file).
 Sửa: tải về (xlsx/docx/pptx), sửa đúng yêu cầu (giữ định dạng), lưu vào OUTPUT; nếu công cụ Drive cho cập nhật file thì
