@@ -214,7 +214,7 @@ main{background:var(--bg)}
  background:linear-gradient(90deg,rgba(239,239,239,0),var(--hover) 55%)}
 .titem.on::after{background:linear-gradient(90deg,rgba(228,228,228,0),var(--acc2) 55%)}
 .titem:hover::after,.titem.menu::after{opacity:1}.tmore{z-index:1}
-.opv{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.opv a{display:flex;flex-direction:column;gap:4px;width:150px;color:var(--mute);font-size:12px;text-decoration:none}
+.opv{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.thumbs a,.opv a{cursor:zoom-in}.opv a{display:flex;flex-direction:column;gap:4px;width:150px;color:var(--mute);font-size:12px;text-decoration:none}
 .opv img{width:150px;height:150px;object-fit:contain;background:var(--soft);border:1px solid var(--line);border-radius:6px}.opv a:hover img{border-color:#BDBDBD}
 .opv span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lb{position:fixed;inset:0;background:rgba(20,20,20,.72);display:none;align-items:center;justify-content:center;z-index:30;padding:32px}.lb.show{display:flex}
@@ -404,8 +404,8 @@ $("tlist").addEventListener("click", (e) => {
   m.style.left = r.left + "px"; m.style.top = r.bottom + 4 + "px"; m.classList.add("show");
 }, true);
 document.addEventListener("click", (e) => {      // bấm ảnh kết quả: xem lớn ngay trong trang
-  const a = e.target.closest("[data-lb]"); if (!a) return; e.preventDefault(); e.stopPropagation();
-  $("lbImg").src = a.getAttribute("href"); $("lb").classList.add("show");
+  const a = e.target.closest("[data-lb],[data-lbsrc]"); if (!a) return; e.preventDefault(); e.stopPropagation();
+  $("lbImg").src = a.dataset.lb ? a.getAttribute("href") : a.src; $("lb").classList.add("show");
 }, true);
 $("lb").onclick = (e) => { if (e.target.id !== "lbImg") { $("lb").classList.remove("show"); $("lbImg").src = ""; } };
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("lb").classList.remove("show"); });
@@ -504,7 +504,7 @@ function purl(f) { if (!_purl.has(f)) _purl.set(f, URL.createObjectURL(f)); retu
 function renderAtts() {
   const a = $("atts"); if (!a) return;
   a.innerHTML = files.map((f, i) => f.type?.startsWith("image/")
-    ? `<span class="pv" title="${esc(f.name)}"><img src="${purl(f)}" alt="${esc(f.name)}"><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`
+    ? `<span class="pv" title="${esc(f.name)}"><img src="${purl(f)}" data-lbsrc="1" style="cursor:zoom-in" alt="${esc(f.name)}"><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`
     : `<span class="a"><span>📎 ${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
   a.style.display = files.length ? "flex" : "none";
   paintTpl(); sendIcon();
@@ -641,7 +641,7 @@ function attHtml(fs) {
   if (!fs.length) return "";
   const isImg = (f) => /\.(png|jpe?g|gif|webp)$/i.test(f), src = (f) => `/api/input?t=${T.id}&name=${encodeURIComponent(f)}`;
   const imgs = fs.filter(isImg), rest = fs.filter((f) => !isImg(f));
-  return (imgs.length ? `<div class="thumbs">${imgs.map((f) => `<a href="${src(f)}" target="_blank" title="${esc(f)}"><img src="${src(f)}" alt="${esc(f)}" loading="lazy"></a>`).join("")}</div>` : "") +
+  return (imgs.length ? `<div class="thumbs">${imgs.map((f) => `<a href="${src(f)}" data-lb="1" title="${esc(f)}"><img src="${src(f)}" alt="${esc(f)}" loading="lazy"></a>`).join("")}</div>` : "") +
     (rest.length ? `<div class="att">📎 ${rest.map(esc).join(", ")}</div>` : "");
 }
 let decOpen = false;
