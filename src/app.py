@@ -644,7 +644,7 @@ Worker lỗi đăng nhập/không chạy: coi như không có, chuyển worker k
 
 Giao sub-task: viết yêu cầu đầy đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy
 cuộc trò chuyện), rồi chạy:
-  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--edit <thư mục>] [--model <model>] [--timeout 900]
+  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--edit <thư mục>] [--drive] [--model <model>] [--timeout 900]
   "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>] [--hard]
   --write: Gemini được tạo file/ảnh trong work/S2/vN. --hard: việc khó -> Gemini mức high. Giao lại cùng --out tự nâng mức.
   --edit <thư mục>: worker SỬA TRỰC TIẾP file trong thư mục đó (file người dùng yêu cầu sửa, OUTPUT, hoặc file Drive đã tải về).
@@ -665,6 +665,8 @@ Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worke
   Hai worker KHÔNG được --edit cùng một thư mục cùng lúc.
 
 ## Tốc độ (quan trọng)
+- VIỆC ĐƠN GIẢN (hỏi đáp, 1 thao tác, sửa nhỏ — làm xong trong 1–2 bước): làm NGAY, không viết criteria.md/plan.json/decisions.json,
+  không gọi giám khảo, không chạy thử trước; giao worker thì giao thẳng việc thật (không giao bước "kiểm tra quyền" riêng).
 - Sản phẩm là VĂN BẢN do worker viết: dặn worker ghi TOÀN BỘ nội dung vào câu trả lời cuối (result.md), không chỉ liệt kê file.
 - Không chép lại/viết lại dài nội dung worker đã viết đạt. Viết nội dung cuối MỘT lần (câu trả lời cuối hoặc 1 file trong OUTPUT).
 - Ít bước nhỏ lẻ: gộp nhiều lệnh đọc/kiểm tra vào một lần chạy.
@@ -694,11 +696,14 @@ Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worke
   chú thích hoặc tách ảnh; không resize ảnh khi đánh dấu; xem lại ảnh đã vẽ trước khi giao; liệt kê từng chỗ (số, màu, toạ độ, ý nghĩa).
 
 ## Google Drive / Sheets / Docs / Slides
-Chỉ BẠN có công cụ Google Drive (mcp__claude_ai_Google_Drive: tìm, đọc, tải file, tạo/cập nhật file); worker không vào Drive được.
-Để worker đọc/sửa file Drive: tải file về work/drive/<tên>/ (Sheets -> .xlsx, Docs -> .docx, Slides -> .pptx), giao worker
---edit work/drive/<tên>, kiểm tra file đã sửa, rồi cập nhật lại bản trên Drive (giữ đúng file, không tạo bản trùng) và lưu 1 bản
-vào OUTPUT. Công cụ Drive không cho cập nhật file -> nói rõ một câu và chỉ cách thay (File > Import > Upload > Replace).
-Chỉ đọc/tóm tắt Drive: tự đọc, không cần worker. Không đổi quyền chia sẻ file Drive.
+Công cụ Google Drive của BẠN (mcp__claude_ai_Google_Drive, nạp bằng ToolSearch): tìm, đọc, tải, tạo file — KHÔNG sửa được ô/nội dung.
+- Chỉ đọc/tóm tắt: tự đọc, không cần worker.
+- SỬA TRỰC TIẾP trên file Google (giữ nguyên link): giao codex kèm --drive (ChatGPT dùng kết nối Google Drive của nó, có lệnh ghi
+  Sheets/Docs/Slides). Ghi rõ link, tab/vùng cần sửa, phần phải giữ (tiêu đề, định dạng, checkbox...). Sửa xong giao codex đọc lại
+  để kiểm tra. Codex báo không có kết nối Google Drive / bị chặn -> cách dự phòng bên dưới.
+- Dự phòng: tải file về work/drive/<tên>/ (Sheets -> .xlsx, Docs -> .docx, Slides -> .pptx), giao worker --edit work/drive/<tên>,
+  kiểm tra, rồi cập nhật bản trên Drive nếu công cụ cho phép; không thì lưu vào OUTPUT và chỉ cách thay (File > Import > Upload >
+  Replace spreadsheet). Không đổi quyền chia sẻ file Drive.
 
 ## Storyboard
 Storyboard viết dạng BẢNG CHỮ (cảnh, thời lượng, hình ảnh, chữ trên màn hình, âm thanh, CTA) trong câu trả lời hoặc tài liệu.
@@ -889,12 +894,13 @@ def start_run(t):
         last.unlink(missing_ok=True)
         args = [exe, "exec"] + (["resume", t["session"]] if t.get("session_started") else []) + [
             "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", str(last),
-            "-c", f'model_reasoning_effort="{ce}"'] + ([] if t.get("session_started") else ["-C", str(d)]) + [build_prompt(t, nxt)]
+            "-c", f'model_reasoning_effort="{ce}"'] + (DRIVE_APPROVE if GOOGLE_LINK.search(t.get("text", "") + nxt.get("text", "")) else []) + (
+            [] if t.get("session_started") else ["-C", str(d)]) + [build_prompt(t, nxt)]
     else:
         args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
                 "--permission-mode", "acceptEdits",
                 "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite,"
-                                  "mcp__claude_ai_Google_Drive", "--model", cm]
+                                  "ToolSearch,mcp__claude_ai_Google_Drive", "--model", cm]
         if t.get("session_started"):
             args += ["--resume", t["session"]]
         else:
@@ -932,7 +938,7 @@ def summarize_tool(b):
     m = re.search(r" worker (codex|gemini) .*?--out\s+\"?([^\s\"]+)", cmd_)
     if m:
         sid = re.split(r"[\\/]", m.group(2).rstrip("/\\"))[-1]
-        return f"Giao {sid} cho {'ChatGPT' if m.group(1) == 'codex' else 'Gemini'}" + (" (sửa file trực tiếp)" if " --edit" in cmd_ else "")
+        return f"Giao {sid} cho {'ChatGPT' if m.group(1) == 'codex' else 'Gemini'}" + (" (sửa file trực tiếp)" if " --edit" in cmd_ else "") + (" (sửa file Google)" if " --drive" in cmd_ else "")
     if " check " in cmd_:
         return "Kiểm tra kết quả"
     label = {"Read": "Đọc", "Write": "Ghi", "Edit": "Sửa", "MultiEdit": "Sửa", "Glob": "Tìm file", "Grep": "Tìm",
@@ -2861,6 +2867,12 @@ def api_worker(st, v, key, text, a):
         fh.write("--- gemini api ---\n" + "\n".join(log) + "\n")
 
 
+# Codex: lệnh ghi của kết nối (Google Drive...) cần người duyệt; worker chạy nền không ai duyệt -> bị chặn.
+# Chỉ bật tự duyệt khi task cần sửa file Google (cờ --drive / tin nhắn có link Google).
+DRIVE_APPROVE = ["-c", 'apps._default.default_tools_approval_mode="approve"']
+GOOGLE_LINK = re.compile(r"https?://(?:docs|drive|sheets)\.google\.com/", re.I)
+
+
 def edit_refused(p):
     """Thư mục quá rộng/nguy hiểm để cho worker sửa thẳng -> lý do từ chối ('' = được phép)."""
     if not p.is_dir():
@@ -2938,6 +2950,7 @@ def cmd_worker(argv):
     ap.add_argument("--vdir")
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--hard", action="store_true")
+    ap.add_argument("--drive", action="store_true", help="ChatGPT được tự duyệt lệnh ghi của kết nối Google Drive (sửa thẳng Sheets/Docs/Slides)")
     ap.add_argument("--edit", help="thư mục worker được SỬA TRỰC TIẾP (file của người dùng, thư mục OUTPUT, file Drive đã tải về)")
     a = ap.parse_args(argv)
     proj = Path.cwd()
@@ -2997,7 +3010,10 @@ def cmd_worker(argv):
                      "Excel/Word/PowerPoint: dùng Python (openpyxl, python-docx, python-pptx); không chuyển đổi định dạng file. "
                      "Câu trả lời cuối: liệt kê từng file đã sửa và đã sửa gì. ") if edit else ""
         if a.worker == "codex":
-            prompt = (f"Thực hiện đúng yêu cầu trong {v / 'TASK.md'}. "
+            drive_note = ("Được sửa TRỰC TIẾP file Google (Sheets/Docs/Slides) bằng kết nối Google Drive của bạn: chỉ sửa đúng file/link "
+                          "trong yêu cầu, không xoá/di chuyển/chia sẻ file, không dùng kết nối khác (Gmail, Calendar...). Đọc lại sau khi sửa "
+                          "để kiểm tra. Không có kết nối Google Drive thì nói rõ, không làm cách khác. ") if a.drive else ""
+            prompt = (drive_note + f"Thực hiện đúng yêu cầu trong {v / 'TASK.md'}. "
                       f"File đầu vào (chỉ đọc): {inp_}. " + (edit_note or "Ghi mọi file kết quả vào thư mục hiện tại. ") +
                       "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung sản phẩm (không chỉ tóm tắt); "
                       "nếu tạo file thì liệt kê file đã tạo và cách đã kiểm tra.")
@@ -3005,7 +3021,7 @@ def cmd_worker(argv):
                    "--output-last-message", str(v / "result.md")]
             mods, eff = pick_model("codex", os.environ.get("AIO_MODE", "balanced"), os.environ.get("AIO_HARD") == "1")
             mods = [a.model] if a.model else list(mods)
-            base_cmd = cmd + ["-c", f'model_reasoning_effort="{eff}"']
+            base_cmd = cmd + ["-c", f'model_reasoning_effort="{eff}"'] + (DRIVE_APPROVE if a.drive else [])
             cands = [base_cmd + ["-m", m_, prompt] for m_ in mods] + [base_cmd + [prompt]]   # model không dùng được -> thử model kế, cuối cùng mặc định
             cmd = cands[0]
             cwd = edit or v                 # Codex chỉ được ghi trong thư mục làm việc của nó (sandbox)
