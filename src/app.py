@@ -684,6 +684,7 @@ def watch(t, p, nxt):
             t["status"] = "done"
             t["finished"] = now()
             tmsg(t, "claude", (result.get("result") or "Xong.").strip(), files=new_files(t, since))
+            threading.Thread(target=slim_task, args=(t,), daemon=True).start()
         else:
             end_work(t, "failed")
             msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {p.returncode}"
@@ -1398,6 +1399,10 @@ class H(BaseHTTPRequestHandler):
             return ai_code(d["ai"], str(d.get("code", "")))
         if path == "/api/ai/cancel" and d.get("ai") in AIS:
             return ai_cancel(d["ai"])
+        if path == "/api/clear-cache":
+            if busy_tasks():
+                return {"error": "Đang có task chạy. Dọn cache sau khi task xong."}
+            return clear_cache()
         if path == "/api/export-log":
             return export_log()
         if path == "/api/ai/refresh":
@@ -1521,6 +1526,86 @@ def registry(force=False):
     except Exception:
         pass
     return _reg["data"]
+
+
+KEEP_EXT = {".md", ".json", ".txt", ".log", ".out", ".py", ".js", ".ps1", ".bat", ".csv", ".yaml", ".yml", ".html"}
+
+
+def _fhash(f):
+    import hashlib
+    h = hashlib.sha1()
+    with open(f, "rb") as fh:
+        for b in iter(lambda: fh.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def slim_task(t, deep=False):
+    """Giảm dung lượng thư mục làm việc của 1 task (giữ lịch sử: tin nhắn, kế hoạch, tiêu chí, quyết định, log chữ).
+    - Luôn: xóa file trong work/ trùng hệt file đã có ở thư mục kết quả (bản thật nằm ở đó).
+    - deep (nút Xóa cache): xóa thêm bản nháp/ảnh/video trung gian trong work/ và file đính kèm đã dùng xong."""
+    if t.get("status") in ("running", "queued"):
+        return 0
+    w = tdir(t) / "work"
+    if not w.exists():
+        return 0
+    od = out_dir(t) if CFG.get("output") else None
+    idx = {}
+    if od and od.exists():
+        for f in od.rglob("*"):
+            if f.is_file() and STORE_NAME not in f.parts:
+                idx.setdefault(f.stat().st_size, []).append(f)
+    deep = deep and t.get("status") in ("done", "cancelled")   # task còn dở: chỉ xóa file trùng, giữ bản nháp để làm tiếp
+    freed = 0
+    for f in list(w.rglob("*")):
+        if not f.is_file() or f.name == "status.json":
+            continue
+        try:
+            sz = f.stat().st_size
+            drop = False
+            if f.suffix.lower() in KEEP_EXT and sz < 2_000_000:
+                continue
+            if sz in idx:
+                h = _fhash(f)
+                drop = any(_fhash(o) == h for o in idx[sz])
+            if not drop and deep:
+                drop = True
+            if drop:
+                f.unlink()
+                freed += sz
+        except Exception as e:
+            dlog(f"slim {f}: {e}")
+    for d in sorted((x for x in w.rglob("*") if x.is_dir()), key=lambda x: -len(x.parts)):
+        try:
+            d.rmdir()                                  # chỉ xóa được thư mục rỗng
+        except OSError:
+            pass
+    return freed
+
+
+def clear_cache():
+    freed = 0
+    for t in list(TASKS.values()):
+        freed += slim_task(t, deep=True)
+    for p in [DATA / ".login", APP.parent / "__pycache__"]:
+        if p.exists():
+            freed += sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+            shutil.rmtree(p, ignore_errors=True)
+    for p in [HOME / "app.py.old", DATA / "debug.log.1"]:
+        if p.is_file():
+            freed += p.stat().st_size
+            p.unlink()
+    lg = DATA / "debug.log"
+    if lg.is_file() and lg.stat().st_size > 1_000_000:
+        b = lg.read_bytes()
+        freed += len(b) - 500_000
+        lg.write_bytes(b[-500_000:])
+    try:
+        registry(force=True)
+    except Exception:
+        pass
+    mb = freed / 1048576
+    return {"ok": True, "msg": f"Đã dọn {mb:.0f} MB" if mb >= 1 else "Không có gì cần dọn"}
 
 
 def export_log():

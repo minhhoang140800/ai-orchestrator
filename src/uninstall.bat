@@ -4,7 +4,7 @@ title AI Orchestrator - Go cai dat
 set "APPDIR=%LOCALAPPDATA%\AIOrchestrator"
 echo.
 echo   AI Orchestrator - GO CAI DAT
-echo   Thu muc ket qua (noi luu file export) luon duoc giu nguyen.
+echo   Thu muc ket qua va lich su task (_AI-Orchestrator) luon duoc giu nguyen.
 echo.
 echo   [1] Go app + dang xuat 3 AI          (de test lai tu buoc cai dat va dang nhap)
 echo   [2] Muc 1 + go Claude Code, Codex, Antigravity
@@ -14,8 +14,6 @@ echo.
 choice /c 1230 /n /m "Chon muc (1/2/3/0): "
 set "LV=%errorlevel%"
 if "%LV%"=="4" exit /b 0
-choice /c YN /n /m "Xoa ca lich su task trong app? (Y/N): "
-set "DELDATA=%errorlevel%"
 echo.
 
 echo [1] Dung app dang chay...
@@ -37,12 +35,11 @@ echo [1] Go app va shortcut...
 del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\AI Orchestrator.lnk" >nul 2>&1
 del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\AI Orchestrator.lnk" >nul 2>&1
 del /q "%USERPROFILE%\Desktop\AI Orchestrator.lnk" >nul 2>&1
-if "%DELDATA%"=="1" (
-  if exist "%APPDIR%" rd /s /q "%APPDIR%"
-) else (
-  del /q "%APPDIR%\app.py" "%APPDIR%\app.py.new" "%APPDIR%\version.txt" "%APPDIR%\icon.ico" "%APPDIR%\install.log" >nul 2>&1
-  if exist "%APPDIR%\data\config.json" del /q "%APPDIR%\data\config.json"
-)
+del /q "%APPDIR%\app.py" "%APPDIR%\app.py.new" "%APPDIR%\app.py.old" "%APPDIR%\version.txt" "%APPDIR%\icon.ico" "%APPDIR%\install.log" >nul 2>&1
+if exist "%APPDIR%\__pycache__" rd /s /q "%APPDIR%\__pycache__"
+del /q "%APPDIR%\data\config.json" "%APPDIR%\data\debug.log" >nul 2>&1
+if exist "%APPDIR%\data\.login" rd /s /q "%APPDIR%\data\.login"
+rem giu lai %APPDIR%\data\tasks (lich su cua ban cu, neu con)
 if "%LV%"=="1" goto done
 
 echo [2] Go Codex...
