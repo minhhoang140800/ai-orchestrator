@@ -626,7 +626,7 @@ EDIT_RE = re.compile(r"sửa|chỉnh|edit|cập nhật|thay|đổi tên|xóa|xo�
 def judge_on(t):
     """Nút Giám sát của task; chưa bấm thì theo chế độ (Pro, Balanced bật)."""
     v = t.get("judge")
-    return bool(v) if v is not None else norm_mode(t.get("mode")) in ("pro", "balanced")
+    return bool(v) if v is not None else norm_mode(t.get("mode")) in ("pro", "balanced", "code")
 
 
 def md_needs(t):
@@ -829,7 +829,7 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
     if "codex" not in on:
         txt = "\n".join(x for x in txt.split("\n") if '" worker codex ' not in x)
     if t.get("kind") == "code":
-        txt = code_md(txt, t)
+        txt = code_md(txt, t, py, app)
     if pm == "codex":
         txt = pm_codex_md(txt)
     if free_setup():
@@ -1384,7 +1384,7 @@ def act(tid, action, text="", files=None, template=""):
             if wdir(t).exists():
                 write_claude_md(t)
         elif action == "mode" and MODE_ALIAS.get(text, text) in MODES:
-            t["judge"] = norm_mode(text) in ("pro", "balanced")   # đổi chế độ: Pro/Balanced tự bật Giám sát
+            t["judge"] = norm_mode(text) in ("pro", "balanced", "code")   # đổi chế độ: Pro/Balanced/Code tự bật Giám sát
             t["mode"] = norm_mode(text)                           # áp dụng từ lượt chạy kế tiếp
             write_claude_md(t)
         elif action == "install" and s == "waiting" and t.get("install") and not t.get("installing"):
@@ -3435,14 +3435,21 @@ App hiện thông báo + nút Cài cho người dùng; cài xong app tự chạy
 """
 
 
-def code_md(txt, t):
+def code_md(txt, t, py="", app=""):
     """Hướng dẫn Code mode: thay mục Vai trò/Chia việc/Nghiệm thu/chế độ bằng quy trình code + chạy thử."""
     code = CODE_MD.format(pdir=t.get("pdir", ""))
     txt = re.sub(r"(?ms)^## Vai trò\n.*?(?=^## )", lambda m: code + "\n", txt, count=1)
     for sec in ("Chia việc (Gemini nhanh, GPT chính xác hơn)", "Nghiệm thu", "Ảnh có đánh dấu", "Ảnh & storyboard"):
         txt = re.sub(r"(?ms)^## " + re.escape(sec) + r"\n.*?(?=^## )", "", txt, count=1)
     txt = re.sub(r"(?ms)^## Chế độ: .*?(?=^## )",
-                 "## Chế độ: Code (Opus, suy nghĩ medium)\n- Ưu tiên chạy được và đúng; chạy thử thật trước khi báo xong.\n\n", txt, count=1)
+                 "## Chế độ: Code (Opus, suy nghĩ medium)\n- Ưu tiên chạy được và đúng; chạy thử thật trước khi báo xong.\n\n"
+                 + (f"""## Giám sát (BẬT)
+Sau khi chạy thử/test đã qua: gọi giám khảo độc lập soát phần code đã sửa theo đúng yêu cầu (viết yêu cầu + điều phải đạt
+vào tasks/criteria.md trước):
+  "{py}" "{app}" judge --files <file/thư mục đã sửa> --criteria tasks/criteria.md --brief "<yêu cầu>" --out work/J1
+Fail -> sửa đúng lỗi nêu, chạy test lại, chấm lại; lặp tới khi ĐẠT (tối đa 4 vòng; vẫn fail thì báo rõ còn lỗi gì).
+
+""" if judge_on(t) and t.get("pm", "claude") == "claude" else ""), txt, count=1)
     return txt
 
 

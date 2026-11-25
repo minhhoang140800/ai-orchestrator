@@ -668,8 +668,8 @@ function bindComposer(onSend) {
     $("modeMenu").classList.remove("show"); if (b.dataset.mode === curMode) return;
     if (c.id !== "homeComp" && b.dataset.mode === "code") return toast("Code mode cần thư mục dự án: tạo task mới ở chế độ Code");
     curMode = b.dataset.mode; paintMode();
-    if (c.id === "homeComp") { localStorage.setItem("mode", curMode); lsSet("judge", ["pro", "balanced"].includes(curMode) ? "1" : "0"); paintKind(); repaintWatch(); }
-    else { const r = await api("/api/task/act", { id: T.id, action: "mode", text: curMode }); toast(r.error || "Đã đổi chế độ"); if (!r.error) { T.judge = ["pro", "balanced"].includes(curMode); repaintWatch(); } kick(); }
+    if (c.id === "homeComp") { localStorage.setItem("mode", curMode); lsSet("judge", JUDGE_MODES.includes(curMode) ? "1" : "0"); paintKind(); repaintWatch(); }
+    else { const r = await api("/api/task/act", { id: T.id, action: "mode", text: curMode }); toast(r.error || "Đã đổi chế độ"); if (!r.error) { T.judge = JUDGE_MODES.includes(curMode); repaintWatch(); } kick(); }
   };
   ta.addEventListener("input", sendIcon);
   let lastChk = 0;      // kiểm tra đăng nhập chỉ khi đang soạn prompt (tối đa 1 lần/phút)
@@ -730,7 +730,8 @@ const homeProj = () => { const v = localStorage.getItem("proj") || ""; return S.
 const curProj = () => (T && $("taskComp") ? T.project || "" : homeProj());
 function whenTxt(c) { const d = new Date(String(c).replace(" ", "T")); if (isNaN(d)) return c || ""; const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5); return days <= 0 ? "Hôm nay" : days === 1 ? "Hôm qua" : `${days} ngày trước`; }
 const WHISTLE = '<svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="15" r="5"/><path d="M12.6 11.4 21 8v4.2l-6.6 1.4"/><path d="M4 5.5l1.6 1.6M8.5 3.5v2.3M2 9.5h2.3"/></svg>';
-function homeJudge() { const v = lsGet("judge"); return v ? v === "1" : ["pro", "balanced"].includes(normMode(lsGet("mode"))); }
+const JUDGE_MODES = ["pro", "balanced", "code"];      // các chế độ tự bật Giám sát
+function homeJudge() { const v = lsGet("judge"); return v ? v === "1" : JUDGE_MODES.includes(normMode(lsGet("mode"))); }
 function watchBtn() {       // nút Giám sát: giám khảo chấm, sửa tới khi đạt (Pro/Balanced tự bật khi đổi chế độ)
   const on = T && $("taskComp") ? !!T.judge : homeJudge();
   return `<button class="wbtn ${on ? "on" : ""}" id="wBtn" data-watch="1" aria-pressed="${on}" data-tip="Giám sát ${on ? "đang bật" : "đang tắt"}: lâu hơn nhưng sẽ check đến khi hoàn thiện">${WHISTLE}Giám sát</button>`;
