@@ -1211,13 +1211,13 @@ async function openUsage(force) {
   const u = await api("/api/usage", { force: !!force }); if (u.error) { m.innerHTML = `<div class="note">${esc(u.error)}</div>`; return; }
   const plan = (k) => (u.plans || {})[k] ? planTxt(u.plans[k]) : "";
   const block = (k, name) => {
-    const a = u[k] || {}, c = ((u.counts || {}).today || {})[k] || {};
+    const a = u[k] || {};
     const cr = a.credits && (k === "claude" ? a.credits.has : (a.credits.unlimited || +a.credits.balance > 0))
       ? `<div class="ur"><span>${k === "claude" ? "Extra usage" : "Credits"}</span><span>${k === "claude" ? "bật" : a.credits.unlimited ? "∞" : a.credits.balance}</span></div>` : "";
     const body = a.known ? leftRow("Phiên hiện tại", a.five_hour) + leftRow("Tuần này", a.week) + cr : `<div class="note">Chưa đọc được</div>`;
     const lim = a.limit_until ? `<div class="ur low"><span>Hết lượt</span><span>${new Date(a.limit_until * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</span></div>` : "";
     const sw = k in (u.in_plan || {}) ? `<label class="sw" title="Gói còn ≤2% thì Maestro dừng AI này tới giờ làm mới, không dùng credit/extra usage"><input type="checkbox" data-inplan="${k}" ${u.in_plan[k] ? "checked" : ""}> Chỉ dùng trong gói</label>` : "";
-    return `<div class="ua"><div class="un">${esc(name)}${plan(k)}<span style="flex:1"></span><small class="note" title="Maestro đã dùng hôm nay">${c.runs || 0} lượt hôm nay</small>${MANAGE[k] ? `<a href="${MANAGE[k]}" target="_blank" rel="noopener" title="Quản lý trên trang ${esc(name)}" aria-label="Quản lý">${lu("external-link")}</a>` : ""}</div>${body}${lim}${sw}</div>`;
+    return `<div class="ua"><div class="un">${esc(name)}${plan(k)}<span style="flex:1"></span>${MANAGE[k] ? `<a href="${MANAGE[k]}" target="_blank" rel="noopener" title="Quản lý trên trang ${esc(name)}" aria-label="Quản lý">${lu("external-link")}</a>` : ""}</div>${body}${lim}${sw}</div>`;
   };
   m.innerHTML = `<div class="uh"><b>Mức dùng</b><span style="flex:1"></span><button class="ghost icon" id="uRef" title="Kiểm tra lại · cập nhật ${new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}" aria-label="Kiểm tra lại">${I.refresh}</button></div>
     ${block("claude", "Claude")}${block("codex", "ChatGPT")}${block("gemini", "Gemini")}`;
