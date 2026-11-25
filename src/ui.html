@@ -312,7 +312,7 @@ function composer(id, ph) {
   return `<div class="comp" id="${id}"><div class="atts" id="atts"></div>
     <textarea id="txt" placeholder="${ph}" aria-label="Tin nhắn"></textarea>
     <div class="bar"><button class="ghost icon" id="bFile" title="Đính kèm file" aria-label="Đính kèm file">${I.attach}</button>
-      ${id === "homeComp" ? `<select id="modeSel" title="Chế độ làm việc" aria-label="Chế độ làm việc"><option value="fast">Nhanh</option><option value="balanced">Cân bằng</option><option value="saver">Tiết kiệm</option></select>` : ""}
+      <select id="modeSel" title="Chế độ làm việc" aria-label="Chế độ làm việc"><option value="fast">Nhanh</option><option value="balanced">Cân bằng</option><option value="saver">Tiết kiệm</option></select>
       <span style="flex:1"></span><span class="hint" id="cHint"></span>
       <button class="pri icon" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
@@ -339,7 +339,8 @@ function bindComposer(onSend) {
     });
     renderAtts();
   });
-  if ($("modeSel")) { $("modeSel").value = localStorage.getItem("mode") || "balanced"; $("modeSel").onchange = (e) => localStorage.setItem("mode", e.target.value); }
+  if (c.id === "homeComp") { $("modeSel").value = localStorage.getItem("mode") || "balanced"; $("modeSel").onchange = (e) => localStorage.setItem("mode", e.target.value); }
+  else { $("modeSel").value = (T && T.mode) || "balanced"; $("modeSel").onchange = async (e) => { const r = await api("/api/task/act", { id: T.id, action: "mode", text: e.target.value }); if (r.error) toast(r.error); else { toast("Đã đổi chế độ, áp dụng từ bước tiếp theo"); kick(); } }; }
   let lastChk = 0;      // kiểm tra đăng nhập chỉ khi đang soạn prompt (tối đa 1 lần/phút)
   const chk = () => { if (Date.now() - lastChk > 60000) { lastChk = Date.now(); api("/api/ai/refresh", {}).then(() => setTimeout(kick, 2500)); } };
   ta.addEventListener("focus", chk); ta.addEventListener("input", chk);
@@ -364,7 +365,7 @@ const fsize = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(
 async function openLib(force) {
   view = "lib"; sel = ""; sessionStorage.removeItem("sel"); T = null; renderSide();
   $("main").innerHTML = `<div class="thead"><h1>Lịch sử &amp; file</h1><span class="grow"></span>
-      <div class="seg"><button data-libtab="tasks">Task</button><button data-libtab="files">File kết quả</button></div>
+      <div class="seg"><button data-libtab="tasks">Task</button><button data-libtab="files">Thư viện</button></div>
       <input type="text" id="libQ" placeholder="Tìm…" style="max-width:220px" value="${esc(libQ)}"><button class="ghost icon" id="libR" title="Quét lại">${I.refresh}</button></div>
     <div class="scroll"><div class="lib" id="libBody"><div class="hint">Đang tải…</div></div></div>`;
   $("libQ").oninput = (e) => { libQ = e.target.value; renderLib(); };
@@ -464,7 +465,7 @@ function renderTask() {
     bindComposer(sendMore);
   }
   $("thead").innerHTML = `<span class="pill ${t.status}">${ST[t.status]}</span>
-      <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1>${t.mode && t.mode !== "balanced" ? `<span class="chip">${t.mode === "fast" ? "Nhanh" : "Tiết kiệm"}</span>` : ""}<button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
+      <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1><button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
       <span class="grow"></span>${acts.join("")}`;
   $("decbar").innerHTML = decHtml(t);
   $("thread").innerHTML = body + queued;
@@ -549,7 +550,6 @@ function renderSettings() {
   const acc = Object.entries(S.ais).map(([k, a]) => `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${accState(k, a)}</span>
       ${a.pending ? `<button data-cancel="${k}">Hủy</button>` : `<button class="${a.ok ? "" : "pri"}" data-login="${k}" data-switch="${a.ok ? 1 : ""}" ${a.installed ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button>`}</div>`).join("");
   $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI</span>${acc}</div>
-    <div class="f"><span class="k">Máy này</span><div class="path" style="white-space:normal">${S.machine.cpu} luồng CPU · ${S.machine.ram} GB RAM → chạy cùng lúc tối đa <b>${S.machine.max}</b> task (tự tính)</div></div>
     <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>`;
   $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><button id="mLog" title="Lưu file log (.zip) vào thư mục kết quả">Export log</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
   $("mLog").onclick = async () => { const r = await api("/api/export-log", {}); toast(r.error || r.msg); };
