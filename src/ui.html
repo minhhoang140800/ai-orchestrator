@@ -278,7 +278,7 @@ async function refresh() {
   renderSide();
   if (sel && !S.tasks.find((t) => t.id === sel)) sel = "";
   if (view === "lib") { /* đang xem thư viện */ } else if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
-  if ($("ov").classList.contains("show") && !$("mUpd")?.disabled && !(document.activeElement?.id || "").startsWith("code_") && !document.querySelector("[data-code]:disabled")) renderSettings();
+  if ($("ov").classList.contains("show") && !$("mUpd")?.disabled && !(document.activeElement?.id || "").startsWith("code_") && !Object.entries(S.ais).some(([k, x]) => x.code && document.querySelector(`[data-code=${k}]:disabled`))) renderSettings();
   feedLoginWin();
   if (!firstRun) { firstRun = true; if (!S.output || !S.ais.claude.ok) openSettings(); }
 }
@@ -581,6 +581,7 @@ function autoLogin() {      // tự mở lần lượt trang đăng nhập của
 function accState(k, a) {
   if (!a.installed) return `<small class="bad">Chưa cài — bấm đúp lại file cài AI-Orchestrator (.bat)</small>`;
   if (a.window === "logout") return `<small>Trong cửa sổ Gemini: gõ <b>/logout</b>, đăng nhập tài khoản mới trên trình duyệt, rồi đóng cửa sổ.</small>`;
+  if (a.code && k === "claude") return `<small>1. Trong cửa sổ đăng nhập bấm <b>Authorize</b> → copy mã hiện ra${a.url ? ` (<a href="${esc(a.url)}" target="aio_login">mở lại</a>)` : ""}. 2. Dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Dán mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`;
   if (a.code) return `<small>1. Đăng nhập Google trên tab vừa mở${a.url ? ` (<a href="${esc(a.url)}" target="_blank">mở lại</a>)` : ""} → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Dán mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`;
   if (a.window) return `<small>1. Đăng nhập Google trên trình duyệt → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào <b>cửa sổ Gemini</b> (chuột phải hoặc Ctrl+V) rồi Enter. 3. Thấy email hiện lên thì đóng cửa sổ.${a.note ? `<br><span class="bad" style="color:var(--bad)">Không chạy ẩn được: ${esc(a.note)}</span>` : ""}</small>`;
   if (a.pending) return `<small>Đăng nhập trong cửa sổ vừa mở${a.url ? ` · <a href="${esc(a.url)}" target="aio_login">mở lại trang đăng nhập</a>` : "…"}</small>`;

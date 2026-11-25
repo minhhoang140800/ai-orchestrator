@@ -954,7 +954,7 @@ def dlog(msg):
 class HiddenTerm:
     """Chạy chương trình dạng cửa sổ dòng lệnh ở chế độ ẩn (terminal ảo), đọc màn hình và gõ phím thay người dùng."""
 
-    def __init__(self, args, cwd):
+    def __init__(self, args, cwd, env=None):
         self.buf = ""
         self.pid = None
         if IS_WIN:
@@ -970,7 +970,7 @@ class HiddenTerm:
                 importlib.invalidate_caches()
                 sys.path.append(site.getusersitepackages())
                 from winpty import PtyProcess
-            self.p = PtyProcess.spawn([str(x) for x in args], cwd=cwd, dimensions=(50, 500))
+            self.p = PtyProcess.spawn([str(x) for x in args], cwd=cwd, env=env, dimensions=(50, 500))
             self.pid = self.p.pid
             self._read = lambda: self.p.read(4096)
             self._write = self.p.write
@@ -978,7 +978,7 @@ class HiddenTerm:
         else:
             import pty
             m, s = pty.openpty()
-            self.sp = subprocess.Popen(args, cwd=cwd, stdin=s, stdout=s, stderr=s, close_fds=True, start_new_session=True)
+            self.sp = subprocess.Popen(args, cwd=cwd, env=env, stdin=s, stdout=s, stderr=s, close_fds=True, start_new_session=True)
             os.close(s)
             self.pid = self.sp.pid
             self._read = lambda: os.read(m, 4096).decode("utf-8", "replace")
@@ -1121,10 +1121,13 @@ def ai_login(ai, switch=False):
                 if ai == "codex" and IS_WIN:          # phiên đăng nhập cũ còn giữ cổng 1455 -> codex login thoát ngay
                     _run_hidden(["powershell", "-NoProfile", "-Command",
                                  "Get-NetTCPConnection -LocalPort 1455 -State Listen -EA 0 | % { Stop-Process -Id $_.OwningProcess -Force -EA 0 }"], 20)
+                env = dict(os.environ, BROWSER="none")   # không để CLI tự mở tab mới: web mở link trong cửa sổ nhỏ
+                if ai == "claude":
+                    return claude_term_login(exe, d, cur, env)
                 logf = d / f"{ai}.out"
                 fh = open(logf, "w", encoding="utf-8", errors="replace")
                 p = subprocess.Popen(args, cwd=str(d), stdin=subprocess.PIPE, stdout=fh, stderr=subprocess.STDOUT,
-                                     creationflags=NO_WINDOW)
+                                     env=env, creationflags=NO_WINDOW)
                 LOGINS[ai] = p
 
                 def grab():                         # lấy link đăng nhập để web mở trong cửa sổ nhỏ
@@ -1193,6 +1196,27 @@ def ai_login(ai, switch=False):
 
     threading.Thread(target=run, daemon=True).start()
     return {"ok": True}
+
+
+def claude_term_login(exe, d, cur, env):
+    """Claude: chạy 'claude auth login' trong terminal ẩn; người dùng đăng nhập ở cửa sổ nhỏ rồi dán mã vào web."""
+    p = HiddenTerm([exe, "auth", "login", "--claudeai"], str(d), env)
+    LOGINS["claude"] = p
+    t0 = time.time()
+    while time.time() - t0 < 900 and p.alive():
+        time.sleep(1)
+        if not cur.get("url"):
+            m = re.search(r"https://claude\.ai/oauth/authorize\S+|https://\S*oauth\S+", p.buf)
+            if m:
+                cur["url"] = m.group(0)
+                cur["code"] = True
+        if time.time() - t0 > 8 and int(time.time() - t0) % 4 == 0 and ai_status("claude").get("ok"):
+            break
+    time.sleep(1)
+    dlog("claude login screen tail:\n" + p.buf[-1500:])
+    p.kill()
+    if not ai_status("claude").get("ok"):
+        cur["msg"] = "Đăng nhập chưa xong. Bấm Đăng nhập lại; nếu vẫn lỗi, Export log gửi tôi."
 
 
 def ai_cancel(ai):
