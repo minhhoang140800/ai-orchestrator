@@ -220,6 +220,11 @@ main{background:var(--bg)}
 .lb{position:fixed;inset:0;background:rgba(20,20,20,.72);display:none;align-items:center;justify-content:center;z-index:30;padding:32px}.lb.show{display:flex}
 .lb img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;background:#fff;box-shadow:0 8px 30px rgba(0,0,0,.3)}
 .lbx{position:absolute;top:14px;right:18px;border:0;background:rgba(255,255,255,.15);color:#fff;font-size:22px;width:36px;height:36px;border-radius:6px;padding:0}
+main.drop::after{content:"Thả file vào đây";position:absolute;inset:8px;border:2px dashed #9A9A9A;border-radius:8px;background:rgba(255,255,255,.75);
+ display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:500;color:var(--ink);pointer-events:none;z-index:15}
+main{position:relative}
+.mdt{overflow-x:auto;margin:8px 0}.mdt table{border-collapse:collapse;font-size:13px;width:100%}.mdt th,.mdt td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+.mdt th{background:var(--soft);font-weight:600}
 .smenu{min-width:160px}.smenu button{align-items:center;font-size:13px}
 .claude.stage{margin-top:12px;color:var(--ink)}.claude.stage .txt{border-left:2px solid var(--line);padding-left:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -297,15 +302,32 @@ async function upload(tid, f) {
 }
 function toast(m) { const t = $("toast"); t.textContent = m; t.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => (t.style.display = "none"), 4500); }
 function notify(title, body) { if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body, icon: "/icon.svg" }); }
+// kéo thả file vào cả vùng nội dung (không chỉ ô nhập)
+let dragN = 0;
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+document.addEventListener("dragenter", (e) => { if (!hasFiles(e) || !$("txt")) return; e.preventDefault(); dragN++; $("main").classList.add("drop"); });
+document.addEventListener("dragover", (e) => { if (hasFiles(e) && $("txt")) e.preventDefault(); });
+document.addEventListener("dragleave", (e) => { if (!hasFiles(e)) return; dragN = Math.max(0, dragN - 1); if (!dragN) $("main").classList.remove("drop"); });
+document.addEventListener("drop", (e) => {
+  if (!hasFiles(e)) return; e.preventDefault(); dragN = 0; $("main").classList.remove("drop");
+  if (!$("txt") || !e.dataTransfer.files.length) return;
+  files.push(...e.dataTransfer.files); renderAtts(); $("txt").focus();
+});
+function mdInline(l) { return l.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<i>$2</i>"); }
 function md(s) {
-  const out = []; let list = false;
+  const out = []; let list = false, tb = null;
+  const flushT = () => { if (!tb) return; const rows = tb.filter((r) => !/^\|?\s*:?-{2,}/.test(r)).map((r) => r.replace(/^\||\|$/g, "").split("|").map((c) => mdInline(c.trim())));
+    out.push(`<div class="mdt"><table>${rows.map((r, i) => `<tr>${r.map((c) => i ? `<td>${c}</td>` : `<th>${c}</th>`).join("")}</tr>`).join("")}</table></div>`); tb = null; };
   for (const raw of esc(s).split("\n")) {
-    let l = raw.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+    if (/^\s*\|.*\|\s*$/.test(raw)) { if (list) { out.push("</ul>"); list = false; } (tb = tb || []).push(raw.trim()); continue; }
+    flushT();
+    let l = mdInline(raw);
     const m = l.match(/^(\s*)[-*•] (.*)$/), h = l.match(/^#{1,4} (.*)$/);
     if (m) { if (!list) { out.push("<ul>"); list = true; } out.push(`<li style="margin-left:${Math.min(m[1].length, 8) * 8}px">${m[2]}</li>`); continue; }
     if (list) { out.push("</ul>"); list = false; }
     out.push(h ? `<p><b>${h[1]}</b></p>` : l.trim() ? `<p>${l}</p>` : "");
   }
+  flushT();
   if (list) out.push("</ul>");
   return out.join("");
 }
@@ -447,9 +469,6 @@ function bindComposer(onSend) {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); onSend(); }
   });
   ta.addEventListener("input", () => fit(ta));
-  ["dragenter", "dragover"].forEach((ev) => c.addEventListener(ev, (e) => { e.preventDefault(); c.classList.add("drag"); }));
-  ["dragleave", "drop"].forEach((ev) => c.addEventListener(ev, (e) => { e.preventDefault(); c.classList.remove("drag"); }));
-  c.addEventListener("drop", (e) => { files.push(...e.dataTransfer.files); renderAtts(); });
   ta.addEventListener("paste", (e) => {        // dán ảnh/file từ clipboard (Ctrl+V)
     const got = [...(e.clipboardData?.items || [])].filter((it) => it.kind === "file").map((it) => it.getAsFile()).filter(Boolean);
     if (!got.length) return;
