@@ -116,6 +116,10 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .wbtn:hover{color:var(--ink,#222)}.wbtn.on{background:var(--ink,#222);border-color:var(--ink,#222);color:#fff}
 .wbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;top:calc(100% + 6px);right:0;white-space:nowrap;background:#222;color:#fff;font-size:12px;padding:5px 8px;border-radius:6px;z-index:30;pointer-events:none}
 .umenu{position:fixed;left:12px;bottom:56px;width:300px;padding:10px 12px;z-index:40}
+.umenu .ur2{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;font-size:13px;padding:4px 0 0}
+.umenu .ur2 .ul{display:flex;flex-direction:column;min-width:0}.umenu .ur2 .ul small{font-size:11.5px;color:var(--mute);line-height:16px}
+.umenu .ur2 .uu{color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}.umenu .ur2.low .uu{color:var(--bad);font-weight:600}
+.umenu .ur2+.bar2{margin-top:5px}.umenu .ur2.low+.bar2 i{background:var(--bad)}
 .umenu .uh{display:flex;align-items:center;font-size:13px;margin:-2px 0 4px}.umenu .uh b{font-weight:600;display:inline;white-space:nowrap}.umenu .uh .icon{min-width:28px;min-height:28px;color:var(--mute);margin-left:auto;width:28px;padding:0}
 .umenu .un a{display:inline-flex;color:var(--mute);margin-left:6px}.umenu .un a svg.i{width:14px;height:14px}.umenu .un .note{font-weight:400}.umenu .ua{border-top:1px solid var(--line);padding:9px 0 7px}
 .umenu .ua:first-of-type{border-top:0;padding-top:2px}.umenu .un{display:flex;align-items:center;gap:6px;font-weight:600;font-size:13px;margin-bottom:4px}
@@ -1190,12 +1194,16 @@ const SBSHOW = `<button class="ghost icon sbshow" id="sbShow" title="Mở thanh 
 if (lsGet("sb") === "0") document.querySelector(".app").classList.add("nosb");
 /* ---------------- mức dùng (góc dưới thanh bên, kiểu ChatGPT) ---------------- */
 const MANAGE = { claude: "https://claude.ai/settings/usage", codex: "https://chatgpt.com/codex/settings/usage" };
-function leftRow(name, w) {
+function leftRow(name, w) {      // kiểu Claude: tên + giờ làm mới bên trái, "% đã dùng" bên phải, thanh đầy theo mức đã dùng
   if (!w || w.left == null) return "";
-  const left = Math.round(w.left), rs = w.resets_at ? Math.max(0, w.resets_at - Date.now() / 1000) : null;
-  const when = rs == null ? "" : rs < 3600 ? `${Math.ceil(rs / 60)}m` : rs < 86400 ? `${Math.floor(rs / 3600)}h${String(Math.round(rs % 3600 / 60)).padStart(2, "0")}m`
-    : new Date(w.resets_at * 1000).toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit" }).replace(/^(Thứ |Th )/, "T").replace("Chủ Nhật", "CN").replace(",", "");
-  return `<div class="ur ${left <= 10 ? "low" : ""}"><span>${name}</span><span title="Còn ${left}% · làm mới sau ${when}">${left}%${when ? ` · ${when}` : ""}</span></div><div class="bar2"><i style="width:${left}%"></i></div>`;
+  const used = Math.max(0, Math.min(100, Math.round(100 - w.left)));
+  let when = "";
+  if (w.resets_at) {
+    const d = new Date(w.resets_at * 1000), hm = d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+    when = w.resets_at - Date.now() / 1000 < 86400 && d.getDate() === new Date().getDate() ? `Làm mới lúc ${hm}`
+      : `Làm mới ${["CN", "T2", "T3", "T4", "T5", "T6", "T7"][d.getDay()]} ${hm}${w.resets_at - Date.now() / 1000 > 6 * 86400 ? " " + d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" }) : ""}`;
+  }
+  return `<div class="ur2 ${used >= 90 ? "low" : ""}"><span class="ul"><span>${name}</span>${when ? `<small>${when}</small>` : ""}</span><span class="uu">${used}% đã dùng</span></div><div class="bar2"><i style="width:${used}%"></i></div>`;
 }
 async function openUsage(force) {
   const m = $("uMenu"); m.classList.add("show");
@@ -1206,7 +1214,7 @@ async function openUsage(force) {
     const a = u[k] || {}, c = ((u.counts || {}).today || {})[k] || {};
     const cr = a.credits && (k === "claude" ? a.credits.has : (a.credits.unlimited || +a.credits.balance > 0))
       ? `<div class="ur"><span>${k === "claude" ? "Extra usage" : "Credits"}</span><span>${k === "claude" ? "bật" : a.credits.unlimited ? "∞" : a.credits.balance}</span></div>` : "";
-    const body = a.known ? leftRow("5 giờ", a.five_hour) + leftRow("Tuần", a.week) + cr : `<div class="note">Chưa đọc được</div>`;
+    const body = a.known ? leftRow("Phiên hiện tại", a.five_hour) + leftRow("Tuần này", a.week) + cr : `<div class="note">Chưa đọc được</div>`;
     const lim = a.limit_until ? `<div class="ur low"><span>Hết lượt</span><span>${new Date(a.limit_until * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</span></div>` : "";
     const sw = k in (u.in_plan || {}) ? `<label class="sw" title="Gói còn ≤2% thì Maestro dừng AI này tới giờ làm mới, không dùng credit/extra usage"><input type="checkbox" data-inplan="${k}" ${u.in_plan[k] ? "checked" : ""}> Chỉ dùng trong gói</label>` : "";
     return `<div class="ua"><div class="un">${esc(name)}${plan(k)}<span style="flex:1"></span><small class="note" title="Maestro đã dùng hôm nay">${c.runs || 0} lượt hôm nay</small>${MANAGE[k] ? `<a href="${MANAGE[k]}" target="_blank" rel="noopener" title="Quản lý trên trang ${esc(name)}" aria-label="Quản lý">${lu("external-link")}</a>` : ""}</div>${body}${lim}${sw}</div>`;
