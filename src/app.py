@@ -1953,32 +1953,63 @@ def busy_tasks():
     return any(t["status"] in ("running", "queued") or t.get("auto_paused") or t.get("_redirect") for t in TASKS.values())
 
 
+def _http(url, timeout, accept=None):
+    import gzip
+    import urllib.request
+    h = {"User-Agent": "maestro", "Accept-Encoding": "gzip"}
+    if accept:
+        h["Accept"] = accept
+    r = urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout)
+    b = r.read()
+    return gzip.decompress(b) if r.headers.get("Content-Encoding") == "gzip" else b
+
+
+def _fetch_any(urls, timeout):
+    """Tải cùng lúc từ nhiều nguồn (GitHub API, jsDelivr, raw); nguồn nào xong trước dùng nguồn đó."""
+    import queue
+    q = queue.Queue()
+    for u, acc in urls:
+        threading.Thread(target=lambda u=u, acc=acc: q.put(_try(lambda: _http(u, timeout, acc))), daemon=True).start()
+    err = None
+    for _ in urls:
+        ok, v = q.get()
+        if ok:
+            return v
+        err = v
+    raise err or OSError("download failed")
+
+
+def _try(f):
+    try:
+        return True, f()
+    except Exception as e:
+        return False, e
+
+
 def fetch_update():
     """Tải bản mới từ GitHub (chỉ code, không có dữ liệu). Trả về số phiên bản mới, '' nếu đang mới nhất."""
     import hashlib
-    import urllib.request
     if not UPDATE_BASE or VERSION == "dev":
         return ""
-    base = UPDATE_BASE
-    try:      # lấy mã commit mới nhất qua GitHub API rồi tải theo đúng commit đó -> không dính bộ đệm 5 phút của GitHub
-        m = re.match(r"https://raw\.githubusercontent\.com/([^/]+/[^/]+)/([^/]+)/", UPDATE_BASE)
-        req = urllib.request.Request(f"https://api.github.com/repos/{m.group(1)}/commits/{m.group(2)}",
-                                     headers={"Accept": "application/vnd.github.sha", "User-Agent": "ai-orchestrator"})
-        sha = urllib.request.urlopen(req, timeout=15).read().decode().strip()
-        if re.fullmatch(r"[0-9a-f]{40}", sha):
-            base = f"https://raw.githubusercontent.com/{m.group(1)}/{sha}/"
-    except Exception:
-        pass
-    try:      # đọc latest.json qua API (không bị bộ đệm), lỗi thì đọc theo commit
-        req = urllib.request.Request(f"https://api.github.com/repos/{m.group(1)}/contents/latest.json?ref={m.group(2)}",
-                                     headers={"Accept": "application/vnd.github.raw", "User-Agent": "ai-orchestrator"})
-        meta = json.loads(urllib.request.urlopen(req, timeout=15).read())
-    except Exception:
-        meta = json.loads(urllib.request.urlopen(base + "latest.json", timeout=20).read())
+    if UPDATED["pending"] and (VERS / UPDATED["pending"] / "app.py").exists():
+        return UPDATED.get("release") or UPDATED["pending"]          # đã tải sẵn ở nền
+    m = re.match(r"https://raw\.githubusercontent\.com/([^/]+/[^/]+)/([^/]+)/", UPDATE_BASE)
+    repo, ref = m.group(1), m.group(2)
+    ok, sha = _try(lambda: _http(f"https://api.github.com/repos/{repo}/commits/{ref}", 8,
+                                 "application/vnd.github.sha").decode().strip())
+    ref2 = sha if ok and re.fullmatch(r"[0-9a-f]{40}", sha) else ref      # theo đúng commit -> không dính bộ đệm
+
+    def srcs(name):
+        u = [(f"https://api.github.com/repos/{repo}/contents/{name}?ref={ref2}", "application/vnd.github.raw"),
+             (f"https://raw.githubusercontent.com/{repo}/{ref2}/{name}", None)]
+        if ref2 != ref:
+            u.append((f"https://cdn.jsdelivr.net/gh/{repo}@{ref2}/{name}", None))
+        return u
+    meta = json.loads(_fetch_any(srcs("latest.json"), 10))
     if meta.get("version", "") > VERSION:
-        body = urllib.request.urlopen(base + "app.py", timeout=60).read()
         if meta["version"] in ((rjson(DATA / "boot.json", {}) or {}).get("bad_versions") or []):
             return ""                                  # bản này đã lỗi khi khởi động trên máy này -> bỏ qua
+        body = _fetch_any(srcs("app.py"), 40)
         if hashlib.sha256(body).hexdigest() == meta.get("sha256"):
             vd = VERS / meta["version"]
             vd.mkdir(parents=True, exist_ok=True)
