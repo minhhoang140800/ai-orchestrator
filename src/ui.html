@@ -115,8 +115,9 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .wbtn{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;margin-right:8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--mute);font:inherit;font-size:13px;cursor:pointer;position:relative}
 .wbtn:hover{color:var(--ink,#222)}.wbtn.on{background:var(--ink,#222);border-color:var(--ink,#222);color:#fff}
 .wbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;top:calc(100% + 6px);right:0;white-space:nowrap;background:#222;color:#fff;font-size:12px;padding:5px 8px;border-radius:6px;z-index:30;pointer-events:none}
-.umenu{position:fixed;left:12px;bottom:56px;width:340px;padding:12px;z-index:40}
-.umenu .uh{font-size:12px;color:var(--mute);margin:0 0 8px}.umenu .ua{border-top:1px solid var(--line);padding:9px 0 7px}
+.umenu{position:fixed;left:12px;bottom:56px;width:300px;padding:10px 12px;z-index:40}
+.umenu .uh{display:flex;align-items:center;font-size:13px;margin:-2px 0 4px}.umenu .uh b{font-weight:600;display:inline;white-space:nowrap}.umenu .uh .icon{min-width:28px;min-height:28px;color:var(--mute);margin-left:auto;width:28px;padding:0}
+.umenu .un a{display:inline-flex;color:var(--mute);margin-left:6px}.umenu .un a svg.i{width:14px;height:14px}.umenu .un .note{font-weight:400}.umenu .ua{border-top:1px solid var(--line);padding:9px 0 7px}
 .umenu .ua:first-of-type{border-top:0;padding-top:2px}.umenu .un{display:flex;align-items:center;gap:6px;font-weight:600;font-size:13px;margin-bottom:4px}
 .umenu .ur{display:flex;justify-content:space-between;font-size:13px;padding:2px 0}.umenu .ur span:last-child{color:var(--mute)}
 .umenu .ur.low span:last-child{color:var(--bad);font-weight:600}.umenu .bar2{height:4px;background:#eee;border-radius:3px;margin:1px 0 4px;overflow:hidden}
@@ -301,11 +302,11 @@ aside{padding:0 12px;background:var(--side)}
 .thead,.crumb{height:56px;box-sizing:border-box;padding:0 16px 0 24px;gap:8px;display:flex;align-items:center;flex:none;border-bottom:1px solid var(--line)}
 .crumb{font-size:13px;color:var(--mute)}
 .sbshow{margin-left:-8px;color:var(--mute)}
-.thead h1{font-size:15px;font-weight:600;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw;cursor:text;border-radius:6px;padding:2px 4px}
+.thead h1{font-size:15px;line-height:24px;font-weight:600;margin:0;align-self:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw;cursor:text;border-radius:6px;padding:2px 4px}
 .thead h1:hover{background:var(--hover)}
 .sdot{width:8px;height:8px;border-radius:50%;flex:none;background:#B5B5B5}.sdot.done{background:var(--ok)}.sdot.running,.sdot.queued{background:var(--ink)}
 .sdot.waiting,.sdot.login,.sdot.limit{background:#946520}.sdot.failed{background:var(--bad)}
-.hst{font-size:12px;color:var(--mute);white-space:nowrap}
+.hst{font-size:12px;line-height:24px;color:var(--mute);white-space:nowrap;display:inline-flex;align-items:center;align-self:center;margin:0}
 .kchip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 7px;font-size:12px}.kchip svg.i{width:14px;height:14px}
 .thead button,.crumb button,.wbtn,.pbtn{height:32px;box-sizing:border-box}
 .wbtn{margin-right:0;border-radius:8px}.thead .icon.on{background:var(--sel)}
@@ -1039,8 +1040,8 @@ function renderTask() {
   const acts = [];
   if (["paused", "failed"].includes(t.status)) acts.push(`<button class="pri" data-act="resume">Tiếp tục</button>`);
   acts.push(watchBtn());
-  acts.push(`<button class="ghost icon ${actOpen ? "on" : ""}" id="bAct" title="Activity — toàn bộ tiến trình" aria-label="Activity" aria-pressed="${actOpen}">${lu("activity")}</button>`);
   acts.push(projBtn());
+  acts.push(`<button class="ghost icon ${actOpen ? "on" : ""}" id="bAct" title="Activity — toàn bộ tiến trình" aria-label="Activity" aria-pressed="${actOpen}">${lu("activity")}</button>`);
   acts.push(`<button class="ghost icon" id="bMore" title="Thêm" aria-label="Thêm" aria-haspopup="true">${lu("ellipsis")}</button>`);
   const lastC = t.messages.map((m) => m.role).lastIndexOf("claude");
   const nSubs = t.messages.reduce((a, m) => a + (m.subtasks || []).length, 0);
@@ -1192,28 +1193,28 @@ const MANAGE = { claude: "https://claude.ai/settings/usage", codex: "https://cha
 function leftRow(name, w) {
   if (!w || w.left == null) return "";
   const left = Math.round(w.left), rs = w.resets_at ? Math.max(0, w.resets_at - Date.now() / 1000) : null;
-  const when = rs == null ? "" : rs < 3600 ? ` · reset ${Math.ceil(rs / 60)}m` : rs < 86400 ? ` · reset ${Math.floor(rs / 3600)}h${String(Math.round(rs % 3600 / 60)).padStart(2, "0")}m` : ` · reset ${new Date(w.resets_at * 1000).toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit" })}`;
-  return `<div class="ur ${left <= 10 ? "low" : ""}"><span>${name}</span><span>còn ${left}%${when}</span></div><div class="bar2"><i style="width:${left}%"></i></div>`;
+  const when = rs == null ? "" : rs < 3600 ? `${Math.ceil(rs / 60)}m` : rs < 86400 ? `${Math.floor(rs / 3600)}h${String(Math.round(rs % 3600 / 60)).padStart(2, "0")}m`
+    : new Date(w.resets_at * 1000).toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit" }).replace(/^(Thứ |Th )/, "T").replace("Chủ Nhật", "CN").replace(",", "");
+  return `<div class="ur ${left <= 10 ? "low" : ""}"><span>${name}</span><span title="Còn ${left}% · làm mới sau ${when}">${left}%${when ? ` · ${when}` : ""}</span></div><div class="bar2"><i style="width:${left}%"></i></div>`;
 }
 async function openUsage(force) {
   const m = $("uMenu"); m.classList.add("show");
-  if (!m.innerHTML) m.innerHTML = `<div class="note"><span class="spin"></span> Đang kiểm tra…</div>`;
+  if (!m.innerHTML) m.innerHTML = `<div class="note"><span class="spin"></span></div>`;
   const u = await api("/api/usage", { force: !!force }); if (u.error) { m.innerHTML = `<div class="note">${esc(u.error)}</div>`; return; }
   const plan = (k) => (u.plans || {})[k] ? planTxt(u.plans[k]) : "";
-  const cnt = (k) => { const c = u.counts || {}; const d = (c.today || {})[k] || {}, w = (c.week || {})[k] || {}; return `<div class="note">Maestro đã dùng: hôm nay ${d.runs || 0} lượt · ${d.mins || 0} phút · 7 ngày ${w.runs || 0} lượt</div>`; };
   const block = (k, name) => {
-    const a = u[k] || {};
-    const cr = a.credits ? (k === "claude" ? `<div class="ur"><span>Extra usage</span><span>${a.credits.has ? "đang bật" : "tắt"}</span></div>` : `<div class="ur"><span>Credits</span><span>${a.credits.unlimited ? "không giới hạn" : (a.credits.balance ?? 0) + " credits"}</span></div>`) : "";
-    const body = a.known ? leftRow("Giới hạn 5 giờ", a.five_hour) + leftRow("Giới hạn tuần", a.week) + cr : `<div class="note">${esc(a.note || "Chưa có dữ liệu")}</div>`;
-    const lim = a.limit_until ? `<div class="ur low"><span>Hết lượt</span><span>dùng lại ${new Date(a.limit_until * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</span></div>` : "";
-    const sw = k in (u.in_plan || {}) ? `<label class="sw"><input type="checkbox" data-inplan="${k}" ${u.in_plan[k] ? "checked" : ""}> Chỉ dùng trong gói (không dùng credit)</label>` : "";
-    return `<div class="ua"><div class="un">${esc(name)}${plan(k)}<span style="flex:1"></span>${MANAGE[k] ? `<a href="${MANAGE[k]}" target="_blank" rel="noopener">Quản lý ↗</a>` : ""}</div>${body}${lim}${cnt(k)}${sw}</div>`;
+    const a = u[k] || {}, c = ((u.counts || {}).today || {})[k] || {};
+    const cr = a.credits && (k === "claude" ? a.credits.has : (a.credits.unlimited || +a.credits.balance > 0))
+      ? `<div class="ur"><span>${k === "claude" ? "Extra usage" : "Credits"}</span><span>${k === "claude" ? "bật" : a.credits.unlimited ? "∞" : a.credits.balance}</span></div>` : "";
+    const body = a.known ? leftRow("5 giờ", a.five_hour) + leftRow("Tuần", a.week) + cr : `<div class="note">Chưa đọc được</div>`;
+    const lim = a.limit_until ? `<div class="ur low"><span>Hết lượt</span><span>${new Date(a.limit_until * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</span></div>` : "";
+    const sw = k in (u.in_plan || {}) ? `<label class="sw" title="Gói còn ≤2% thì Maestro dừng AI này tới giờ làm mới, không dùng credit/extra usage"><input type="checkbox" data-inplan="${k}" ${u.in_plan[k] ? "checked" : ""}> Chỉ dùng trong gói</label>` : "";
+    return `<div class="ua"><div class="un">${esc(name)}${plan(k)}<span style="flex:1"></span><small class="note" title="Maestro đã dùng hôm nay">${c.runs || 0} lượt hôm nay</small>${MANAGE[k] ? `<a href="${MANAGE[k]}" target="_blank" rel="noopener" title="Quản lý trên trang ${esc(name)}" aria-label="Quản lý">${lu("external-link")}</a>` : ""}</div>${body}${lim}${sw}</div>`;
   };
-  m.innerHTML = `<div class="uh">Mức dùng gói AI · cập nhật ${new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</div>
-    ${block("claude", "Claude")}${block("codex", "ChatGPT / Codex")}${block("gemini", "Gemini")}
-    <div class="uf"><button id="uRef">${I.refresh} Kiểm tra lại</button><span style="flex:1"></span><small class="note">Gói gần hết → Maestro dừng AI đó tới giờ reset</small></div>`;
-  $("uRef").onclick = (e) => { e.stopPropagation(); $("uRef").innerHTML = '<span class="spin"></span> Đang kiểm tra…'; openUsage(true); };
-  m.querySelectorAll("[data-inplan]").forEach((c) => c.onchange = async () => { await api("/api/usage", { ai: c.dataset.inplan, in_plan: c.checked }); toast(c.checked ? "Chỉ dùng trong gói: bật" : "Đã tắt — khi hết gói, AI này có thể dùng credit/extra usage nếu tài khoản cho phép"); });
+  m.innerHTML = `<div class="uh"><b>Mức dùng</b><span style="flex:1"></span><button class="ghost icon" id="uRef" title="Kiểm tra lại · cập nhật ${new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}" aria-label="Kiểm tra lại">${I.refresh}</button></div>
+    ${block("claude", "Claude")}${block("codex", "ChatGPT")}${block("gemini", "Gemini")}`;
+  $("uRef").onclick = (e) => { e.stopPropagation(); $("uRef").innerHTML = '<span class="spin"></span>'; openUsage(true); };
+  m.querySelectorAll("[data-inplan]").forEach((c) => c.onchange = async () => { await api("/api/usage", { ai: c.dataset.inplan, in_plan: c.checked }); toast(c.checked ? "Chỉ dùng trong gói: bật" : "Đã tắt — khi hết gói, AI này có thể dùng credit/extra usage"); });
 }
 $("btnUse").onclick = (e) => { e.stopPropagation(); const m = $("uMenu"); if (m.classList.contains("show")) return m.classList.remove("show"); openUsage(false); };
 $("uMenu").onclick = (e) => e.stopPropagation();
