@@ -402,6 +402,17 @@ def load_tasks():
         t = rjson(f)
         if not t:
             continue
+        for m in t.get("messages", []):          # câu trả lời cũ xuất file ra chỗ khác: gắn nút Open folder
+            if m.get("role") == "claude" and not m.get("files") and not m.get("chk"):
+                m["chk"] = 1
+                try:
+                    d = path_in_text(m.get("text", ""))
+                    if d:
+                        fs = _scan(d, 0)
+                        if fs:
+                            m["files"], m["dir"] = fs[:30], str(d)
+                except Exception:
+                    pass
         if not t.get("w2") and t.get("session_started"):
             t["legacy"] = True
         if t.get("status") == "running":      # app bị tắt khi đang chạy -> tự chạy tiếp
@@ -661,13 +672,41 @@ def summarize_tool(b):
     return f"{label}: {s[:110]}" if s and name != "TodoWrite" else label
 
 
-def new_files(t, since):
-    od = out_dir(t)
-    if not od.exists():
+def _scan(od, since):
+    if not od.is_dir():
         return []
-    fs = [f for f in od.rglob("*") if f.is_file() and ".work" not in f.parts and f.stat().st_mtime >= since - 1]
+    fs = [f for f in od.rglob("*") if f.is_file() and ".work" not in f.parts and STORE_NAME not in f.parts
+          and f.stat().st_mtime >= since - 1]
     fs.sort(key=str)
-    return [str(f.relative_to(od)).replace("\\", "/") for f in fs][:30]
+    return [str(f.relative_to(od)).replace("\\", "/") for f in fs]
+
+
+def path_in_text(text):
+    """Thư mục người dùng/Claude nêu trong câu trả lời (vd export vào chỗ khác thư mục mặc định)."""
+    cands = re.findall(r"`([A-Za-z]:[\\/][^`\n]+)`", text or "") + re.findall(r"([A-Za-z]:[\\/][^\n`*\"<>|]+)", text or "")
+    for c in cands:
+        c = c.strip()
+        for _ in range(200):                 # bớt dần ký tự cuối cho tới khi ra đường dẫn có thật
+            if len(c) <= 3:
+                break
+            p = Path(c.rstrip(" .,;:"))
+            if p.exists():
+                return p if p.is_dir() else p.parent
+            c = c[:-1]
+    return None
+
+
+def new_files(t, since, text=""):
+    """File mới tạo trong lượt làm; trả (danh sách, thư mục để mở)."""
+    fs = _scan(out_dir(t), since) if CFG.get("output") and t.get("folder") else []
+    if fs:
+        return fs[:30], ""
+    d = path_in_text(text)
+    if d:
+        fs = _scan(d, since)
+        if fs:
+            return fs[:30], str(d)
+    return [], ""
 
 
 def watch(t, p, nxt):
@@ -720,12 +759,16 @@ def watch(t, p, nxt):
         elif q.exists() and q.read_text(encoding="utf-8").strip():
             end_work(t, "done")
             t["status"] = "waiting"
-            tmsg(t, "claude", q.read_text(encoding="utf-8").strip(), kind="question", files=new_files(t, since))
+            qt = q.read_text(encoding="utf-8").strip()
+            fs, fd = new_files(t, since, qt)
+            tmsg(t, "claude", qt, kind="question", files=fs, dir=fd)
         elif p.returncode == 0 and result and not result.get("is_error"):
             end_work(t, "done")
             t["status"] = "done"
             t["finished"] = now()
-            tmsg(t, "claude", (result.get("result") or "Xong.").strip(), files=new_files(t, since))
+            rt = (result.get("result") or "Xong.").strip()
+            fs, fd = new_files(t, since, rt)
+            tmsg(t, "claude", rt, files=fs, dir=fd)
             threading.Thread(target=finish_clean, args=(t,), daemon=True).start()
         else:
             end_work(t, "failed")
@@ -820,6 +863,10 @@ def act(tid, action, text="", files=None):
         elif action == "rename" and text:
             t["title"] = text[:80]
             t["renamed"] = True
+        elif action == "open" and text and Path(text).is_dir() and any(
+                m.get("dir") == text for m in t.get("messages", [])):
+            open_path(Path(text))
+            return {"ok": True}
         elif action == "open":
             open_path(out_dir(t) if CFG.get("output") and out_dir(t).exists() else tdir(t))
             return {"ok": True}

@@ -482,7 +482,7 @@ function renderTask() {
     if (m.role === "user") return `<div class="msg user">${esc(m.text)}${attHtml(m.files || [])}</div>`;
     if (m.role === "work") return workBlock(m, i);
     const n = (m.files || []).length;
-    const fl = n ? `<button class="openf" data-act="open" title="${esc(T.output)}">${I.folder}Open folder · ${n} file</button>` : "";
+    const fl = n ? `<button class="openf" data-act="open" data-dir="${esc(m.dir || "")}" title="${esc(m.dir || T.output)}">${I.folder}Open folder · ${n} file</button>` : "";
     return `<div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${fl}</div>`;
   }).join("");
   const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Claude chưa đăng nhập. Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>Đang chuẩn bị…</span></div>` : "";
@@ -544,7 +544,7 @@ document.addEventListener("click", async (e) => {
     if (d.act === "cancel" && !confirm("Hủy task này?")) return;
     if (d.act === "delete" && !confirm("Xóa task khỏi danh sách? File kết quả vẫn giữ nguyên.")) return;
     el.disabled = true;
-    const r = await api("/api/task/act", { id: T.id, action: d.act }); if (r.error) toast(r.error);
+    const r = await api("/api/task/act", { id: T.id, action: d.act, text: d.dir || "" }); if (r.error) toast(r.error);
     if (d.act === "delete") { sel = ""; sessionStorage.removeItem("sel"); }
     T = null; lastSnap = ""; refresh();
   }
