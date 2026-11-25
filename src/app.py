@@ -161,26 +161,31 @@ def kill_orphan(pid):
 
 PS_OPEN_FOLDER = r"""
 $p = $env:AIO_OPEN.TrimEnd('\')
-$w = $null
-foreach ($x in (New-Object -ComObject Shell.Application).Windows()) {
-  try { if ($x.Document.Folder.Self.Path.TrimEnd('\') -ieq $p) { $w = $x; break } } catch {}
+$sel = $env:AIO_SELECT
+Add-Type -Namespace AIO -Name W -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h); [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);'
+function Find { foreach ($x in (New-Object -ComObject Shell.Application).Windows()) { try { if ($x.Document.Folder.Self.Path.TrimEnd('\') -ieq $p) { return $x } } catch {} } return $null }
+$w = Find
+if ($w -and $sel) { try { $w.Document.SelectItem($w.Document.Folder.ParseName((Split-Path $sel -Leaf)), 29) } catch {} }
+if (-not $w) {
+  if ($sel) { Start-Process explorer.exe -ArgumentList ('/select,"' + $sel + '"') } else { Start-Process explorer.exe -ArgumentList ('"' + $p + '"') }
+  for ($i = 0; $i -lt 30 -and -not $w; $i++) { Start-Sleep -Milliseconds 150; $w = Find }
 }
 if ($w) {
-  Add-Type -Namespace AIO -Name W -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);'
   $h = [IntPtr]$w.HWND
   if ([AIO.W]::IsIconic($h)) { [void][AIO.W]::ShowWindow($h, 9) }
   (New-Object -ComObject WScript.Shell).SendKeys('%')
+  [void][AIO.W]::BringWindowToTop($h)
   [void][AIO.W]::SetForegroundWindow($h)
-} else { Start-Process explorer.exe -ArgumentList ('"' + $p + '"') }
+}
 """
 
 
-def open_path(p):
+def open_path(p, select=""):
     p = str(p)
-    if IS_WIN and os.path.isdir(p):      # thư mục đang mở sẵn -> đưa cửa sổ đó lên, không mở thêm
+    if IS_WIN and os.path.isdir(p):      # thư mục đang mở sẵn -> đưa lên trên cùng; mở mới cũng đưa lên trên cùng
         try:
             subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", PS_OPEN_FOLDER],
-                             env=dict(os.environ, AIO_OPEN=p), creationflags=NO_WINDOW)
+                             env=dict(os.environ, AIO_OPEN=p, AIO_SELECT=select), creationflags=NO_WINDOW)
             return
         except Exception:
             pass
@@ -809,10 +814,7 @@ def ofile_act(d):
     if op == "open":
         open_path(f)
     elif op == "reveal":
-        if IS_WIN:
-            subprocess.Popen(["explorer.exe", "/select,", str(f)])
-        else:
-            open_path(f.parent)
+        open_path(f.parent, str(f) if IS_WIN else "")
     elif op == "path":
         return {"ok": True, "path": str(f)}
     return {"ok": True}
@@ -925,9 +927,28 @@ def claude_ready(t):
     return False
 
 
+SCHED = {"beat": 0.0}
+
+
 def scheduler():
     while True:
-        with _tlock:
+        SCHED["beat"] = time.time()
+        try:
+            sched_tick()
+        except Exception:
+            import traceback
+            dlog("scheduler error:\n" + traceback.format_exc())
+        time.sleep(1)
+
+
+def sched_tick():
+    if not _tlock.acquire(timeout=60):           # bị kẹt khóa: ghi lại các luồng để tìm lỗi
+        import traceback
+        dlog("scheduler: _tlock busy >60s\n" + "\n".join(
+            "".join(traceback.format_stack(f)) for f in sys._current_frames().values())[-6000:])
+        return
+    try:
+        if True:
             running = sum(1 for t in TASKS.values() if t["status"] == "running")
             queued = sorted((t for t in TASKS.values() if t["status"] == "queued"), key=lambda x: x["created"])
             for t in queued:
@@ -937,9 +958,18 @@ def scheduler():
                     continue          # chờ đăng nhập Claude (đã tự mở trang đăng nhập)
                 if t.get("titling") and time.time() - t.get("created_ts", 0) < 30:
                     continue          # chờ đặt tên xong để thư mục kết quả có tên đẹp
-                start_run(t)
+                try:
+                    start_run(t)
+                except Exception as e:
+                    import traceback
+                    dlog(f"start_run {t['id']}:\n" + traceback.format_exc())
+                    t["status"] = "failed"
+                    tmsg(t, "claude", f"Không khởi động được task: {e}", kind="error")
+                    tsave(t)
+                    continue
                 running += 1
-        time.sleep(1)
+    finally:
+        _tlock.release()
 
 
 def act(tid, action, text="", files=None, template=""):
@@ -1649,6 +1679,9 @@ def task_detail(t):
     dec = rjson(wdir(t) / "tasks" / "decisions.json", None)
     if not isinstance(dec, list):
         dec = t.get("decisions") or []
+    if t["status"] == "queued":
+        nrun = sum(1 for x in TASKS.values() if x["status"] == "running")
+        d["wait"] = f"Chờ {nrun} task đang chạy (máy này chạy tối đa {MAX_RUNNING} task cùng lúc)" if nrun >= MAX_RUNNING else ""
     d["project"] = t.get("project", "")
     d["tpl_saved"] = t.get("tpl_saved", "")
     d["brain_suggest"] = brain_suggest(t) if t.get("project") else []
@@ -1718,6 +1751,10 @@ class H(BaseHTTPRequestHandler):
             return self.send(403, {"error": "forbidden"})
         if u.path == "/api/state":
             page_seen()
+            if SCHED["beat"] and time.time() - SCHED["beat"] > 90:     # bộ xếp lịch bị dừng -> chạy lại
+                dlog("scheduler stalled, restarting")
+                SCHED["beat"] = time.time()
+                threading.Thread(target=scheduler, daemon=True).start()
             with _tlock:
                 ts = [{k: t.get(k) for k in ("id", "title", "status", "created", "pinned")}
                       for t in TASKS.values() if t["status"] != "draft"]

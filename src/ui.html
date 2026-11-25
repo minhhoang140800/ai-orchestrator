@@ -656,7 +656,7 @@ function renderTask() {
     const pv = ims.length ? `<div class="opv">${ims.map((f) => { const q = `t=${T.id}&i=${i}&f=${encodeURIComponent(f)}`; return `<a href="/api/ofile?${q}&full=1" data-lb="1" data-of="${esc(f)}" data-oi="${i}" title="${esc(f)}"><img src="/api/ofile?${q}" alt="${esc(f)}" loading="lazy"><span>${esc(f.split("/").pop())}</span></a>`; }).join("")}</div>` : "";
     return `<div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>`;
   }).join("");
-  const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Claude chưa đăng nhập. Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>Đang chuẩn bị…</span></div>` : "";
+  const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Claude chưa đăng nhập. Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>${esc(t.wait || "Đang chuẩn bị…")}</span></div>` : "";
   const comp = $("taskComp");
   if (!comp || comp.dataset.t !== t.id) {          // chỉ tạo ô nhập 1 lần cho mỗi task
     $("main").innerHTML = `<div class="thead" id="thead"></div><div id="decbar"></div><div class="scroll"><div class="thread" id="thread"></div></div>
@@ -726,7 +726,7 @@ document.addEventListener("click", async (e) => {
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
   else if (d.relogin) { await api("/api/ai/cancel", { ai: "claude" }); setTimeout(() => api("/api/ai/login", { ai: "claude" }), 1500); }
   else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; el.innerHTML = '<span class="spin"></span>'; const r = await api("/api/ai/code", { ai: d.code, code: v }); if (r.error) toast(r.error); setTimeout(() => { if (el.isConnected) { el.disabled = false; el.textContent = "Gửi"; toast("Mã chưa được chấp nhận — thử lại hoặc bấm Hủy rồi Đăng nhập lại"); } }, 12000); }
-  else if (d.cancel) { await api("/api/ai/cancel", { ai: d.cancel }); }
+  else if (d.cancel) { await api("/api/ai/cancel", { ai: d.cancel }); try { if (loginWin && !loginWin.closed) loginWin.close(); } catch (e) {} loginWin = null; }
   else if (d.login) { openLoginWin(d.login); S.ais[d.login].pending = "login"; renderSettings(); const r = await api("/api/ai/login", { ai: d.login, switch: !!d.switch }); if (r.error) toast(r.error); }
 });
 $("btnLib").onclick = () => openLib();
