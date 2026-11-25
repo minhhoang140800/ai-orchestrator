@@ -1385,12 +1385,19 @@ def ai_status(ai):
         elif ai == "codex":
             p = _run_hidden([exe, "login", "status"], 45)
             out = ((p.stdout or "") + (p.stderr or "")).lower()
+            if "node" in out and ("not recognized" in out or "not found" in out):   # PATH thiếu node -> tìm lại rồi thử 1 lần
+                refresh_path()
+                dlog(f"codex: node missing; which(node)={shutil.which('node')}; PATH={os.environ.get('PATH', '')[:1500]}")
+                if shutil.which("node"):
+                    p = _run_hidden([exe, "login", "status"], 45)
+                    out = ((p.stdout or "") + (p.stderr or "")).lower()
             ok = p.returncode == 0 and "not logged" not in out
             msg = ""
             if not ok and "not logged" not in out:   # lệnh lỗi (không phải chưa đăng nhập) -> không coi là bị văng
                 dlog(f"codex login status rc={p.returncode}: {out[-600:]}")
-                if "node" in out and ("not recognized" in out or "not found" in out or "không" in out):
-                    msg = "Thiếu Node.js — chạy lại Maestro_setup.bat"
+                if "node" in out and ("not recognized" in out or "not found" in out):
+                    msg = ("Không tìm thấy Node.js — chạy lại Maestro_setup.bat (sẽ cài Node), rồi Export log nếu vẫn lỗi"
+                           if not shutil.which("node") else "Codex lỗi khi chạy — bấm Export log gửi lại")
                 elif (Path.home() / ".codex" / "auth.json").exists():
                     ok = True
             cur.update(ok=ok, msg=msg, email=ai_email(ai) if ok else "")
