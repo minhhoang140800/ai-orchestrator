@@ -213,6 +213,30 @@ def refresh_path():
 _cfg_lock = threading.Lock()
 CFG = None
 TASKS_DIR = DATA / "tasks"
+STORE = DATA                 # nơi giữ task/lịch sử: <thư mục nhận kết quả>/_AI-Orchestrator (không mất khi cập nhật/gỡ/cài lại)
+STORE_NAME = "_AI-Orchestrator"
+
+
+def set_store():
+    """Trỏ dữ liệu task về thư mục nhận kết quả; chuyển dữ liệu cũ sang nếu có."""
+    global STORE, TASKS_DIR
+    o = CFG.get("output", "")
+    new = Path(o) / STORE_NAME if o and Path(o).is_dir() else DATA
+    new_tasks = new / "tasks"
+    new_tasks.mkdir(parents=True, exist_ok=True)
+    for src in {TASKS_DIR, DATA / "tasks"}:
+        if src.exists() and src.resolve() != new_tasks.resolve():
+            for d in list(src.iterdir()):
+                if d.is_dir() and not (new_tasks / d.name).exists():
+                    try:
+                        shutil.move(str(d), str(new_tasks / d.name))
+                    except Exception as e:
+                        dlog(f"move {d}: {e}")
+    STORE, TASKS_DIR = new, new_tasks
+    try:
+        wjson(STORE / "settings-backup.json", {k: CFG.get(k) for k in ("output", "instructions")})
+    except Exception:
+        pass
 DEFAULT_INSTRUCTIONS = ""
 OLD_DEFAULT_PREFIX = "Xưng hô: tôi - bạn. Trả lời tiếng Việt, ngắn gọn"
 
@@ -416,7 +440,7 @@ nghiệm thu trên file thật, sửa đúng phần lỗi, báo cáo. Task này 
 - Được ĐỌC mọi ổ đĩa của máy: {', '.join(drives())}. Người dùng nhắc tới file/thư mục nào thì tự tìm.
   Không sửa, không xóa, không di chuyển file nào ngoài thư mục làm việc và OUTPUT.
 - OUTPUT (nơi lưu sản phẩm giao người dùng): {out_dir(t)}
-- Sản phẩm của các task trước (để dùng lại, tránh làm lại): danh mục ở {DATA / "registry.json"}
+- Sản phẩm của các task trước (để dùng lại, tránh làm lại): danh mục ở {STORE / "registry.json"}
 
 ## Worker sẵn có trên máy
 {chr(10).join('- ' + desc[w] for w in on) or '- (không có — tự làm)'}
@@ -1091,9 +1115,31 @@ def ai_login(ai, switch=False):
                 elif ai_status(ai).get("ok"):
                     return
                 args = [exe, "auth", "login", "--claudeai"] if ai == "claude" else [exe, "login"]
-                p = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)   # CLI tự mở trình duyệt
+                old = LOGINS.pop(ai, None)
+                if old:
+                    kill_tree(old)
+                if ai == "codex" and IS_WIN:          # phiên đăng nhập cũ còn giữ cổng 1455 -> codex login thoát ngay
+                    _run_hidden(["powershell", "-NoProfile", "-Command",
+                                 "Get-NetTCPConnection -LocalPort 1455 -State Listen -EA 0 | % { Stop-Process -Id $_.OwningProcess -Force -EA 0 }"], 20)
+                logf = d / f"{ai}.out"
+                fh = open(logf, "w", encoding="utf-8", errors="replace")
+                p = subprocess.Popen(args, cwd=str(d), stdin=subprocess.PIPE, stdout=fh, stderr=subprocess.STDOUT,
+                                     creationflags=NO_WINDOW)
                 LOGINS[ai] = p
+
+                def grab():                         # lấy link đăng nhập để web mở trong cửa sổ nhỏ
+                    for _ in range(40):
+                        time.sleep(0.5)
+                        try:
+                            m = re.search(r"https://\S+", logf.read_text("utf-8", "replace"))
+                        except Exception:
+                            m = None
+                        if m:
+                            cur["url"] = m.group(0).rstrip(").,'\"")
+                            return
+                        if p.poll() is not None:
+                            return
+                threading.Thread(target=grab, daemon=True).start()
                 t0 = time.time()
                 while time.time() - t0 < 600:
                     time.sleep(2)
@@ -1101,7 +1147,11 @@ def ai_login(ai, switch=False):
                         break
                 time.sleep(1)
                 kill_tree(p)
-                ai_status(ai)
+                fh.close()
+                ok = ai_status(ai).get("ok")
+                if not ok:
+                    dlog(f"{ai} login failed rc={p.poll()}; output:\n" + logf.read_text("utf-8", "replace")[-1500:])
+                    cur["msg"] = "Đăng nhập chưa xong. Bấm Đăng nhập lại; nếu vẫn lỗi, Export log gửi tôi."
             else:
                 # agy -p không tự hoàn tất đăng nhập được (không có chỗ dán mã) -> chỉ chạy ẩn khi máy đã có phiên lưu
                 ok = (not switch) and gemini_has_cred() and gemini_ping(exe, 120)[0]
@@ -1337,8 +1387,14 @@ class H(BaseHTTPRequestHandler):
             o = (d.get("output") or "").strip()
             if not o or not Path(o).is_dir():
                 return {"error": "Chọn thư mục nhận kết quả"}
+            if o != CFG.get("output") and busy_tasks():
+                return {"error": "Đang có task chạy. Đổi thư mục sau khi task xong hoặc tạm dừng."}
             CFG["output"] = o
             save_cfg()
+            with _tlock:
+                set_store()
+                TASKS.clear()
+                load_tasks()
             return {"ok": True}
         if path == "/api/open-output":
             if CFG.get("output"):
@@ -1435,7 +1491,7 @@ def registry(force=False):
     arts.sort(key=lambda x: x["mtime"], reverse=True)
     _reg.update(t=time.time(), data={"tasks": tasks, "artifacts": arts})
     try:      # bản cho Claude tra cứu file của các task trước
-        wjson(DATA / "registry.json", {"output_root": CFG.get("output", ""), "tasks": [
+        wjson(STORE / "registry.json", {"output_root": CFG.get("output", ""), "tasks": [
             {"title": x["title"], "folder": x["folder"], "created": x["created"], "status": x["status"],
              "files": [a["path"] for a in arts if a["task"] == x["id"]][:200]} for x in tasks]})
     except Exception:
@@ -1601,7 +1657,10 @@ def serve(background=False):
     CFG["port"] = PORT
     save_cfg()
     url = app_url()
-    TASKS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        set_store()
+    except Exception as e:
+        dlog(f"set_store: {e}")
     load_tasks()
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=check_startup, daemon=True).start()

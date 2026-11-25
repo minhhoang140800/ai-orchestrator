@@ -175,7 +175,11 @@ main{background:var(--bg)}
 .atts{align-items:flex-end;gap:8px}
 .pv{position:relative;display:inline-block;line-height:0}.pv img{width:72px;height:72px;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:#fff}
 .pv button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;padding:0;border-radius:50%;border:0;background:#303030;color:#fff;font-size:13px;line-height:20px}
-#modeSel{border:0;background:transparent;border-radius:999px;padding:6px 10px;font:inherit;color:var(--mute);cursor:pointer}#modeSel:hover{background:rgba(31,31,31,.08)}
+.msel{position:relative}.mbtn{display:inline-flex;align-items:center;gap:2px;border:0;background:transparent;border-radius:999px;padding:7px 8px 7px 12px;font:inherit;font-weight:500;color:var(--mute);cursor:pointer}.mbtn:hover{background:rgba(31,31,31,.08)}.mbtn .i{width:18px;height:18px}
+.mmenu{display:none;position:absolute;right:0;bottom:calc(100% + 8px);min-width:300px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.16);padding:8px;z-index:20}.mmenu.show{display:block}
+.mmenu button{display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;border:0;background:transparent;border-radius:12px;padding:10px 12px;font:inherit;color:var(--ink);cursor:pointer}.mmenu button:hover{background:rgba(31,31,31,.06)}.mmenu button.on{outline:1.5px solid var(--ink)}
+.mmenu .ck{width:16px;flex:none}.mmenu b{display:block;font-weight:500}.mmenu small{display:block;color:var(--mute);font-size:13px;margin-top:2px}
+#oldModeSel{border:0;background:transparent;border-radius:999px;padding:6px 10px;font:inherit;color:var(--mute);cursor:pointer}#modeSel:hover{background:rgba(31,31,31,.08)}
 </style>
 </head>
 <body>
@@ -275,8 +279,8 @@ async function refresh() {
   if (sel && !S.tasks.find((t) => t.id === sel)) sel = "";
   if (view === "lib") { /* đang xem thư viện */ } else if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
   if ($("ov").classList.contains("show") && !$("mUpd")?.disabled && !(document.activeElement?.id || "").startsWith("code_") && !document.querySelector("[data-code]:disabled")) renderSettings();
-  autoLogin();
-  if (!firstRun) { firstRun = true; if (!S.output || !S.ais.claude.ok) { chain = true; openSettings(); } }
+  feedLoginWin();
+  if (!firstRun) { firstRun = true; if (!S.output || !S.ais.claude.ok) openSettings(); }
 }
 let lastSnap = "", pendingRender = false;
 function selecting() {          // người dùng đang bôi đen chữ trong khung chat -> không vẽ lại
@@ -312,14 +316,25 @@ function composer(id, ph) {
   return `<div class="comp" id="${id}"><div class="atts" id="atts"></div>
     <textarea id="txt" placeholder="${ph}" aria-label="Tin nhắn"></textarea>
     <div class="bar"><button class="ghost icon" id="bFile" title="Đính kèm file" aria-label="Đính kèm file">${I.attach}</button>
-      <select id="modeSel" title="Chế độ làm việc" aria-label="Chế độ làm việc"><option value="fast">Nhanh</option><option value="balanced">Cân bằng</option><option value="saver">Tiết kiệm</option></select>
       <span style="flex:1"></span><span class="hint" id="cHint"></span>
+      <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="mmenu" id="modeMenu" role="menu"></div></span>
       <button class="pri icon" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
+const MODE = { fast: ["Nhanh", "Xong sớm nhất, dùng nhiều hạn mức hơn"], balanced: ["Cân bằng", "Mặc định: việc dễ dùng model nhỏ, việc khó dùng model mạnh"], saver: ["Tiết kiệm", "Chậm hơn, dùng ít hạn mức nhất"] };
+let curMode = "balanced";
+function paintMode() {
+  if (!$("modeBtn")) return;
+  $("modeBtn").innerHTML = `${MODE[curMode][0]}<svg class="i" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>`;
+  $("modeMenu").innerHTML = Object.entries(MODE).map(([k, [n, d]]) => `<button data-mode="${k}" class="${k === curMode ? "on" : ""}" role="menuitem"><span class="ck">${k === curMode ? "✓" : ""}</span><span><b>${n}</b><small>${d}</small></span></button>`).join("");
+}
+document.addEventListener("click", () => $("modeMenu")?.classList.remove("show"));
+const STOP = '<svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>';
+function stopMode() { return !!(T && $("taskComp") && T.status === "running" && !$("txt").value.trim() && !files.length); }
+function sendIcon() { const b = $("bSend"); if (!b || b.disabled) return; const st = stopMode(); b.innerHTML = st ? STOP : I.send; b.title = st ? "Dừng (tạm dừng task)" : "Gửi (Enter · Shift+Enter xuống dòng)"; }
 function bindComposer(onSend) {
   const c = document.querySelector(".comp"), ta = $("txt");
   $("bFile").onclick = () => $("fileIn").click();
-  $("bSend").onclick = onSend;
+  $("bSend").onclick = () => (stopMode() ? api("/api/task/act", { id: T.id, action: "pause" }).then(kick) : onSend());
   ta.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); onSend(); }
   });
@@ -339,8 +354,17 @@ function bindComposer(onSend) {
     });
     renderAtts();
   });
-  if (c.id === "homeComp") { $("modeSel").value = localStorage.getItem("mode") || "balanced"; $("modeSel").onchange = (e) => localStorage.setItem("mode", e.target.value); }
-  else { $("modeSel").value = (T && T.mode) || "balanced"; $("modeSel").onchange = async (e) => { const r = await api("/api/task/act", { id: T.id, action: "mode", text: e.target.value }); if (r.error) toast(r.error); else { toast("Đã đổi chế độ, áp dụng từ bước tiếp theo"); kick(); } }; }
+  curMode = c.id === "homeComp" ? (localStorage.getItem("mode") || "balanced") : ((T && T.mode) || "balanced");
+  paintMode();
+  $("modeBtn").onclick = (e) => { e.stopPropagation(); $("modeMenu").classList.toggle("show"); };
+  $("modeMenu").onclick = async (e) => {
+    const b = e.target.closest("[data-mode]"); if (!b) return; e.stopPropagation();
+    $("modeMenu").classList.remove("show"); if (b.dataset.mode === curMode) return;
+    curMode = b.dataset.mode; paintMode();
+    if (c.id === "homeComp") localStorage.setItem("mode", curMode);
+    else { const r = await api("/api/task/act", { id: T.id, action: "mode", text: curMode }); toast(r.error || "Đã đổi chế độ, áp dụng từ bước tiếp theo"); kick(); }
+  };
+  ta.addEventListener("input", sendIcon);
   let lastChk = 0;      // kiểm tra đăng nhập chỉ khi đang soạn prompt (tối đa 1 lần/phút)
   const chk = () => { if (Date.now() - lastChk > 60000) { lastChk = Date.now(); api("/api/ai/refresh", {}).then(() => setTimeout(kick, 2500)); } };
   ta.addEventListener("focus", chk); ta.addEventListener("input", chk);
@@ -356,9 +380,10 @@ function renderAtts() {
     ? `<span class="pv" title="${esc(f.name)}"><img src="${purl(f)}" alt="${esc(f.name)}"><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`
     : `<span class="a"><span>📎 ${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
   a.style.display = files.length ? "flex" : "none";
+  sendIcon();
 }
 $("fileIn").onchange = (e) => { files.push(...e.target.files); e.target.value = ""; renderAtts(); };
-function busy(on, label) { const b = $("bSend"); if (!b) return; b.disabled = on; b.innerHTML = on ? `<span class="spin"></span>` : I.send; $("cHint").textContent = label || ""; }
+function busy(on, label) { const b = $("bSend"); if (!b) return; b.disabled = on; b.innerHTML = on ? `<span class="spin"></span>` : I.send; $("cHint").textContent = label || ""; if (!on) sendIcon(); }
 
 /* ---------------- lịch sử task + file kết quả ---------------- */
 const fsize = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
@@ -468,6 +493,7 @@ function renderTask() {
       <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1><button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
       <span class="grow"></span>${acts.join("")}`;
   $("decbar").innerHTML = decHtml(t);
+  sendIcon(); if (curMode !== (t.mode || "balanced") && !$("modeMenu").classList.contains("show")) { curMode = t.mode || "balanced"; paintMode(); }
   $("thread").innerHTML = body + queued;
   $("bRename").onclick = startRename;
   const sc = document.querySelector(".scroll"); if (wasBottom) sc.scrollTop = sc.scrollHeight;
@@ -522,7 +548,7 @@ document.addEventListener("click", async (e) => {
   else if (d.relogin) { await api("/api/ai/cancel", { ai: "claude" }); setTimeout(() => api("/api/ai/login", { ai: "claude" }), 1500); }
   else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; el.innerHTML = '<span class="spin"></span>'; const r = await api("/api/ai/code", { ai: d.code, code: v }); if (r.error) toast(r.error); setTimeout(() => { if (el.isConnected) { el.disabled = false; el.textContent = "Gửi"; toast("Mã chưa được chấp nhận — thử lại hoặc bấm Hủy rồi Đăng nhập lại"); } }, 12000); }
   else if (d.cancel) { await api("/api/ai/cancel", { ai: d.cancel }); }
-  else if (d.login) { chain = false; S.ais[d.login].pending = "login"; renderSettings(); const r = await api("/api/ai/login", { ai: d.login, switch: !!d.switch }); if (r.error) toast(r.error); }
+  else if (d.login) { openLoginWin(d.login); S.ais[d.login].pending = "login"; renderSettings(); const r = await api("/api/ai/login", { ai: d.login, switch: !!d.switch }); if (r.error) toast(r.error); }
 });
 $("btnLib").onclick = () => openLib();
 $("btnNew").onclick = () => { view = ""; sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
@@ -530,7 +556,18 @@ $("btnSet").onclick = () => openSettings();
 $("btnOut").onclick = () => (S.output ? api("/api/open-output", {}) : openSettings());
 /* ---------------- settings ---------------- */
 function openSettings() { form = { output: S.output }; renderSettings(); $("ov").classList.add("show"); api("/api/ai/refresh", {}); kick(); }
-let chain = false, tried = new Set();
+let chain = false, tried = new Set(), loginWin = null, loginAi = "", loginUrl = "";
+function openLoginWin(ai) {   // mở cửa sổ nhỏ ngay khi bấm (tránh bị chặn popup), link đăng nhập được nạp khi có
+  loginAi = ai; loginUrl = "";
+  const w = 520, h = 720;
+  loginWin = window.open("", "aio_login", `width=${w},height=${h},left=${Math.max(0, screen.availWidth - w - 40)},top=60`);
+  try { if (loginWin && loginWin.location.href === "about:blank") loginWin.document.write(`<title>Đăng nhập ${AIN[ai]}</title><body style="font:15px system-ui;color:#444;display:grid;place-items:center;height:90vh">Đang mở trang đăng nhập ${AIN[ai]}…</body>`); } catch (e) {}
+}
+function feedLoginWin() {
+  const a = S && S.ais[loginAi]; if (!a || !loginWin) return;
+  if (a.url && a.url !== loginUrl && !loginWin.closed) { loginUrl = a.url; try { loginWin.location.href = a.url; } catch (e) {} }
+  if (!a.pending && a.ok && !loginWin.closed) { try { loginWin.close(); } catch (e) {} loginWin = null; }
+}
 function autoLogin() {      // tự mở lần lượt trang đăng nhập của các AI chưa đăng nhập
   if (!chain || Object.values(S.ais).some((a) => a.pending)) return;
   const next = Object.entries(S.ais).find(([k, a]) => a.installed && !a.ok && !tried.has(k));
@@ -542,7 +579,7 @@ function accState(k, a) {
   if (a.window === "logout") return `<small>Trong cửa sổ Gemini: gõ <b>/logout</b>, đăng nhập tài khoản mới trên trình duyệt, rồi đóng cửa sổ.</small>`;
   if (a.code) return `<small>1. Đăng nhập Google trên tab vừa mở${a.url ? ` (<a href="${esc(a.url)}" target="_blank">mở lại</a>)` : ""} → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Dán mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`;
   if (a.window) return `<small>1. Đăng nhập Google trên trình duyệt → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào <b>cửa sổ Gemini</b> (chuột phải hoặc Ctrl+V) rồi Enter. 3. Thấy email hiện lên thì đóng cửa sổ.${a.note ? `<br><span class="bad" style="color:var(--bad)">Không chạy ẩn được: ${esc(a.note)}</span>` : ""}</small>`;
-  if (a.pending) return `<small>Đăng nhập trên tab trình duyệt vừa mở…</small>`;
+  if (a.pending) return `<small>Đăng nhập trong cửa sổ vừa mở${a.url ? ` · <a href="${esc(a.url)}" target="aio_login">mở lại trang đăng nhập</a>` : "…"}</small>`;
   if (a.ok) return `<small>${a.email ? esc(a.email) : "Đã đăng nhập"}</small>`;
   return `<small class="bad">Chưa đăng nhập</small>`;
 }
