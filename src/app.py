@@ -460,8 +460,8 @@ def subtasks(t):
 
 
 MODE_RULES = {
-    "fast": """- Ưu tiên THỜI GIAN. Chạy song song tối đa {n} worker/sub-agent cho các phần độc lập.
-- Dùng model mạnh ngay từ đầu để ít phải sửa. Giám khảo: chấm 1 lần ở cuối, chỉ chấm lại phần đã sửa.""",
+    "fast": """- Ưu tiên THỜI GIAN và chất lượng. Chạy song song tối đa {n} worker/sub-agent cho các phần độc lập.
+- Dùng model mạnh ngay từ đầu để ít phải sửa. Giám khảo được dùng model mạnh, tối đa 2 vòng sửa.""",
     "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song tối đa {n} worker/sub-agent cho phần độc lập; tuần tự khi phụ thuộc.
 - Model nhỏ/nhanh cho việc đơn giản; model mạnh cho việc khó. Nâng model khi kết quả không đạt, hạ khi việc lặp lại.""",
     "saver": """- Ưu tiên TIẾT KIỆM HẠN MỨC. Làm tuần tự, 1 worker tại một thời điểm. Việc nào tự làm được bằng lệnh/script thì không gọi AI.
@@ -522,19 +522,33 @@ cuộc trò chuyện), rồi chạy:
   "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2
 Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worker tạo). Sửa lỗi: giao lại cùng --out.
 
-## Quy trình nghiệm thu (mọi task có sản phẩm: ảnh, code, bảng tính, tài liệu, báo cáo dạng file...)
-1. TIÊU CHÍ: trước khi làm, viết tasks/criteria.md từ chính yêu cầu của người dùng trong task này: sản phẩm phải có gì, đúng
-   gì, định dạng/kích thước, chất lượng/style, lỗi cần tránh; đánh dấu tiêu chí nào BẮT BUỘC. Ngắn gọn, kiểm chứng được.
-   Người dùng bổ sung/đổi yêu cầu hoặc góp ý ở lượt sau -> cập nhật file. Không hỏi người dùng để duyệt tiêu chí.
-2. LÀM THỬ: việc lặp theo lô (từ 3 sản phẩm cùng loại trở lên) -> làm 1 mẫu trước, chấm đạt mới chạy cả lô theo đúng cách đó.
-3. CHẤM ĐỘC LẬP: bạn không tự nghiệm thu sản phẩm của mình hay của worker. Sau khi check kỹ thuật đạt, gọi giám khảo:
-     "{py}" "{app}" judge --files <thư mục/file sản phẩm> --criteria tasks/criteria.md [--refs "<thư mục mẫu người dùng đã duyệt>"]
-        --brief "<yêu cầu riêng của phần này>" --out work/J1 [--model <model>]
-   Giám khảo là phiên Claude mới, chỉ thấy sản phẩm + tiêu chí. Kết quả: work/J1/vN/review.json (verdict, điểm, lỗi, cách sửa).
-   Fail -> sửa/giao sửa đúng lỗi giám khảo nêu rồi chấm lại (cùng --out), tối đa 2 vòng; vẫn fail -> báo người dùng lỗi còn lại.
-   Không bỏ qua kết quả giám khảo; nếu thấy giám khảo sai rõ ràng, nêu trong câu trả lời để người dùng quyết.
-   Chọn model giám khảo theo độ khó: việc đơn giản dùng model nhỏ.
-Bỏ qua cả quy trình này khi task không tạo sản phẩm (hỏi đáp, tra cứu nhanh, giải thích) hoặc người dùng bảo làm nhanh/nháp.
+## Quy trình nghiệm thu
+1. TIÊU CHÍ: trước khi làm, viết tasks/criteria.md từ chính yêu cầu của người dùng (sản phẩm phải có gì, đúng gì, định dạng/
+   kích thước, style, lỗi cần tránh; đánh dấu BẮT BUỘC). Ngắn, kiểm chứng được. Người dùng đổi yêu cầu -> cập nhật. Không hỏi duyệt.
+2. CHẤM ĐÚNG CHỖ (giám khảo tốn thời gian — chỉ dùng khi đáng):
+   - Văn bản (phân tích, research, idea, kịch bản, báo cáo, tài liệu chữ): KHÔNG gọi giám khảo. Tự rà 1 lần theo tiêu chí.
+   - Sản phẩm hình/âm thanh/code/bảng tính: check kỹ thuật bằng lệnh check trước; rồi gọi giám khảo 1 LẦN cho CẢ LÔ ở cuối:
+     "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1 [--model <model>]
+     Kết quả work/J1/vN/review.json. Fail -> sửa đúng lỗi nêu, tối đa 1 vòng sửa, chỉ chấm lại file đã sửa; vẫn fail -> báo người dùng.
+   - Lô lớn (từ 5 sản phẩm cùng loại, tốn nhiều thời gian/hạn mức): làm 1 mẫu, tự xem (không cần giám khảo) rồi chạy cả lô.
+   - Giám khảo dùng model nhỏ (sonnet/haiku) trừ chế độ Pro.
+   Bỏ qua hết khi hỏi đáp/tra cứu hoặc người dùng bảo làm nhanh/nháp.
+
+## Storyboard
+Storyboard viết dạng BẢNG CHỮ (cảnh, thời lượng, hình ảnh, chữ trên màn hình, âm thanh, CTA) trong câu trả lời hoặc tài liệu.
+KHÔNG tự tạo ảnh/khung hình storyboard, trừ khi người dùng yêu cầu rõ (vẽ/minh hoạ/render storyboard).
+
+## Song song
+Nhiều sản phẩm độc lập cùng loại (nhiều ảnh, nhiều file): chia thành 2–3 worker chạy song song (lệnh worker chạy nền, mỗi
+worker --out riêng), không dồn cả lô vào 1 worker. Giới hạn theo chế độ bên dưới.
+
+## Trả kết quả theo từng chặng
+Task nhiều phần (vd phân tích → idea → sản phẩm): xong phần nào có ích cho người dùng thì ghi ngay nội dung phần đó (markdown
+ngắn gọn) vào ./stages/<số thứ tự>.md — giao diện hiện ngay cho người dùng đọc trong lúc bạn làm tiếp. Câu trả lời cuối vẫn phải
+đủ ý (gộp kết quả các chặng); các chặng sẽ được ẩn khi task xong.
+
+## Model
+Bạn đang chạy {'Opus' if t.get('mode') == 'fast' else 'Sonnet'}. {'' if t.get('mode') == 'fast' else 'Bước khó cần suy luận sâu (phân tích chiến lược, lập kế hoạch phức tạp, gỡ lỗi khó): giao cho sub-agent (Task/Agent) với model opus, chỉ cho đúng bước đó.'}
 
 ## Tạo ảnh
 Tạo bằng codex ($imagegen) hoặc cách khác có sẵn. Chỉ khi không thể tạo được (lỗi, hết hạn mức): viết prompt vào
@@ -560,7 +574,8 @@ Mỗi khi người dùng góp ý, yêu cầu sửa, hoặc duyệt/chốt điề
 - Đầu mỗi lượt: đọc file này và tuân theo các quyết định đã chốt; không hỏi lại điều đã chốt.
 
 ## Tiến độ
-Cập nhật tasks/plan.json sau mỗi bước: goal, subtasks[id, worker, model, status, attempt, outputs].
+Cập nhật tasks/plan.json sau mỗi bước: goal, subtasks[id, title, worker, model, status(todo|running|done|failed), attempt, outputs].
+Liệt kê ĐỦ các bước dự kiến ngay từ đầu (cả bước bạn tự làm) — giao diện tính % tiến độ = số bước done / tổng bước.
 Có thể bị ngắt giữa chừng (người dùng gửi tin gấp, hoặc máy tắt): khi chạy tiếp, đọc plan.json, bỏ qua bước đã xong.
 
 ## Khi cần người dùng quyết định
@@ -646,8 +661,7 @@ def start_run(t):
     args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
             "--permission-mode", "acceptEdits",
             "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite"]
-    if t.get("mode") == "saver":
-        args += ["--model", "sonnet"]
+    args += ["--model", "opus" if t.get("mode") == "fast" else "sonnet"]   # Balanced/Eco: Sonnet điều phối, bước khó gọi Opus
     if t.get("session_started"):
         args += ["--resume", t["session"]]
     else:
@@ -1506,6 +1520,18 @@ def task_detail(t):
             if s["ts"] >= m.get("started_ts", 0) - 1:
                 m["subtasks"].append(s)
                 break
+    if t["status"] == "running" and works and works[-1].get("status") == "running":
+        cur = works[-1]
+        pl = rjson(wdir(t) / "tasks" / "plan.json", {}) or {}
+        st = [str(x.get("status", "")).lower() for x in (pl.get("subtasks") or []) if isinstance(x, dict)]
+        if st:
+            fin = sum(x in ("done", "completed", "partial", "failed", "skipped", "pass", "ok") for x in st)
+            cur["progress"] = min(99, round(100 * fin / len(st)))
+            cur["nsteps"] = len(st)
+        sd = wdir(t) / "stages"
+        if sd.is_dir():
+            cur["stages"] = [f.read_text("utf-8", "replace")[:6000] for f in sorted(sd.glob("*.md"),
+                             key=lambda f: [int(x) if x.isdigit() else x for x in re.split(r"(\d+)", f.stem)])][:20]
     for m in works:
         if m.get("status") != "running":
             for s in m["subtasks"]:
@@ -1966,9 +1992,7 @@ def update_now():
         return {"error": "Không kết nối được GitHub, thử lại sau"}
     if not new and not UPDATED["pending"]:
         return {"ok": True, "msg": f"Đang dùng bản mới nhất (v{RELEASE})"}
-    if busy_tasks():
-        return {"ok": True, "msg": f"Có bản v{UPDATED.get('release') or new}. Sẽ tự cập nhật khi các task làm xong."}
-    threading.Thread(target=lambda: (time.sleep(0.5), apply_update()), daemon=True).start()
+    threading.Thread(target=lambda: (time.sleep(0.5), apply_update()), daemon=True).start()   # task đang chạy: dừng, cập nhật xong tự chạy tiếp
     return {"ok": True, "restart": True, "msg": "Đang cập nhật, trang sẽ tự tải lại…"}
 
 
@@ -1992,6 +2016,14 @@ def apply_update():
     if not v or not (VERS / v / "app.py").exists():
         return
     (HOME / "next.txt").write_text(v, encoding="ascii")
+    live = [t for t in TASKS.values() if t["status"] == "running"]
+    for t in live:                       # giữ trạng thái "running" -> bản mới mở lên sẽ tự chạy tiếp (Claude nối lại phiên)
+        t["_quit"] = True
+        kill_tree(PROCS.get(t["id"]))
+    for _ in range(20):
+        if all(t.get("pid") is None for t in live):
+            break
+        time.sleep(0.25)
     boot = HOME / "app.py"
     env = {k: x for k, x in os.environ.items() if k not in ("AIO_CHILD",)}
     env["AIO_RESTART"] = "1"

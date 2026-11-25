@@ -206,6 +206,7 @@ main{background:var(--bg)}
 .foot{display:block}.ais{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}.foot .fbtns{display:flex}
 .pop .row button{width:auto;border:1px solid var(--line);padding:6px 12px}.pop button.pri{background:var(--acc);color:#fff;border-color:var(--acc)}.pop button.pri:hover{background:#000}
 .pop .row button.ghost{border-color:transparent}
+.claude.stage{margin-top:12px;color:var(--ink)}.claude.stage .txt{border-left:2px solid var(--line);padding-left:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -536,13 +537,14 @@ function workBlock(m, i) {
   const el = live ? (T._now - m.started_ts) + (Date.now() - fetchedAt) / 1000 : (m.ended_ts || m.started_ts) - m.started_ts;
   const label = live ? `<span class="spin"></span>Đang làm · <span data-timer="${m.started_ts}">${clock(el)}</span>`
     : { done: `Đã làm trong ${dur(el)}`, interrupted: `Dừng để nhận tin mới · ${dur(el)}`, paused: `Tạm dừng sau ${dur(el)}`, cancelled: `Đã hủy sau ${dur(el)}`, failed: `Lỗi sau ${dur(el)}` }[m.status] || dur(el);
-  const nsub = m.subtasks.length ? ` · ${m.subtasks.length} sub-task` : "";
+  const nsub = live && m.progress != null ? ` · Process ${m.progress}%` : "";
   const steps = m.steps;
   const subs = m.subtasks.length ? `<div class="subs">${m.subtasks.map((s) => `<div class="sub" title="${esc(s.error)}"><span class="id">${esc(s.id)}</span><span class="tt">${esc(s.title || "—")}</span>
       <span class="chip">${WN[s.worker] || s.worker || "…"}${s.model ? " · " + esc(s.model) : ""}${s.attempt > 1 ? " · lần " + s.attempt : ""}</span>
       <span class="pill ${s.status}">${s.status === "running" ? "Đang làm" : ST[s.status] || s.status}</span></div>`).join("")}</div>` : "";
+  const stg = live && (m.stages || []).length ? m.stages.map((x) => `<div class="claude stage"><div class="txt">${md(x)}</div></div>`).join("") : "";
   return `<div class="work"><button class="whead ${open ? "open" : ""}" data-w="${key}" data-live="${live ? 1 : 0}">${label}${nsub}${I.chev}</button>
-    ${open ? `<div class="wbody">${steps.map((s, j) => `<div class="wstep ${live && j === steps.length - 1 ? "cur" : ""}" title="${esc(s)}">${esc(s)}</div>`).join("") || "<div class='wstep'>Đang khởi động…</div>"}</div>` : ""}${subs}</div>`;
+    ${open ? `<div class="wbody">${steps.map((s, j) => `<div class="wstep ${live && j === steps.length - 1 ? "cur" : ""}" title="${esc(s)}">${esc(s)}</div>`).join("") || "<div class='wstep'>Đang khởi động…</div>"}</div>` : ""}${live || open ? subs : ""}${stg}</div>`;
 }
 function attHtml(fs) {
   if (!fs.length) return "";
@@ -715,7 +717,13 @@ let timer = 0;
 function nextDelay() {
   const active = S && (S.tasks.some((t) => ["running", "queued", "login"].includes(t.status)) || Object.values(S.ais).some((a) => a.pending));
   if (document.hidden) return 20000;
-  return active || $("ov").classList.contains("show") ? 2500 : 10000;
+  if ($("ov").classList.contains("show") || (S && Object.values(S.ais).some((a) => a.pending))) return 2500;
+  if (T && $("taskComp") && T.status === "running") {      // task lớn: 30 giây/lần, task nhỏ: 5 giây/lần
+    const w = [...T.messages].reverse().find((m) => m.role === "work");
+    const big = w && ((w.nsteps || 0) >= 5 || (T._now - w.started_ts) > 600);
+    return big ? 30000 : 5000;
+  }
+  return active ? 5000 : 10000;
 }
 async function loop() { await refresh(); timer = setTimeout(loop, nextDelay()); }
 function kick() { clearTimeout(timer); timer = setTimeout(loop, 300); }
