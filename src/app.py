@@ -25,6 +25,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 UI_B64 = ""  # filled at build time
+ICO_B64 = ""  # icon Windows (shortcut), filled at build time
 VERSION = "dev"  # filled at build time
 RELEASE = "dev"  # số phiên bản hiển thị (vd 1.6), filled at build time
 UPDATE_BASE = ""  # vd https://raw.githubusercontent.com/<owner>/<repo>/main/ (filled at build time)
@@ -81,7 +82,7 @@ AIS = {
     "codex": {"bin": "codex", "login": ["login"], "test": ["exec", "--skip-git-repo-check", *CODEX_SANDBOX, PING]},
     "gemini": {"bin": "agy", "login": [], "test": ["-p", PING]},
 }
-ICON_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="23" fill="#202020"/><path d="M23 23V42L50 68L77 42V23M50 23V68" stroke="#FFFFFF" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>'
+ICON_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#202020"/><g stroke="#FFFFFF" stroke-width="6.8" fill="none"><path d="M23.4 23.7V43.4L50 70L76.6 43.4V23.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M50 23.7V65.2" stroke-linecap="butt"/></g><circle cx="50" cy="23.7" r="3.4" fill="#FFFFFF"/></svg>'
 
 
 # ---------------------------------------------------------------- helpers
@@ -525,8 +526,9 @@ Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worke
 ## Quy trình nghiệm thu
 1. TIÊU CHÍ: trước khi làm, viết tasks/criteria.md từ chính yêu cầu của người dùng (sản phẩm phải có gì, đúng gì, định dạng/
    kích thước, style, lỗi cần tránh; đánh dấu BẮT BUỘC). Ngắn, kiểm chứng được. Người dùng đổi yêu cầu -> cập nhật. Không hỏi duyệt.
-2. CHẤM ĐÚNG CHỖ (giám khảo tốn thời gian — chỉ dùng khi đáng):
-   - Văn bản (phân tích, research, idea, kịch bản, báo cáo, tài liệu chữ): KHÔNG gọi giám khảo. Tự rà 1 lần theo tiêu chí.
+2. CHẤM ĐÚNG CHỖ (ưu tiên tốc độ):
+   - Văn bản hoặc task nhẹ (phân tích, research, idea, kịch bản, báo cáo, tài liệu chữ): chấm 1 LẦN, nhanh — giám khảo
+     model nhỏ (judge --model haiku) hoặc giao gemini đọc soát theo criteria.md. Chỉ sửa lỗi nêu, không chấm lại.
    - Sản phẩm hình/âm thanh/code/bảng tính: check kỹ thuật bằng lệnh check trước; rồi gọi giám khảo 1 LẦN cho CẢ LÔ ở cuối:
      "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1 [--model <model>]
      Kết quả work/J1/vN/review.json. Fail -> sửa đúng lỗi nêu, tối đa 1 vòng sửa, chỉ chấm lại file đã sửa; vẫn fail -> báo người dùng.
@@ -601,13 +603,15 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
 def build_prompt(t, nxt):
     kind = nxt.get("kind")
     files = nxt.get("files") or []
-    fl = f"\nFile mới trong ./input/: {', '.join(files)}." if files else ""
+    fl = f"\nFile mới trong {tdir(t) / 'input'}: {', '.join(files)}." if files else ""
     text = nxt.get("text", "")
     if kind == "start" or not t.get("session_started"):
         base = f"Task mới. Yêu cầu của người dùng:\n\n{t['text']}\n"
         if kind != "start" and text:
             base += f"\nBổ sung của người dùng:\n{text}\n"
         return base + fl + "\nLàm theo CLAUDE.md."
+    if t.get("session_started"):        # app có thể vừa cập nhật: luật mới trong CLAUDE.md áp dụng cho lượt này
+        fl += "\nCLAUDE.md có thể vừa được cập nhật: đọc lại ./CLAUDE.md và áp dụng bản mới nhất (thay cho quy tắc cũ trong phiên)."
     if kind == "answer":
         return f"Người dùng trả lời:\n\n{text}\n{fl}\nTiếp tục task."
     if kind == "urgent":
@@ -894,6 +898,8 @@ def act(tid, action, text="", files=None):
         elif action == "mode" and text in MODES:
             t["mode"] = text                           # áp dụng từ lượt chạy kế tiếp
             write_claude_md(t)
+        elif action == "pin":
+            t["pinned"] = not t.get("pinned")
         elif action == "rename" and text:
             t["title"] = text[:80]
             t["renamed"] = True
@@ -1606,7 +1612,7 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/api/state":
             page_seen()
             with _tlock:
-                ts = [{k: t.get(k) for k in ("id", "title", "status", "created")}
+                ts = [{k: t.get(k) for k in ("id", "title", "status", "created", "pinned")}
                       for t in TASKS.values() if t["status"] != "draft"]
                 for x in ts:
                     if TASKS[x["id"]].get("need_login") and x["status"] == "queued":
@@ -2141,6 +2147,13 @@ def serve(background=False):
         set_store()
     except Exception as e:
         dlog(f"set_store: {e}")
+    if ICO_B64:                                  # icon shortcut Start Menu đổi theo bản cập nhật
+        try:
+            ico = base64.b64decode(ICO_B64)
+            if not (HOME / "icon.ico").exists() or (HOME / "icon.ico").read_bytes() != ico:
+                (HOME / "icon.ico").write_bytes(ico)
+        except Exception:
+            pass
     if IS_WIN:                                   # đổi tên shortcut cũ sang Maestro (bản cập nhật qua nút Cập nhật)
         for base in (Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs",
                      Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup"):

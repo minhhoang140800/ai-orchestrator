@@ -175,7 +175,7 @@ main{background:var(--bg)}
 .a{background:var(--soft);border:1px solid var(--line);border-radius:6px}
 .home{flex:1;display:flex;flex-direction:column;justify-content:flex-start;padding:12vh 24px 40px;overflow:auto}
 .home .in{max-width:640px;width:100%;margin:0 auto}
-.home h2{text-align:left;font-size:30px;font-weight:600;letter-spacing:-.02em;margin:0 0 6px;color:var(--ink)}
+.home h2{text-align:left;font-size:30px;font-weight:600;letter-spacing:-.02em;margin:0 0 20px;color:var(--ink)}
 .home .sub2{color:var(--mute);margin:0 0 20px;font-size:14px}
 .home .comp{max-width:none}.home .comp textarea{min-height:72px}
 .recent{margin-top:28px}.recent .k{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin-bottom:6px}
@@ -206,6 +206,15 @@ main{background:var(--bg)}
 .foot{display:block}.ais{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}.foot .fbtns{display:flex}
 .pop .row button{width:auto;border:1px solid var(--line);padding:6px 12px}.pop button.pri{background:var(--acc);color:#fff;border-color:var(--acc)}.pop button.pri:hover{background:#000}
 .pop .row button.ghost{border-color:transparent}
+.titem{position:relative;cursor:pointer}.titem .pin{color:var(--mute);line-height:0}.titem .pin .i{width:13px;height:13px}
+.tmore{position:absolute;right:4px;top:50%;transform:translateY(-50%);display:none;border:0;background:transparent;padding:4px;border-radius:6px;line-height:0;color:var(--mute)}
+.tmore:hover{background:#DCDCDC;color:var(--ink)}
+.titem:hover .tmore,.titem.menu .tmore,.titem:focus-within .tmore{display:block}
+.titem::after{content:"";position:absolute;right:0;top:0;bottom:0;width:56px;border-radius:0 6px 6px 0;pointer-events:none;opacity:0;transition:opacity var(--t);
+ background:linear-gradient(90deg,rgba(239,239,239,0),var(--hover) 55%)}
+.titem.on::after{background:linear-gradient(90deg,rgba(228,228,228,0),var(--acc2) 55%)}
+.titem:hover::after,.titem.menu::after{opacity:1}.tmore{z-index:1}
+.smenu{min-width:160px}.smenu button{align-items:center;font-size:13px}
 .claude.stage{margin-top:12px;color:var(--ink)}.claude.stage .txt{border-left:2px solid var(--line);padding-left:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -234,6 +243,7 @@ main{background:var(--bg)}
 </div></div>
 <div id="toast" role="status"></div>
 <div class="pop pmenu" id="pMenu" role="menu" style="position:fixed"></div>
+<div class="pop smenu" id="sMenu" role="menu" style="position:fixed"></div>
 <input type="file" id="fileIn" multiple hidden>
 
 <script>
@@ -255,6 +265,8 @@ const I = {
   img: '<svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg>',
   code: '<svg class="i" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg>',
   folder: '<svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  more: '<svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/></svg>',
+  pin: '<svg class="i" viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/></svg>',
   proj: '<svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M8 13h8"/></svg>',
   down: '<svg class="i" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>',
   tpl: '<svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16M9 9v11"/></svg>',
@@ -299,7 +311,7 @@ async function refresh() {
   try { S = await api("/api/state"); } catch { return; }
   for (const t of S.tasks) {
     const p = prev[t.id];
-    if (p && p !== t.status && ["waiting", "done", "failed"].includes(t.status)) notify(ST[t.status] + " · " + t.title, "");
+    if (p && p !== t.status && ["waiting", "done"].includes(t.status)) notify(t.title, t.status === "waiting" ? "Cần bạn trả lời" : "Đã xong");
     prev[t.id] = t.status;
   }
   $("ver").textContent = S.release && S.release !== "dev" ? "v" + S.release : "";
@@ -337,8 +349,33 @@ document.addEventListener("selectionchange", () => { if (pendingRender && !selec
 
 /* ---------------- sidebar ---------------- */
 function aiDot(a) { return a.pending ? "pend" : a.ok ? "ok" : a.ok === false ? "bad" : ""; }
+let sMenuFor = "";
+async function taskAct(id, action, text) { const r = await api("/api/task/act", { id, action, text }); if (r.error) toast(r.error); return r; }
+$("sMenu").onclick = async (e) => {
+  e.stopPropagation(); const b = e.target.closest("[data-sm]"); if (!b) return;
+  const id = sMenuFor, t = S.tasks.find((x) => x.id === id); closeSMenu(); if (!t) return;
+  if (b.dataset.sm === "pin") await taskAct(id, "pin");
+  if (b.dataset.sm === "rename") { const n = prompt("Tên task:", t.title); if (n && n.trim() && n.trim() !== t.title) await taskAct(id, "rename", n.trim()); }
+  if (b.dataset.sm === "delete") {
+    if (["running", "queued", "login"].includes(t.status)) return toast("Task đang chạy, hủy task trước khi xóa");
+    if (!confirm("Xóa task khỏi danh sách? File kết quả vẫn giữ nguyên.")) return;
+    const r = await taskAct(id, "delete"); if (!r.error && sel === id) { sel = ""; sessionStorage.removeItem("sel"); T = null; renderHome(); }
+  }
+  T = null; lastSnap = ""; await refresh();
+};
+function closeSMenu() { sMenuFor = ""; $("sMenu").classList.remove("show"); document.querySelectorAll(".titem.menu").forEach((x) => x.classList.remove("menu")); }
+document.addEventListener("click", (e) => { if (!e.target.closest("#sMenu,[data-more]")) closeSMenu(); });
+$("tlist").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-more]"); if (!b) return; e.stopPropagation();
+  if (sMenuFor === b.dataset.more) return closeSMenu();
+  closeSMenu(); sMenuFor = b.dataset.more; b.closest(".titem").classList.add("menu");
+  const t = S.tasks.find((x) => x.id === sMenuFor), r = b.getBoundingClientRect(), m = $("sMenu");
+  m.innerHTML = `<button data-sm="pin">${I.pin}${t && t.pinned ? "Bỏ ghim" : "Pin"}</button><button data-sm="rename">${I.edit}Rename</button><button data-sm="delete" style="color:var(--bad)">${I.trash}Delete</button>`;
+  m.style.left = r.left + "px"; m.style.top = r.bottom + 4 + "px"; m.classList.add("show");
+}, true);
 function renderSide() {
-  $("tlist").innerHTML = S.tasks.length ? S.tasks.map((t) => `<button class="titem ${t.id === sel ? "on" : ""}" data-sel="${t.id}" title="${esc(ST[t.status])}"><span class="sd ${t.status}"></span><span class="t">${esc(t.title)}</span></button>`).join("")
+  const ls = [...S.tasks.filter((t) => t.pinned), ...S.tasks.filter((t) => !t.pinned)];
+  $("tlist").innerHTML = ls.length ? ls.map((t) => `<div class="titem ${t.id === sel ? "on" : ""} ${sMenuFor === t.id ? "menu" : ""}" data-sel="${t.id}" title="${esc(ST[t.status])}" role="button" tabindex="0"><span class="sd ${t.status}"></span><span class="t">${esc(t.title)}</span>${t.pinned ? `<span class="pin">${I.pin}</span>` : ""}<button class="tmore" data-more="${t.id}" aria-label="Tùy chọn">${I.more}</button></div>`).join("")
     : `<div class="hint" style="padding:6px 10px">Chưa có task</div>`;
   $("aiDots").innerHTML = Object.entries(S.ais).map(([k, a]) => `<span><span class="dot ${aiDot(a)}"></span>${AIN[k]}</span>`).join("");
 }
@@ -347,12 +384,12 @@ function renderSide() {
 function composer(id, ph) {
   return `<div class="comp" id="${id}"><div class="atts" id="atts"></div>
     <textarea id="txt" placeholder="${ph}" aria-label="Tin nhắn"></textarea>
-    <div class="bar"><span class="msel"><button class="ghost" id="bFile" title="Đính kèm file (hoặc dán ảnh / kéo thả)" aria-label="Đính kèm file">${I.attach}Đính kèm</button>${id === "homeComp" ? `<div class="pop tmenu" id="tplMenu" role="menu"></div>` : ""}</span>
+    <div class="bar"><span class="msel"><button class="ghost" id="bFile" title="Đính kèm (hoặc dán / kéo thả)" aria-label="Đính kèm file">${I.attach}Đính kèm</button>${id === "homeComp" ? `<div class="pop tmenu" id="tplMenu" role="menu"></div>` : ""}</span>
       <span style="flex:1"></span><span class="hint" id="cHint"></span>
       <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="pop mmenu" id="modeMenu" role="menu"></div></span>
       <button class="pri" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${id === "homeComp" ? "Chạy task" : ""}${I.send}</button></div></div>`;
 }
-const MODE = { fast: ["Pro", "Model mạnh nhất, xong sớm nhất, tốn hạn mức hơn"], balanced: ["Balanced", "Mặc định: việc dễ dùng model nhỏ, việc khó dùng model mạnh"], saver: ["Eco", "Chậm hơn, dùng ít hạn mức nhất"] };
+const MODE = { fast: ["Pro", "Opus, chấm kỹ, tốn hạn mức hơn"], balanced: ["Balanced", "Sonnet, Opus cho bước khó"], saver: ["Eco", "Ít hạn mức nhất, chậm hơn"] };
 const MICON = {
   fast: '<svg class="i" viewBox="0 0 24 24"><path d="M9.5 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"/><path d="M12.5 9h2a2 2 0 0 0 2-2M12.5 14h3a2 2 0 0 1 2 2v1M16.5 11h3"/></svg>',
   balanced: '<svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 4v11.8M18 8.2a8 8 0 0 1-8 8H8.2"/></svg>',
@@ -398,7 +435,7 @@ function bindComposer(onSend) {
     $("modeMenu").classList.remove("show"); if (b.dataset.mode === curMode) return;
     curMode = b.dataset.mode; paintMode();
     if (c.id === "homeComp") localStorage.setItem("mode", curMode);
-    else { const r = await api("/api/task/act", { id: T.id, action: "mode", text: curMode }); toast(r.error || "Đã đổi chế độ, áp dụng từ bước tiếp theo"); kick(); }
+    else { const r = await api("/api/task/act", { id: T.id, action: "mode", text: curMode }); toast(r.error || "Đã đổi chế độ"); kick(); }
   };
   ta.addEventListener("input", sendIcon);
   let lastChk = 0;      // kiểm tra đăng nhập chỉ khi đang soạn prompt (tối đa 1 lần/phút)
@@ -468,13 +505,13 @@ async function openProj(b) {
   if (pEdit) { const g = await api("/api/project", { action: "get", id: pEdit }); brain = g.brain || ""; }
   m.innerHTML = `${S.projects.map((p) => `<button data-pick="${p.id}" class="${p.id === cur ? "on" : ""}"><span class="ck" style="width:16px">${p.id === cur ? "✓" : ""}</span><b>${esc(p.name)}</b></button>`).join("")}
     <button data-pick="" class="${cur ? "" : "on"}"><span class="ck" style="width:16px">${cur ? "" : "✓"}</span><span style="color:var(--mute)">Không thuộc dự án</span></button>
-    <div class="sep"></div><div class="row"><input type="text" id="pNew" placeholder="Tên dự án mới (vd Mini Soccer)"><button id="pAdd">Tạo</button></div>
-    ${pEdit ? `<div class="sep"></div><div style="padding:2px 4px"><small style="color:var(--mute)">Bộ nhớ dự án · Claude đọc trước mọi task của dự án (style, size chuẩn, đặt tên, KPI…)</small>
-      <textarea id="pBrain" placeholder="- Style: …&#10;- Size chuẩn: …">${esc(brain)}</textarea>
+    <div class="sep"></div><div class="row"><input type="text" id="pNew" placeholder="Tên dự án mới"><button id="pAdd">Tạo</button></div>
+    ${pEdit ? `<div class="sep"></div><div style="padding:2px 4px"><small style="color:var(--mute)">Bộ nhớ dự án</small>
+      <textarea id="pBrain" placeholder="Quy tắc chung của dự án">${esc(brain)}</textarea>
       <div class="row"><button class="ghost" id="pDel" style="color:var(--bad)">Xóa dự án</button><span style="flex:1"></span><button class="pri" id="pSave">Lưu</button></div></div>` : ""}`;
   $("pAdd").onclick = async (e) => { e.stopPropagation(); const n = $("pNew").value.trim(); if (!n) return $("pNew").focus(); if (e.currentTarget.disabled) return; e.currentTarget.disabled = true; const r2 = await api("/api/project", { action: "create", name: n, task: T && $("taskComp") ? T.id : "" }); if (r2.error) return toast(r2.error); if (!(T && $("taskComp"))) localStorage.setItem("proj", r2.id); else T.project = r2.id; await refresh(); pEdit = r2.id; repaintProj(); openProj($("pBtn")); };
   $("pNew").onkeydown = (e) => { if (e.key === "Enter") $("pAdd").click(); };
-  if ($("pSave")) $("pSave").onclick = async (e) => { e.stopPropagation(); const r2 = await api("/api/project", { action: "save", id: pEdit, brain: $("pBrain").value }); toast(r2.error || "Đã lưu bộ nhớ dự án"); };
+  if ($("pSave")) $("pSave").onclick = async (e) => { e.stopPropagation(); const r2 = await api("/api/project", { action: "save", id: pEdit, brain: $("pBrain").value }); toast(r2.error || "Đã lưu"); };
   if ($("pDel")) $("pDel").onclick = async (e) => { e.stopPropagation(); if (!confirm("Xóa dự án này? Task và file vẫn giữ.")) return; await api("/api/project", { action: "delete", id: pEdit }); m.classList.remove("show"); await refresh(); repaintProj(); };
 }
 function repaintProj() { const b = $("pBtn"); if (b) { b.outerHTML = projBtn(); bindProj(); } }
@@ -496,7 +533,7 @@ function bindTpl() {
   const show = () => {
     const q = ta.value.slice(1).toLowerCase(), ls = S.templates.filter((x) => x.name.toLowerCase().includes(q));
     m.innerHTML = ls.length ? ls.map((x) => `<button data-tpl="${x.id}"><span class="ck">${I.tpl}</span><span style="flex:1"><b>${esc(x.name)}</b><small>${x.steps} bước</small></span><span data-deltpl="${x.id}" title="Xóa mẫu" style="color:var(--mute);padding:0 4px">×</span></button>`).join("")
-      : `<div style="padding:8px 10px;color:var(--mute);font-size:13px">${S.templates.length ? "Không có mẫu khớp" : "Chưa có template. Task nhiều bước làm xong sẽ có nút Save Template."}</div>`;
+      : `<div style="padding:8px 10px;color:var(--mute);font-size:13px">${S.templates.length ? "Không có mẫu khớp" : "Chưa có template"}</div>`;
     m.classList.add("show");
   };
   ta.addEventListener("input", () => (ta.value.startsWith("/") ? show() : m.classList.remove("show")));
@@ -504,14 +541,14 @@ function bindTpl() {
     e.stopPropagation(); const d = e.target.closest("[data-deltpl]");
     if (d) { if (!confirm("Xóa template này?")) return; await api("/api/template", { action: "delete", id: d.dataset.deltpl }); await refresh(); return show(); }
     const b = e.target.closest("[data-tpl]"); if (!b) return;
-    curTpl = b.dataset.tpl; ta.value = ""; m.classList.remove("show"); paintTpl(); ta.placeholder = "Mô tả yêu cầu lần này (file, size, số lượng…)"; ta.focus();
+    curTpl = b.dataset.tpl; ta.value = ""; m.classList.remove("show"); paintTpl(); ta.placeholder = "Yêu cầu lần này"; ta.focus();
   };
 }
 function renderHome() {
   T = null; lastSnap = "";
   const rec = S.tasks.slice(0, 5);
   $("main").innerHTML = `<div class="crumb"><span>Workspace / Task mới</span><span class="grow"></span>${projBtn()}</div>
-    <div class="home"><div class="in"><h2>Hôm nay làm gì?</h2><p class="sub2">Tạo task mới và để Maestro điều phối công việc.</p>
+    <div class="home"><div class="in"><h2>Hôm nay làm gì?</h2>
     ${composer("homeComp", PH_NEW)}
     ${rec.length ? `<div class="recent"><div class="k">Task gần đây</div>${rec.map((t) => `<button data-sel="${t.id}"><span>${esc(t.title)}</span><small>${esc(whenTxt(t.created))}</small></button>`).join("")}</div>` : ""}</div></div>`;
   bindComposer(sendNew); bindProj(); bindTpl(); paintTpl();
@@ -572,7 +609,6 @@ function renderTask() {
   const acts = [];
   acts.push(projBtn());
   if (["paused", "failed"].includes(t.status)) acts.push(`<button class="pri" data-act="resume">Tiếp tục</button>`);
-  if (!live) acts.push(`<button class="ghost icon" data-act="delete" title="Xóa task" aria-label="Xóa task">${I.trash}</button>`);
   const lastC = t.messages.map((m) => m.role).lastIndexOf("claude");
   const nSubs = t.messages.reduce((a, m) => a + (m.subtasks || []).length, 0);
   const body = t.messages.map((m, i) => {
@@ -581,7 +617,7 @@ function renderTask() {
     const n = (m.files || []).length;
     const fl = n ? `<button class="openf" data-act="open" data-dir="${esc(m.dir || "")}" title="${esc(m.dir || T.output)}">${I.folder}Open folder · ${n} file</button>` : "";
     const sv = i === lastC && t.status === "done" && nSubs >= 2
-      ? (t.tpl_saved ? `<button class="savet" disabled>${I.tpl}Đã lưu template</button>` : `<button class="savet" data-savet="1" title="Lưu quy trình này để dùng lại (gõ / ở ô Task mới)">${I.tpl}Save Template</button>`) : "";
+      ? (t.tpl_saved ? `<button class="savet" disabled>${I.tpl}Đã lưu template</button>` : `<button class="savet" data-savet="1">${I.tpl}Save Template</button>`) : "";
     return `<div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>`;
   }).join("");
   const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Claude chưa đăng nhập. Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>Đang chuẩn bị…</span></div>` : "";
@@ -616,6 +652,7 @@ function startRename() {
 }
 async function sendMore() {
   const text = $("txt").value.trim(); if (!text && !files.length) return $("txt").focus();
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   busy(true);
   try {
     const names = [];
@@ -647,7 +684,7 @@ document.addEventListener("click", async (e) => {
     if (d.act === "delete") { sel = ""; sessionStorage.removeItem("sel"); }
     T = null; lastSnap = ""; refresh();
   }
-  else if (d.savet) { const n = prompt("Tên template:", T.title); if (n === null) return; const r = await api("/api/template", { action: "save", task: T.id, name: n }); toast(r.error || "Đã lưu. Ở Task mới gõ / để dùng lại."); T = null; lastSnap = ""; await refresh(); }
+  else if (d.savet) { const n = prompt("Tên template:", T.title); if (n === null) return; const r = await api("/api/template", { action: "save", task: T.id, name: n }); toast(r.error || "Đã lưu template. Gõ / ở Task mới để dùng."); T = null; lastSnap = ""; await refresh(); }
   else if (d.bacc || d.brej) { const r = await api("/api/project", { action: d.bacc ? "accept" : "reject", id: T.project, task: T.id, idx: +(d.bacc || d.brej) }); if (r.error) toast(r.error); T = null; lastSnap = ""; await refresh(); }
   else if (d.untpl) { curTpl = ""; paintTpl(); if ($("txt")) $("txt").placeholder = PH_NEW; }
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
@@ -695,8 +732,14 @@ function renderSettings() {
       ${a.pending ? `<button data-cancel="${k}">Hủy</button>` : `<button class="${a.ok ? "" : "pri"}" data-login="${k}" data-switch="${a.ok ? 1 : ""}" ${a.installed ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button>`}</div>`).join("");
   $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI</span>${acc}</div>
     <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>`;
-  $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><button id="mLog" title="Lưu file log (.zip) vào thư mục kết quả">Export log</button><button id="mClr" title="Xóa bản nháp, ảnh/video trung gian và file trùng với thư mục kết quả. Không xóa lịch sử task.">Clear cache</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
+  $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><button class="icon" id="mBell" title="Thông báo" aria-label="Thông báo"><svg class="i" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button><button id="mLog" title="Lưu log (.zip) vào thư mục kết quả">Export log</button><button id="mClr" title="Xóa file nháp, file trùng. Giữ lịch sử.">Clear cache</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
   $("mClr").onclick = async () => { const b = $("mClr"); b.disabled = true; b.innerHTML = '<span class="spin"></span> Đang dọn…'; const r = await api("/api/clear-cache", {}); toast(r.error || r.msg); b.disabled = false; b.textContent = "Clear cache"; };
+  $("mBell").onclick = async () => {
+    if (!("Notification" in window)) return toast("Trình duyệt không hỗ trợ thông báo");
+    if (Notification.permission === "default") await Notification.requestPermission();
+    if (Notification.permission === "granted") { new Notification("Maestro", { body: "Thông báo đang bật", icon: "/icon.svg" }); toast("Đã gửi thông báo thử"); }
+    else toast("Thông báo đang bị chặn. Bật lại ở biểu tượng ổ khóa cạnh thanh địa chỉ.");
+  };
   $("mLog").onclick = async () => { const r = await api("/api/export-log", {}); toast(r.error || r.msg); };
   $("oPick").onclick = async () => { const r = await api("/api/pick", {}); if (r.path) { form.output = r.path; const s = await api("/api/setup", form); if (s.error) toast(s.error); else S.output = form.output; renderSettings(); } };
   $("mDone").onclick = () => { if (!S.output) return toast("Chọn thư mục nhận kết quả"); closeSettings(); };

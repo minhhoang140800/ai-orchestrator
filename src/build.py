@@ -32,6 +32,7 @@ ui = base64.b64encode((d / "ui.html").read_bytes()).decode()
 assert 'UI_B64 = ""' in app
 import os
 built = app.replace('UI_B64 = ""', f'UI_B64 = "{ui}"', 1)
+built = built.replace('ICO_B64 = ""', 'ICO_B64 = "' + base64.b64encode((d / "icon.ico").read_bytes()).decode() + '"', 1)
 import datetime
 ver = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d.%H%M") + "-" + hashlib.sha1(built.encode()).hexdigest()[:6]  # so sánh được theo thời gian
 repo = os.environ.get("AIO_REPO", "minhhoang140800/ai-orchestrator")          # owner/repo trên GitHub
