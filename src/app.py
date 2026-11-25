@@ -1708,6 +1708,24 @@ def ui_html():
     return (APP.parent / "ui.html").read_bytes()
 
 
+_prog = {}
+_exp = {"t": 0, "v": {}}
+
+
+def expected_secs(mode):
+    """Thời gian 1 lượt làm thường mất (trung vị các lượt đã xong cùng chế độ) để ước % tiến độ."""
+    if time.time() - _exp["t"] > 120:
+        by = {}
+        for x in TASKS.values():
+            for m in x.get("messages", []):
+                if m.get("role") == "work" and m.get("status") == "done" and m.get("ended_ts") and m.get("started_ts"):
+                    d = m["ended_ts"] - m["started_ts"]
+                    if 20 < d < 4 * 3600:
+                        by.setdefault(x.get("mode", "balanced"), []).append(d)
+        _exp.update(t=time.time(), v={k: sorted(v)[len(v) // 2] for k, v in by.items() if len(v) >= 2})
+    return max(60, _exp["v"].get(mode) or {"turbo": 240, "balanced": 420, "fast": 600, "saver": 600}.get(mode, 420))
+
+
 def task_detail(t):
     d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished", "mode")}
     if t.get("need_login") and t["status"] == "queued":
@@ -1735,9 +1753,20 @@ def task_detail(t):
         ws = cur.get("subtasks") or []                       # worker đã giao trong lượt này (status.json)
         wfin = sum(x.get("status") not in ("running",) for x in ws)
         tot = max(len(st), len(ws) + (1 if ws else 0))       # +1: bước Claude tổng hợp sau cùng
-        if tot:
-            cur["progress"] = min(99, round(100 * max(pfin, wfin) / tot))
-            cur["nsteps"] = tot
+        now_ = time.time()
+        el = now_ - cur.get("started_ts", now_)
+        # worker đang chạy: tính phần đã chạy so với thời gian thường gặp (ảnh ~2 phút, chữ ~1,5 phút)
+        part = sum(min(0.9, (now_ - x.get("ts", now_)) / (150 if x.get("worker") == "codex" else 100))
+                   for x in ws if x.get("status") == "running")
+        done_ = max(pfin, wfin + part)
+        struct = done_ / tot if tot else 0
+        timep = min(0.95, el / expected_secs(t.get("mode", "balanced")))   # ước theo thời gian các lượt trước
+        est = max(struct, timep * (0.85 if tot else 1))
+        key = (t["id"], cur.get("started_ts"))
+        est = max(est, _prog.get(key, 0))                     # không lùi
+        _prog[key] = est
+        cur["progress"] = max(1, min(99, round(100 * est)))
+        cur["nsteps"] = tot
         sd = wdir(t) / "stages"
         if sd.is_dir():
             cur["stages"] = [f.read_text("utf-8", "replace")[:6000] for f in sorted(sd.glob("*.md"),
