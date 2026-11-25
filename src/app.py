@@ -75,13 +75,14 @@ CPU, RAM_GB = machine()
 def machine_tier(cpu, ram):
     """Mức máy -> (số task chạy cùng lúc, worker song song mỗi task, chạy AI ưu tiên thấp?).
     AI chạy trên máy chủ của hãng; máy chủ yếu tốn RAM (~1–1,5 GB/Claude, 0,5–1 GB/worker) và CPU lúc ghép ảnh/chạy script."""
+    low = ram <= 8.5                         # chỉ máy 8 GB RAM trở xuống chạy AI ưu tiên thấp
     if cpu >= 16 and ram >= 30:
-        return 6, 3, False
+        return 6, 3, low
     if cpu >= 10 and ram >= 15:
-        return 4, 3, False
+        return 4, 3, low
     if cpu >= 6 and ram >= 11:
-        return 3, 2, True
-    return 1, 1, True
+        return 3, 2, low
+    return 1, 1, low
 
 
 MAX_RUNNING, MAX_WORKERS, LOW_PRIO = machine_tier(CPU, RAM_GB)
@@ -452,12 +453,16 @@ def finish_clean(t):
         t["brain_suggest"] = brain_suggest(t)
         tsave(t)
         w = wdir(t)
+        tl = w / "timeline.log"                 # nhật ký giờ từng bước: giữ lại trong lịch sử để đo chỗ chậm (Export log)
+        if w != tdir(t) and tl.is_file():
+            with open(tdir(t) / "timeline.log", "a", encoding="utf-8") as fo:
+                fo.write(tl.read_text("utf-8", "replace"))
         if w != tdir(t):
             shutil.rmtree(w, ignore_errors=True)
         else:                        # task cũ: chỉ giữ task.json, file đính kèm, CLAUDE.md
             for x in ("work", "tasks"):
                 shutil.rmtree(w / x, ignore_errors=True)
-            for x in ("run.log", "timeline.log", "question.md"):
+            for x in ("run.log", "question.md"):
                 (w / x).unlink(missing_ok=True)
     except Exception as e:
         dlog(f"finish_clean {t.get('id')}: {e}")
@@ -478,6 +483,15 @@ def work(t):
     if i is not None and i < len(t.get("messages", [])) and t["messages"][i]["role"] == "work":
         return t["messages"][i]
     return None
+
+
+def tl_mark(t, text):
+    """Mốc giờ chỉ ghi vào nhật ký (không hiện ở giao diện): bước vừa có kết quả / hết lượt — để đo thời gian từng phần."""
+    try:
+        with open(wdir(t) / "timeline.log", "a", encoding="utf-8") as f:
+            f.write(f"{now()}\t{text}\n")
+    except Exception:
+        pass
 
 
 def step(t, line):
@@ -592,14 +606,14 @@ def subtasks(t):
 MODE_RULES = {
     "code": "",          # Code mode có quy trình riêng (CODE_MD)
     "pro": """- Ưu tiên chất lượng và thời gian. Song song tối đa {n} worker cho phần độc lập.
-- Giám khảo chấm kỹ (được dùng model mạnh), tối đa 2 vòng sửa.""",
+- Giám khảo (khi Giám sát bật) được dùng model mạnh.""",
     "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song tối đa {n} worker cho phần độc lập; tuần tự khi phụ thuộc.
-- Giám khảo 1 lần ở cuối (model nhỏ), tối đa 1 vòng sửa.""",
+- Model nhỏ/nhanh cho việc đơn giản, mạnh cho việc khó.""",
     "turbo": """- TỐC ĐỘ TỐI ĐA: bắt tay làm ngay, kế hoạch vài dòng, không hỏi lại trừ khi thiếu dữ kiện bắt buộc. Song song tối đa {n} worker.
-- Không giám khảo, không mẫu thử trước lô, không vòng sửa: chỉ check kỹ thuật, sai thì sửa đúng chỗ; tự xem sản phẩm tối đa 1 lần.
+- Không mẫu thử trước lô; Giám sát tắt thì không vòng sửa: chỉ check kỹ thuật, sai thì sửa đúng chỗ; tự xem sản phẩm tối đa 1 lần.
 - Không làm thêm ngoài yêu cầu (không preview/ghép so sánh). Trả kết quả ngay khi đủ dùng; ghi rõ phần chưa kiểm tra kỹ.""",
     "eco": """- TIẾT KIỆM HẠN MỨC: tuần tự, 1 worker một lúc; việc tự làm được bằng lệnh/script thì không gọi AI.
-- Không giám khảo, tối đa 1 vòng sửa. Không làm thêm ngoài yêu cầu.""",
+- Giám sát tắt: tối đa 1 vòng sửa. Không làm thêm ngoài yêu cầu.""",
 }
 
 
@@ -607,6 +621,12 @@ MODE_RULES = {
 IMG_RE = re.compile(r"ảnh|hình|image|png|jpe?g|webp|keyframe|storyboard|asset|banner|icon|thumbnail|poster|sprite|"
                     r"art\b|artwork|vẽ|render|minh hoạ|minh họa|background|\bbg\b|logo|gif", re.I)
 EDIT_RE = re.compile(r"sửa|chỉnh|edit|cập nhật|thay|đổi tên|xóa|xoá|clear|\.xlsx|\.docx|\.pptx|\.csv|[A-Za-z]:\\|\\\\|/Users/", re.I)
+
+
+def judge_on(t):
+    """Nút Giám sát của task; chưa bấm thì theo chế độ (Pro, Balanced bật)."""
+    v = t.get("judge")
+    return bool(v) if v is not None else norm_mode(t.get("mode")) in ("pro", "balanced")
 
 
 def md_needs(t):
@@ -717,7 +737,8 @@ Tiêu chí đã dùng:
 {tp.get('criteria', '').strip() or '(không lưu)'}
 
 """) if tp else ""
-    judge = mode in ("pro", "balanced") and pm == "claude"   # giám khảo độc lập (Claude): chỉ Balanced trở lên
+    watch_on = judge_on(t)                    # nút Giám sát: giám khảo chấm, sửa tới khi đạt
+    judge = watch_on and pm == "claude"
     need = md_needs(t)
     mods = {k: f(py, app, pm) for k, f in MD_MODULES.items()}
     inline = "".join(mods[k] for k in mods if k in need)
@@ -748,8 +769,9 @@ sửa đúng phần lỗi, báo cáo. Task là cuộc trò chuyện nhiều lư�
 Việc nhỏ hoặc cần phán đoán: tự làm. Worker lỗi/không chạy: coi như không có. Giao việc: viết yêu cầu đủ ngữ cảnh vào
 tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy cuộc trò chuyện), rồi chạy:
   "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--edit <thư mục>] [--drive] [--timeout 900]
-  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>]
-  --write: Gemini được tạo file/ảnh. --edit / --drive: xem mục sửa file / Google Drive.
+  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>] [--hard]
+  --write: Gemini được tạo file/ảnh. --hard: việc khó (Balanced: Gemini lên mức high; giao lại vì lỗi cũng tự lên high).
+  --edit / --drive: xem mục sửa file / Google Drive.
 Kết quả: work/<ID>/vN/ (result.md, status.json, file worker tạo). Sửa lỗi: giao lại cùng --out. App tự chọn model — không truyền --model.
 
 ## Chia việc (Gemini nhanh, GPT chính xác hơn)
@@ -765,10 +787,12 @@ Kết quả: work/<ID>/vN/ (result.md, status.json, file worker tạo). Sửa l�
 
 ## Nghiệm thu
 - Worker "completed" chưa phải là xong: kiểm tra file thật. Đo được: "{py}" "{app}" check files|png ... (xem --help).
-- Task có sản phẩm: trước khi làm, viết tasks/criteria.md ngắn, kiểm chứng được (đánh dấu BẮT BUỘC); đổi yêu cầu -> cập nhật.
-- Chấm chất lượng: {"giám khảo độc lập 1 LẦN cho CẢ LÔ ở cuối (sau check kỹ thuật):" if judge else "KHÔNG gọi giám khảo — tự xem lại theo criteria.md 1 lần; lỗi nhỏ thẩm mỹ thì ghi chú cho người dùng."}
+{"- Giám sát bật + task có sản phẩm: trước khi làm, viết tasks/criteria.md ngắn, kiểm chứng được (đánh dấu BẮT BUỘC); đổi yêu cầu -> cập nhật." + chr(10) if watch_on else "- Giám sát tắt: không viết criteria.md; tự đối chiếu sản phẩm với đúng yêu cầu gốc." + chr(10)}- Chấm chất lượng: {("GIÁM SÁT BẬT — giám khảo độc lập chấm CẢ LÔ ở cuối (sau check kỹ thuật); fail -> sửa đúng lỗi nêu, chấm lại "
+  "file đã sửa, lặp tới khi ĐẠT (tối đa 4 vòng; vẫn fail thì báo rõ còn lỗi gì):") if judge else
+  ("GIÁM SÁT BẬT — không có giám khảo Claude: giao gemini soát theo criteria.md, sửa và soát lại tới khi đạt (tối đa 4 vòng).")
+  if watch_on else "Giám sát TẮT — không gọi giám khảo; tự xem lại theo yêu cầu 1 lần, lỗi nhỏ thẩm mỹ thì ghi chú cho người dùng."}
 {f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1 [--model haiku|sonnet]
-  Văn bản/task nhẹ: --model haiku. Giám khảo model nhỏ trừ Pro. Fail -> sửa đúng lỗi nêu, chỉ chấm lại file đã sửa.
+  Văn bản/task nhẹ: --model haiku. Giám khảo model nhỏ trừ Pro. Code: chạy test trước, giám khảo soát phần đã sửa.
 """ if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial.
 
 {inline}{extra_md}{brain_md}{tpl_md}## Chế độ: {mode_name}
@@ -776,11 +800,10 @@ Kết quả: work/<ID>/vN/ (result.md, status.json, file worker tạo). Sửa l�
 - Worker báo "limit": chuyển worker khác hoặc tự làm; không đảm bảo chất lượng thì hỏi người dùng.{" Bước QUÁ khó (đã thử không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if mode == 'pro' else ""}
 
 ## Ghi lại (để giao diện hiển thị)
-- tasks/plan.json: đủ các bước ngay từ đầu, cập nhật sau mỗi bước: goal, subtasks[id, title, worker, status(todo|running|done|failed)]
-  (giao diện tính % theo đó). Bị ngắt rồi chạy tiếp: đọc plan.json, bỏ bước đã xong.
-- tasks/decisions.json — khi người dùng góp ý/chốt điều gì, gom theo phần việc, sửa/gộp mục cũ thay vì thêm trùng:
+- Tiến độ: app tự tính từ các bước và worker — KHÔNG cần viết plan.json.
+- Người dùng góp ý hoặc chốt điều gì (chỉ khi đó): cập nhật tasks/decisions.json, gom theo phần việc, sửa/gộp mục cũ:
   [{{"group": "<phần việc>", "items": [{{"type": "feedback"|"decision", "text": "<1 câu>", "status": "open"|"done"}}]}}]
-  Đầu mỗi lượt đọc file này, theo đúng các quyết định đã chốt, không hỏi lại.
+  Có file này thì đọc đầu mỗi lượt, theo đúng các quyết định đã chốt, không hỏi lại.
 - Task nhiều phần: xong phần nào hữu ích thì ghi ngay vào ./stages/<số>.md (giao diện hiện cho người dùng đọc trong lúc làm).
 
 ## Khi cần người dùng quyết định
@@ -790,7 +813,8 @@ vào ./question.md rồi DỪNG. Còn lại tự quyết, ghi giả định.
 ## Kết thúc mỗi lượt
 Báo cáo, research, concept, so sánh: viết thẳng trong câu trả lời, KHÔNG tạo file .md/.txt. Chỉ tạo file khi sản phẩm vốn là file
 hoặc người dùng yêu cầu; lưu vào OUTPUT. Câu trả lời cuối ngắn: đạt/chưa đạt, điểm cần biết, việc người dùng cần làm.
-Không liệt kê lại từng file (giao diện có nút mở thư mục). Dùng được **đậm**, `code`, gạch đầu dòng.
+Không liệt kê lại từng file (giao diện có nút mở thư mục). KHÔNG kể quá trình/worker (ai làm, hết hạn mức, chuyển worker,
+số vòng) trừ khi ảnh hưởng tới kết quả người dùng nhận. Tập trung vào sản phẩm của task. Dùng được **đậm**, `code`, gạch đầu dòng.
 
 ## Cấm
 Không dùng API key. Không ghi mật khẩu/token vào file.
@@ -800,7 +824,7 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
         subprocess.run(["attrib", "+h", str(wdir(t))], creationflags=NO_WINDOW, capture_output=True)
     rules = learn_rules()
     learn_md = (("## Bài học chung của team (đã kiểm chứng, hợp với hầu hết loại task — áp dụng)\n"
-                 + "\n".join("- " + r for r in rules) + "\n\n") if rules else "") + LESSON_MD
+                 + "\n".join("- " + r for r in rules) + "\n\n") if rules else "")
     txt = txt.replace("\n## Cấm\n", "\n" + learn_md + "\n## Cấm\n", 1)
     if "codex" not in on:
         txt = "\n".join(x for x in txt.split("\n") if '" worker codex ' not in x)
@@ -819,14 +843,8 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
     f.write_text(txt, encoding="utf-8")
 
 
-LESSON_MD = f"""## Bài học cho team (khi task xong)
-Ghi ./lessons.json: {{"category": "<{'|'.join(CATEGORIES)}>", "lessons": ["<tối đa 3 câu>"]}} — điều giúp MỌI task sau
-nhanh/đúng hơn (chia việc, worker hợp việc gì, lỗi hay gặp, bước thừa). Không có gì mới: []. KHÔNG tên dự án/người, link, đường dẫn, số liệu riêng.
-"""
-
-
 FREE_RULES = """## Chế độ Free (người dùng không có tài khoản AI trả phí — áp dụng THAY mọi luật chế độ ở trên khi mâu thuẫn)
-- Hạn mức rất ít: làm tuần tự, 1 worker tại một thời điểm; không gọi giám khảo, không làm mẫu thử, tối đa 1 vòng sửa.
+- Hạn mức rất ít: làm tuần tự, 1 worker tại một thời điểm; không làm mẫu thử; Giám sát tắt thì tối đa 1 vòng sửa.
 - Ưu tiên giao Gemini (Antigravity hoặc API key) cho research, ý tưởng, viết; tự làm phần code/file bằng lệnh/script.
 - Worker báo "limit": chuyển ngay sang worker/cách khác còn dùng được, không chờ; hết cả thì trả phần đã xong + nói rõ phần còn thiếu.
 - Câu trả lời ngắn, đủ ý; không làm thêm ngoài yêu cầu.
@@ -870,10 +888,10 @@ def build_prompt(t, nxt):
             f'"{py_console()}" "{APP}" wait work/<ID> (không giao lại việc đó).')
     if kind == "urgent":
         return (f"Người dùng vừa gửi tin nhắn trong lúc bạn đang làm (bạn đã bị ngắt):\n\n{text}\n{fl}\n"
-                f"Đọc tasks/plan.json, điều chỉnh kế hoạch theo tin nhắn này rồi tiếp tục. Làm theo {md_name(t)}.{wait}")
+                f"Xem lại phần đã làm (work/*/status.json, file đã tạo), điều chỉnh theo tin nhắn này rồi tiếp tục. Làm theo {md_name(t)}.{wait}")
     if kind == "followup":
         return f"Tin nhắn mới của người dùng:\n\n{text}\n{fl}\nLàm theo {md_name(t)}."
-    return f"Task bị dừng giữa chừng. Đọc tasks/plan.json và chạy tiếp từ bước đang dở. Làm theo {md_name(t)}.{wait}"
+    return f"Task bị dừng giữa chừng. Xem lại phần đã làm (work/*/status.json, file đã tạo) và làm tiếp phần còn dở. Làm theo {md_name(t)}.{wait}"
 
 
 def gen_title(t):
@@ -1111,6 +1129,8 @@ def codex_event(t, ev, cx):
         tsave(t)
     elif typ == "item.started" and it.get("type") == "command_execution":
         step(t, summarize_tool({"name": "Bash", "input": {"command": str(it.get("command") or "")}}))
+    elif typ == "item.completed" and it.get("type") == "command_execution":
+        tl_mark(t, "(Claude suy nghĩ)")
     elif typ == "item.completed" and it.get("type") == "agent_message" and str(it.get("text") or "").strip():
         cx["last"] = str(it["text"]).strip()
         step(t, cx["last"].split("\n")[0])
@@ -1158,9 +1178,12 @@ def watch(t, p, nxt):
                         note_warn("claude", b["text"])
                 elif b.get("type") == "tool_use":
                     step(t, summarize_tool(b))
+        elif typ == "user":                 # kết quả công cụ đã về -> từ đây là Claude suy nghĩ/viết
+            tl_mark(t, "(Claude suy nghĩ)")
         elif typ == "result":
             result = ev
     err = p.stderr.read()
+    tl_mark(t, "(xong lượt)")
     if err.strip():
         raw.write("--- stderr ---\n" + err)
     raw.close()
@@ -1284,8 +1307,13 @@ def sched_tick():
         for t in queued:
             if running >= MAX_RUNNING:
                 break
-            if t.get("hold_until", 0) > time.time() or lm.get(t.get("pm") or pick_pm() or "claude"):
+            pm_ = t.get("pm") or pick_pm() or "claude"
+            if t.get("hold_until", 0) > time.time() or lm.get(pm_):
                 continue          # AI quản lý hết hạn mức: chờ tới giờ reset (mọi task cùng quản lý cùng chờ)
+            ub = usage_block(pm_)
+            if ub:                # gói đã dùng gần hết + "chỉ dùng trong gói": không chạy để không tràn sang credit
+                note_limit(pm_, f"in-plan limit, resets at |{ub}")
+                continue
             if t.pop("hold_until", None):
                 tsave(t)
             if not pm_ready(t):
@@ -1351,7 +1379,12 @@ def act(tid, action, text="", files=None, template=""):
         elif action == "mode" and (text == "code") != (t.get("kind") == "code"):
             return {"error": "Code mode cần thư mục dự án: tạo task mới ở chế độ Code" if text == "code"
                     else "Task Code chỉ chạy ở chế độ Code"}
+        elif action == "judge":
+            t["judge"] = text == "on"                  # Giám sát: áp dụng từ lượt chạy kế tiếp
+            if wdir(t).exists():
+                write_claude_md(t)
         elif action == "mode" and MODE_ALIAS.get(text, text) in MODES:
+            t["judge"] = norm_mode(text) in ("pro", "balanced")   # đổi chế độ: Pro/Balanced tự bật Giám sát
             t["mode"] = norm_mode(text)                           # áp dụng từ lượt chạy kế tiếp
             write_claude_md(t)
         elif action == "install" and s == "waiting" and t.get("install") and not t.get("installing"):
@@ -1429,10 +1462,34 @@ def scrub(text, n=300):
     return re.sub(r"\s+", " ", text).strip()[:n]
 
 
+def learn_extract(t):
+    """Rút bài học chung của 1 task xong bằng Claude Haiku (rẻ, nhanh, chạy ngầm) — Claude quản lý không phải tự ghi."""
+    exe = find_bin("claude")
+    if not exe or not claude_usable():
+        return {}
+    asks = [m.get("text", "")[:1200] for m in t.get("messages", []) if m.get("role") == "user"][:3]
+    ans = next((m.get("text", "") for m in reversed(t.get("messages", [])) if m.get("role") == "claude"), "")[:2000]
+    subs = "; ".join(f"{s_['worker']} {s_['status']} {s_.get('seconds') or '?'}s lần {s_['attempt']}" for s_ in subtasks(t))[:800]
+    prompt = (f"Task của một công cụ AI (Claude quản lý, giao việc cho ChatGPT/Gemini). Chế độ: {t.get('mode')}.\n"
+              f"Yêu cầu: {' | '.join(asks)}\nKết quả cuối: {ans}\nWorker: {subs or '(không)'}\n\n"
+              f"Trả về DUY NHẤT 1 JSON: {{\"category\": \"<1 trong: {', '.join(CATEGORIES)}>\", \"lessons\": [\"<tối đa 3 câu>\"]}}. "
+              "Bài học = điều giúp MỌI task sau nhanh/đúng hơn (chia việc, worker hợp việc gì, lỗi hay gặp, bước thừa). "
+              "Không có gì thật sự mới -> []. KHÔNG ghi tên dự án/game/người, link, đường dẫn, nội dung, số liệu riêng.")
+    try:
+        p = subprocess.run([exe, "-p", prompt, "--model", "haiku"], cwd=str(tdir(t)), stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, creationflags=NO_WINDOW)
+        out = p.stdout or ""
+        d = json.loads(out[out.index("{"):out.rindex("}") + 1])
+        return d if isinstance(d, dict) else {}
+    except Exception as e:
+        dlog(f"learn_extract {t.get('id')}: {e}")
+        return {}
+
+
 def learn_report(t):
     """Báo cáo ẩn danh của 1 task: loại việc, bài học (đã lọc), AI nào làm/bao lâu/đạt không. Không có nội dung task."""
     w = wdir(t)
-    les = rjson(w / "lessons.json", {}) or {}
+    les = rjson(w / "lessons.json", None) or learn_extract(t)
     les = les if isinstance(les, dict) else {"lessons": les if isinstance(les, list) else []}
     cat = str(les.get("category") or "khác").strip().lower()[:40]
     works = [m for m in t.get("messages", []) if m.get("role") == "work"]
@@ -1452,7 +1509,7 @@ def learn_queue(t):
         if t.get("learned"):
             return
         ends = [m.get("ended_ts") or 0 for m in t.get("messages", []) if m.get("role") == "work"]
-        if not (wdir(t) / "lessons.json").exists() and time.time() - max(ends or [0]) > 3600:
+        if time.time() - max(ends or [0]) > 3600:
             t["learned"] = True                # task cũ (trước khi có learning): không gửi lại
             return
         rep = learn_report(t)
@@ -1496,6 +1553,16 @@ def learn_send():
         CFG["learn_sent"] = int(CFG.get("learn_sent") or 0) + sent
         save_cfg()
     return sent
+
+
+def usage_loop():
+    while True:
+        time.sleep(120)
+        try:
+            if any(t["status"] in ("running", "queued") for t in list(TASKS.values())):
+                usage_refresh()
+        except Exception as e:
+            dlog(f"usage_loop: {e}")
 
 
 def learn_loop():
@@ -1637,7 +1704,7 @@ def template_api(d):
     return {"error": "bad request"}
 
 
-def new_task(text, mode="balanced", project="", template="", kind="", pdir=""):
+def new_task(text, mode="balanced", project="", template="", kind="", pdir="", judge=None):
     if not text.strip():
         return {"error": "Chưa nhập yêu cầu"}
     kind = "code" if norm_mode(mode) == "code" or kind == "code" else ""
@@ -1654,6 +1721,8 @@ def new_task(text, mode="balanced", project="", template="", kind="", pdir=""):
          "mode": norm_mode(mode), "w2": True}
     if kind == "code":
         t.update(kind="code", pdir=str(Path(pdir).expanduser()) if pdir else "")
+    if judge is not None:
+        t["judge"] = bool(judge)
     if project and any(p["id"] == project for p in projects()):
         t["project"] = project
     tp = next((x for x in templates() if x["id"] == template), None)
@@ -2214,6 +2283,7 @@ def pm_limit(t):
 def task_detail(t):
     d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished", "mode", "kind", "pdir", "installing")}
     d["can_restore"] = bool(t.get("checkpoints"))
+    d["judge"] = judge_on(t)
     if t.get("need_login") and t["status"] == "queued":
         d["status"] = "login"
     if t["status"] == "queued" and (t.get("hold_until", 0) > time.time() or pm_limit(t)):
@@ -2237,10 +2307,16 @@ def task_detail(t):
             pl = {}                                          # kế hoạch của lượt trước -> bỏ qua
         st = [str(x.get("status", "")).lower().strip() for x in (pl.get("subtasks") or []) if isinstance(x, dict)]
         tot = len(st)
-        if tot:                                              # có kế hoạch: % = số bước xong / tổng bước
+        timep = min(0.95, (time.time() - cur.get("started_ts", time.time())) / expected_secs(t.get("mode", "balanced")))
+        ws = cur.get("subtasks") or []                       # app tự tính: worker đã xong / (worker + 1 bước tổng hợp)
+        if tot:                                              # task cũ còn plan.json
             est = sum(x in ("done", "completed", "failed", "skipped", "partial") for x in st) / tot
-        else:                                                # chưa có kế hoạch: ước theo thời gian các lượt trước
-            est = min(0.95, (time.time() - cur.get("started_ts", time.time())) / expected_secs(t.get("mode", "balanced")))
+        elif ws:
+            wfin = sum(x.get("status") != "running" for x in ws)
+            est = max(0.9 * wfin / (len(ws) + 1), timep * 0.85)
+            tot = len(ws) + 1
+        else:
+            est = timep
         key = (t["id"], cur.get("started_ts"))
         est = max(est, _prog.get(key, 0))                     # không lùi
         _prog[key] = est
@@ -2423,6 +2499,11 @@ class H(BaseHTTPRequestHandler):
             return export_log()
         if path == "/api/ai/refresh":
             return refresh_status()
+        if path == "/api/usage":
+            if d.get("ai") in ("claude", "codex") and "in_plan" in d:
+                CFG.setdefault("in_plan", {})[d["ai"]] = bool(d["in_plan"])
+                save_cfg()
+            return usage_state(force=bool(d.get("force")))
         if path == "/api/memory":
             CFG["instructions"] = str(d.get("instructions") or "")[:20000]
             save_cfg()
@@ -2453,7 +2534,7 @@ class H(BaseHTTPRequestHandler):
             return {"ok": True}
         if path == "/api/task/new":
             return new_task(d.get("text", ""), d.get("mode", "balanced"), d.get("project", ""), d.get("template", ""),
-                            d.get("kind", ""), d.get("pdir", ""))
+                            d.get("kind", ""), d.get("pdir", ""), d.get("judge"))
         if path == "/api/ofile":
             return ofile_act(d)
         if path == "/api/project":
@@ -2642,6 +2723,32 @@ def quit_app():
     os._exit(0)
 
 
+def timing_summary(lines):
+    """Cộng thời gian theo loại bước từ nhật ký giờ (khoảng cách tới bước kế tiếp trong cùng lượt, tối đa 30 phút/bước)."""
+    rows = []
+    for x in lines:
+        p = x.split("\t", 1)
+        try:
+            rows.append((datetime.datetime.strptime(p[0], "%Y-%m-%d %H:%M:%S").timestamp(), p[1] if len(p) > 1 else ""))
+        except Exception:
+            pass
+    rows.sort()
+    by = {}
+    for (t0, a), (t1, _) in zip(rows, rows[1:]):
+        if 0 <= t1 - t0 <= 1800 and a != "(xong lượt)":
+            k = ("Giao worker + chờ" if a.startswith("Giao ") else "Chạy lệnh" if a.startswith("Chạy") else
+                 "Đọc/tìm file" if a.startswith(("Đọc", "Tìm", "Xem")) else "Ghi/sửa file" if a.startswith(("Ghi", "Sửa")) else
+                 "Kiểm tra" if a.startswith("Kiểm tra") else "Sub-agent" if a.startswith("Sub-agent") else
+                 "Web" if "web" in a.lower() else "Claude suy nghĩ/viết")
+            n, sec = by.get(k, (0, 0))
+            by[k] = (n + 1, sec + t1 - t0)
+    if not by:
+        return []
+    tot = sum(v[1] for v in by.values()) or 1
+    return ["  Thời gian theo loại bước: " + "; ".join(f"{k} {int(v[1]) // 60}m{int(v[1]) % 60:02d}s ({v[0]} bước, {round(100 * v[1] / tot)}%)"
+                                                      for k, v in sorted(by.items(), key=lambda kv: -kv[1][1])), ""]
+
+
 def export_log():
     """Gom log của mọi task vào 1 file zip trong thư mục kết quả (không kèm file đầu vào/đầu ra)."""
     import zipfile
@@ -2669,7 +2776,11 @@ def export_log():
                 else:
                     lines.append(f"- {m.get('time', '')}  CLAUDE ({m.get('kind') or 'trả lời'}): {m['text'][:200].replace(chr(10), ' ')}")
             lines.append("")
-            for f in [tdir(t) / "task.json", d / "timeline.log", d / "run.log", d / "tasks" / "plan.json", d / "CLAUDE.md"]:
+            tls = [f for f in dict.fromkeys([tdir(t) / "timeline.log", d / "timeline.log"]) if f.is_file()]
+            for f in tls:
+                z.write(f, f"{t['id']}/{'timeline.log' if f.parent == tdir(t) else 'timeline_dang_lam.log'}")
+            lines += timing_summary([x for f in tls for x in f.read_text("utf-8", "replace").splitlines()])
+            for f in [tdir(t) / "task.json", d / "run.log", d / "CLAUDE.md", d / "AGENTS.md"]:
                 if f.is_file():
                     z.write(f, f"{t['id']}/{f.name}")
             for f in list((d / "tasks").glob("*.md")) + [x for x in (d / "work").glob("*/v*/*")
@@ -2935,6 +3046,7 @@ def serve(background=False):
     threading.Thread(target=check_startup, daemon=True).start()
     threading.Thread(target=ensure_libs, daemon=True).start()
     threading.Thread(target=learn_loop, daemon=True).start()
+    threading.Thread(target=usage_loop, daemon=True).start()
     threading.Thread(target=check_update, daemon=True).start()
     if not background and not os.environ.get("AIO_NO_BROWSER"):
         webbrowser.open(url)
@@ -3029,7 +3141,7 @@ def api_worker(st, v, key, text, a):
     t0, log, limited, err, m = time.time(), [], False, "", ""
     try:
         models = models or gemini_api_models(key)
-        hard = os.environ.get("AIO_HARD") == "1"
+        hard = os.environ.get("AIO_HARD") == "1" or (os.environ.get("AIO_MODE") == "balanced" and (a.hard or v.name != "v1"))
         for m in api_order([x for x in models if x not in bad_models("gemini_api")], hard)[:5]:
             body = {"contents": [{"role": "user", "parts": parts}], "tools": [{"google_search": {}}]}
             code, j = gemini_api_call(key, f"/v1beta/models/{m}:generateContent", body, a.timeout)
@@ -3298,7 +3410,7 @@ Task này là một cuộc trò chuyện nhiều lượt.
 
 ## Quy trình code
 1. Hiểu: tìm đúng file liên quan (Grep/Glob), đọc phần cần đọc; không đọc tràn lan.
-2. Kế hoạch ngắn trong tasks/plan.json (việc nhỏ thì làm luôn).
+2. Việc lớn: nghĩ kế hoạch ngắn trước (không cần ghi file); việc nhỏ thì làm luôn.
 3. Sửa: thay đổi nhỏ nhất đúng yêu cầu, giữ phong cách code sẵn có, không "cải thiện" phần không được nhờ.
 4. CHẠY THỬ: chạy build/test/lint có sẵn của dự án; không có test thì chạy chương trình hoặc đoạn kiểm tra ngắn.
    Giao diện web: chạy server local, chụp màn hình bằng trình duyệt có sẵn
@@ -3386,8 +3498,12 @@ def cmd_worker(argv):
     if edit and not bad_edit:
         st["edit_dir"] = str(edit)
         st["backup"] = backup_dir(edit, v / "_backup")
+    ub = usage_block(a.worker, fresh=a.worker == "codex") if not use_api else 0
     if bad_edit:
         st.update(status="failed", error=bad_edit)
+    elif ub:
+        st.update(status="limit", reset=ub, error=("Gói đã dùng gần hết — Maestro không chạy để không dùng credit (bật 'Chỉ dùng trong gói'); "
+                                                   "dùng lại lúc " + datetime.datetime.fromtimestamp(ub).strftime("%H:%M %d/%m")))
     elif not task.exists():
         st.update(status="failed", error=f"Không thấy {task}")
     elif not exe and not use_api:
@@ -3422,7 +3538,8 @@ def cmd_worker(argv):
             cwd = edit or v                 # Codex chỉ được ghi trong thư mục làm việc của nó (sandbox)
         else:
             md_ = os.environ.get("AIO_MODE", "balanced")
-            hard_ = os.environ.get("AIO_HARD") == "1"   # chỉ Pro + bước quá khó (effort.txt); Balanced không tự lên high
+            # Balanced: medium; lên high khi Claude đánh dấu việc khó (--hard) hoặc giao lại vì lỗi (v2+). Pro: bước quá khó.
+            hard_ = os.environ.get("AIO_HARD") == "1" or (md_ == "balanced" and (a.hard or v.name != "v1"))
             gm, _ = pick_model("gemini", md_, hard_)
             inp = inp_
             gtext = (f"{text}\n\n---\nFile đầu vào (chỉ đọc): {inp}. " + (edit_note or
@@ -3551,6 +3668,210 @@ def note_limit(ai, text):
 def limits():
     d = rjson(DATA / "limits.json", {}) or {}
     return {k: v for k, v in d.items() if isinstance(v, dict) and v.get("until", 0) > time.time()}
+
+
+# ---------------------------------------------------------------- mức dùng (usage) + chỉ dùng trong gói (không dùng credit)
+USAGE_F = DATA / "usage.json"
+IN_PLAN_LEFT = 2.0          # còn <= 2% của cửa sổ 5 giờ hoặc tuần -> coi như hết, không chạy (để không tràn sang credit)
+
+
+def _pct_left(used):
+    try:
+        return max(0.0, min(100.0, 100.0 - float(used)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _ts(v):
+    """Thời điểm reset: số giây epoch / mili giây / chuỗi ISO -> epoch giây (None nếu không đọc được)."""
+    if v in (None, ""):
+        return None
+    try:
+        f = float(v)
+        return int(f / 1000) if f > 1e11 else int(f)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return int(datetime.datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp())
+    except Exception:
+        return None
+
+
+def _find_key(o, key, depth=0):
+    if depth > 6:
+        return None
+    if isinstance(o, dict):
+        if key in o:
+            return o[key]
+        for v in o.values():
+            r = _find_key(v, key, depth + 1)
+            if r is not None:
+                return r
+    elif isinstance(o, list):
+        for v in o:
+            r = _find_key(v, key, depth + 1)
+            if r is not None:
+                return r
+    return None
+
+
+def codex_usage():
+    """Mức dùng ChatGPT/Codex: Codex tự lưu trong file phiên trên máy (sự kiện có 'rate_limits', như lệnh /status) — không tốn lượt."""
+    home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "sessions"
+    if not home.is_dir():
+        return {"known": False, "note": "Chưa có dữ liệu (chưa chạy ChatGPT lần nào)"}
+    files = sorted(home.rglob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)[:8]
+    for f in files:
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(max(0, f.stat().st_size - 400_000))
+                tail = fh.read().decode("utf-8", "replace").splitlines()
+        except Exception:
+            continue
+        for line in reversed(tail):
+            if "rate_limits" not in line:
+                continue
+            try:
+                rl = _find_key(json.loads(line), "rate_limits")
+            except Exception:
+                continue
+            if not isinstance(rl, dict):
+                continue
+            at = f.stat().st_mtime
+            out = {"known": True, "at": int(at), "plan": str(rl.get("plan_type") or "")}
+            for k, name in (("primary", "five_hour"), ("secondary", "week")):
+                w = rl.get(k) or {}
+                if isinstance(w, dict) and w.get("used_percent") is not None:
+                    rs = _ts(w.get("resets_at")) or (int(at + float(w["resets_in_seconds"])) if w.get("resets_in_seconds") is not None else None)
+                    out[name] = {"left": _pct_left(w.get("used_percent")), "resets_at": rs, "minutes": w.get("window_minutes")}
+            cr = rl.get("credits") or {}
+            if isinstance(cr, dict):
+                out["credits"] = {"has": bool(cr.get("has_credits")), "unlimited": bool(cr.get("unlimited")), "balance": cr.get("balance")}
+            for name in ("five_hour", "week"):      # số đã cũ mà qua giờ reset -> coi như đầy lại
+                w = out.get(name)
+                if w and w.get("resets_at") and w["resets_at"] < time.time():
+                    w.update(left=100.0, stale=True)
+            return out
+    return {"known": False, "note": "Chưa có dữ liệu mức dùng (chạy ChatGPT 1 lần để có)"}
+
+
+def claude_token():
+    """Token đăng nhập Claude Code trên máy (chỉ dùng để hỏi mức dùng của chính tài khoản, gửi tới Anthropic; không lưu lại)."""
+    try:
+        if IS_MAC:
+            r = subprocess.run(["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                               capture_output=True, text=True, timeout=10)
+            d = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else {}
+        else:
+            d = rjson(Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / ".credentials.json", {}) or {}
+        return str((d.get("claudeAiOauth") or {}).get("accessToken") or "")
+    except Exception:
+        return ""
+
+
+def claude_usage():
+    """Mức dùng Claude (5 giờ / tuần / extra usage) — cùng kênh lệnh /usage của Claude Code dùng. Kênh nội bộ: có thể đổi."""
+    import urllib.error
+    import urllib.request
+    tok = claude_token()
+    if not tok:
+        return {"known": False, "note": "Không đọc được đăng nhập Claude trên máy"}
+    req = urllib.request.Request(os.environ.get("AIO_CLAUDE_USAGE") or "https://api.anthropic.com/api/oauth/usage",
+                                 headers={"Authorization": "Bearer " + tok, "anthropic-beta": "oauth-2025-04-20",
+                                          "User-Agent": "maestro", "Accept": "application/json"})
+    try:
+        d = json.loads(urllib.request.urlopen(req, timeout=15).read() or b"{}")
+    except urllib.error.HTTPError as e:
+        return {"known": False, "note": f"Claude chưa trả mức dùng (HTTP {e.code}) — chạy 1 task Claude rồi thử lại"}
+    except Exception as e:
+        return {"known": False, "note": f"Không kết nối được: {e}"[:120]}
+    out = {"known": True, "at": int(time.time())}
+    for k, name in (("five_hour", "five_hour"), ("seven_day", "week"), ("seven_day_opus", "week_opus")):
+        w = d.get(k)
+        if isinstance(w, dict) and w.get("utilization") is not None:
+            out[name] = {"left": _pct_left(w.get("utilization")), "resets_at": _ts(w.get("resets_at"))}
+    ex = d.get("extra_usage")
+    if isinstance(ex, dict):
+        out["credits"] = {"has": bool(ex.get("is_enabled")), "used": ex.get("used_credits"), "limit": ex.get("monthly_limit")}
+    return out if len(out) > 2 else {"known": False, "note": "Claude trả dữ liệu không đọc được"}
+
+
+_usage_lock = threading.Lock()
+
+
+def usage_refresh(force=False, only=None):
+    """Đọc lại mức dùng (Claude: tối đa 1 lần/2 phút; ChatGPT: đọc file trên máy) -> data/usage.json (worker đọc chung)."""
+    with _usage_lock:
+        d = rjson(USAGE_F, {}) or {}
+        for ai, fn, ttl in (("codex", codex_usage, 20), ("claude", claude_usage, 120)):
+            if only and ai not in only:
+                continue
+            if force or time.time() - (d.get(ai) or {}).get("checked", 0) > ttl:
+                try:
+                    v = fn()
+                except Exception as e:
+                    v = {"known": False, "note": str(e)[:120]}
+                v["checked"] = int(time.time())
+                d[ai] = v
+        try:
+            wjson(USAGE_F, d)
+        except Exception:
+            pass
+        return d
+
+
+def in_plan_only(ai):
+    c = (CFG or rjson(CFG_FILE, {}) or {}).get("in_plan") or {}
+    return c.get(ai, True) is not False
+
+
+def usage_block(ai, fresh=False):
+    """Đã dùng gần hết gói (cửa sổ 5 giờ hoặc tuần) và đang bật 'chỉ dùng trong gói' -> giờ dùng lại được (epoch), không thì 0."""
+    if ai not in ("claude", "codex") or not in_plan_only(ai):
+        return 0
+    u = (usage_refresh(force=True, only=[ai]) if fresh else (rjson(USAGE_F, {}) or {})).get(ai) or {}
+    if not u.get("known"):
+        return 0
+    worst = 0
+    for name in ("five_hour", "week"):
+        w = u.get(name) or {}
+        if w.get("left") is not None and w["left"] <= IN_PLAN_LEFT and not w.get("stale"):
+            worst = max(worst, w.get("resets_at") or int(time.time() + 1800))
+    return worst if worst > time.time() else 0
+
+
+def usage_counts():
+    """App tự đếm: số lượt / phút của mỗi AI hôm nay và 7 ngày qua (từ lịch sử task trên máy)."""
+    now_ = time.time()
+    day0 = datetime.datetime.combine(datetime.date.today(), datetime.time()).timestamp()
+    out = {k: {ai: {"runs": 0, "mins": 0} for ai in ("claude", "codex", "gemini")} for k in ("today", "week")}
+    for t in list(TASKS.values()):
+        pm = t.get("pm") or "claude"
+        for m in t.get("messages", []):
+            if m.get("role") != "work" or not m.get("started_ts"):
+                continue
+            items = [(pm, (m.get("ended_ts") or now_) - m["started_ts"], m["started_ts"])]
+            items += [(x.get("worker"), x.get("seconds") or 0, x.get("ts") or m["started_ts"]) for x in m.get("subs") or []
+                      if x.get("worker") in ("codex", "gemini")]
+            for ai, sec, ts in items:
+                for k, since in (("today", day0), ("week", now_ - 7 * 86400)):
+                    if ts >= since and ai in out[k]:
+                        out[k][ai]["runs"] += 1
+                        out[k][ai]["mins"] += max(0, sec) / 60
+    for k in out:
+        for ai in out[k]:
+            out[k][ai]["mins"] = round(out[k][ai]["mins"])
+    return out
+
+
+def usage_state(force=False):
+    d = usage_refresh(force=force)
+    lm = limits()
+    return {"claude": d.get("claude") or {}, "codex": d.get("codex") or {},
+            "gemini": {"known": False, "note": "Gemini chưa cho đọc mức dùng — chỉ biết khi hết lượt",
+                       **({"limit_until": lm["gemini"]["until"]} if "gemini" in lm else {})},
+            "plans": {k: CFG["ais"].get(k, {}).get("plan", "") for k in ("claude", "codex")},
+            "in_plan": {k: in_plan_only(k) for k in ("claude", "codex")}, "counts": usage_counts()}
 
 
 # ---------------------------------------------------------------- model theo chế độ (người dùng chốt; app tự hạ khi sắp/đã hết hạn mức)

@@ -112,6 +112,18 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .accrow small.bad{color:var(--bad)}
 .kchip{display:inline-block;padding:1px 7px;border:1px solid var(--line);border-radius:6px;font-size:12px;color:var(--mute);margin-right:6px}
 .inst{margin-top:8px;font-size:13px}.inst li{margin:2px 0}
+.wbtn{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;margin-right:8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--mute);font:inherit;font-size:13px;cursor:pointer;position:relative}
+.wbtn:hover{color:var(--ink,#222)}.wbtn.on{background:var(--ink,#222);border-color:var(--ink,#222);color:#fff}
+.wbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;top:calc(100% + 6px);right:0;white-space:nowrap;background:#222;color:#fff;font-size:12px;padding:5px 8px;border-radius:6px;z-index:30;pointer-events:none}
+.umenu{position:fixed;left:12px;bottom:56px;width:340px;padding:12px;z-index:40}
+.umenu .uh{font-size:12px;color:var(--mute);margin:0 0 8px}.umenu .ua{border-top:1px solid var(--line);padding:9px 0 7px}
+.umenu .ua:first-of-type{border-top:0;padding-top:2px}.umenu .un{display:flex;align-items:center;gap:6px;font-weight:600;font-size:13px;margin-bottom:4px}
+.umenu .ur{display:flex;justify-content:space-between;font-size:13px;padding:2px 0}.umenu .ur span:last-child{color:var(--mute)}
+.umenu .ur.low span:last-child{color:var(--bad);font-weight:600}.umenu .bar2{height:4px;background:#eee;border-radius:3px;margin:1px 0 4px;overflow:hidden}
+.umenu .bar2 i{display:block;height:100%;background:var(--ink,#222)}.umenu .ur.low+.bar2 i{background:var(--bad)}
+.umenu .note{font-size:12px;color:var(--mute)}.umenu .uf{display:flex;gap:8px;align-items:center;margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
+.umenu label.sw{font-size:12px;color:var(--mute);display:flex;gap:6px;align-items:center;margin-top:3px;cursor:pointer}
+.umenu a{font-size:12px;color:var(--mute)}
 .plan{display:inline-block;margin-left:6px;padding:0 6px;border:1px solid var(--line);border-radius:6px;font-size:11px;color:var(--mute);font-weight:500}
 .freebar{margin:0 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fafaf9;font-size:13px;color:var(--mute);display:flex;gap:10px;align-items:center}
 .freebar b{color:var(--ink,#222)}.freebar .grow{flex:1}
@@ -271,6 +283,7 @@ main.withact .scroll,main.withact .compwrap,main.withact #decbar{margin-right:32
     <div class="foot">
       <div class="ais" id="aiDots"></div>
       <div class="fbtns"><button class="ghost" id="btnSet" aria-label="Cài đặt"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Cài đặt</button><span style="flex:1"></span>
+      <button class="ghost icon" id="btnUse" title="Mức dùng của các gói AI" aria-label="Mức dùng"><svg class="i" viewBox="0 0 24 24"><path d="M4.5 16.5a8 8 0 1 1 15 0"/><path d="M12 13.5l3.5-4"/><circle cx="12" cy="14" r="1.3"/></svg></button>
       <button class="ghost icon" id="btnOut" title="Mở thư mục kết quả" aria-label="Mở thư mục kết quả"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button></div>
     </div>
   </aside>
@@ -307,6 +320,7 @@ main.withact .scroll,main.withact .compwrap,main.withact #decbar{margin-right:32
 </div>
 <div class="pop smenu" id="cMenu" role="menu" style="position:fixed"><button data-co="open">Mở</button><button data-co="reveal">Mở vị trí file</button><button data-co="copy">Copy ảnh</button><button data-co="path">Copy đường dẫn</button></div>
 <input type="file" id="fileIn" multiple hidden>
+<div class="pop umenu" id="uMenu" role="dialog" aria-label="Mức dùng"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -654,8 +668,8 @@ function bindComposer(onSend) {
     $("modeMenu").classList.remove("show"); if (b.dataset.mode === curMode) return;
     if (c.id !== "homeComp" && b.dataset.mode === "code") return toast("Code mode cần thư mục dự án: tạo task mới ở chế độ Code");
     curMode = b.dataset.mode; paintMode();
-    if (c.id === "homeComp") { localStorage.setItem("mode", curMode); paintKind(); }
-    else { const r = await api("/api/task/act", { id: T.id, action: "mode", text: curMode }); toast(r.error || "Đã đổi chế độ"); kick(); }
+    if (c.id === "homeComp") { localStorage.setItem("mode", curMode); lsSet("judge", ["pro", "balanced"].includes(curMode) ? "1" : "0"); paintKind(); repaintWatch(); }
+    else { const r = await api("/api/task/act", { id: T.id, action: "mode", text: curMode }); toast(r.error || "Đã đổi chế độ"); if (!r.error) { T.judge = ["pro", "balanced"].includes(curMode); repaintWatch(); } kick(); }
   };
   ta.addEventListener("input", sendIcon);
   let lastChk = 0;      // kiểm tra đăng nhập chỉ khi đang soạn prompt (tối đa 1 lần/phút)
@@ -715,6 +729,13 @@ let curTpl = "", pEdit = "";
 const homeProj = () => { const v = localStorage.getItem("proj") || ""; return S.projects.some((p) => p.id === v) ? v : ""; };
 const curProj = () => (T && $("taskComp") ? T.project || "" : homeProj());
 function whenTxt(c) { const d = new Date(String(c).replace(" ", "T")); if (isNaN(d)) return c || ""; const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5); return days <= 0 ? "Hôm nay" : days === 1 ? "Hôm qua" : `${days} ngày trước`; }
+const WHISTLE = '<svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="15" r="5"/><path d="M12.6 11.4 21 8v4.2l-6.6 1.4"/><path d="M4 5.5l1.6 1.6M8.5 3.5v2.3M2 9.5h2.3"/></svg>';
+function homeJudge() { const v = lsGet("judge"); return v ? v === "1" : ["pro", "balanced"].includes(normMode(lsGet("mode"))); }
+function watchBtn() {       // nút Giám sát: giám khảo chấm, sửa tới khi đạt (Pro/Balanced tự bật khi đổi chế độ)
+  const on = T && $("taskComp") ? !!T.judge : homeJudge();
+  return `<button class="wbtn ${on ? "on" : ""}" id="wBtn" data-watch="1" aria-pressed="${on}" data-tip="Giám sát ${on ? "đang bật" : "đang tắt"}: lâu hơn nhưng sẽ check đến khi hoàn thiện">${WHISTLE}Giám sát</button>`;
+}
+function repaintWatch() { const b = $("wBtn"); if (b) b.outerHTML = watchBtn(); }
 function projBtn() { const p = S.projects.find((x) => x.id === curProj()); return `<button class="pbtn" id="pBtn" aria-haspopup="true" title="Dự án và bộ nhớ dự án">${I.proj}${p ? esc(p.name) : "Project"}${I.down}</button>`; }
 function bindProj() { const b = $("pBtn"); if (b) b.onclick = (e) => { e.stopPropagation(); const m = $("pMenu"); if (m.classList.contains("show")) return m.classList.remove("show"); pEdit = curProj(); openProj(b); }; }
 async function openProj(b) {
@@ -731,7 +752,7 @@ async function openProj(b) {
       <div class="row"><button class="ghost" id="pDel" style="color:var(--bad)">Xóa dự án</button><span style="flex:1"></span><button class="pri" id="pSave">Lưu</button></div></div>` : ""}`;
   $("pAdd").onclick = async (e) => { e.stopPropagation(); const n = $("pNew").value.trim(); if (!n) return $("pNew").focus(); if (e.currentTarget.disabled) return; e.currentTarget.disabled = true; const r2 = await api("/api/project", { action: "create", name: n, task: T && $("taskComp") ? T.id : "" }); if (r2.error) return toast(r2.error); if (!(T && $("taskComp"))) localStorage.setItem("proj", r2.id); else T.project = r2.id; await refresh(); pEdit = r2.id; repaintProj(); openProj($("pBtn")); };
   $("pNew").onkeydown = (e) => { if (e.key === "Enter") $("pAdd").click(); };
-  if ($("pSave")) $("pSave").onclick = async (e) => { e.stopPropagation(); const r2 = await api("/api/project", { action: "save", id: pEdit, brain: $("pBrain").value }); toast(r2.error || "Đã lưu"); };
+  if ($("pSave")) $("pSave").onclick = async (e) => { e.stopPropagation(); const r2 = await api("/api/project", { action: "save", id: pEdit, brain: $("pBrain").value }); toast(r2.error || "Đã lưu bộ nhớ dự án"); if (!r2.error) m.classList.remove("show"); };
   if ($("pDel")) $("pDel").onclick = async (e) => { e.stopPropagation(); if (!confirm("Xóa dự án này? Task và file vẫn giữ.")) return; await api("/api/project", { action: "delete", id: pEdit }); m.classList.remove("show"); await refresh(); repaintProj(); };
 }
 function repaintProj() { const b = $("pBtn"); if (b) { b.outerHTML = projBtn(); bindProj(); } }
@@ -740,7 +761,7 @@ $("pMenu").onclick = async (e) => {
   const id = b.dataset.pick;
   if (T && $("taskComp")) { const r = await api("/api/project", { action: "assign", task: T.id, id }); if (r.error) return toast(r.error); T.project = id; }
   else localStorage.setItem("proj", id);
-  pEdit = id; repaintProj(); if (id) openProj($("pBtn")); else $("pMenu").classList.remove("show");
+  pEdit = id; repaintProj(); $("pMenu").classList.remove("show");      // chọn xong đóng menu (bấm lại nút Dự án để sửa bộ nhớ)
 };
 document.addEventListener("click", (e) => { if (!e.target.closest("#pMenu")) $("pMenu").classList.remove("show"); if (!e.target.closest("#tplMenu")) $("tplMenu")?.classList.remove("show"); });
 function paintTpl() {   // mẫu đang chọn hiện như 1 chip trong ô nhập
@@ -773,7 +794,7 @@ function freeBar() {        // gói miễn phí: ChatGPT làm quản lý, mời 
 function renderHome() {
   T = null; lastSnap = "";
   const rec = S.tasks.slice(0, 5);
-  $("main").innerHTML = `<div class="crumb"><span>Workspace / Task mới</span><span class="grow"></span>${projBtn()}</div>
+  $("main").innerHTML = `<div class="crumb"><span>Workspace / Task mới</span><span class="grow"></span>${watchBtn()}${projBtn()}</div>
     <div class="home"><div class="in"><h2>Hôm nay làm gì?</h2>
     ${freeBar()}${composer("homeComp", PH_NEW)}
     ${rec.length ? `<div class="recent"><div class="k">Task gần đây</div>${rec.map((t) => `<button data-sel="${t.id}"><span>${esc(t.title)}</span><small>${esc(whenTxt(t.created))}</small></button>`).join("")}</div>` : ""}</div></div>`;
@@ -785,7 +806,7 @@ async function sendNew() {
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   busy(true);
   try {
-    const r = await api("/api/task/new", { text, mode: curMode, project: homeProj(), template: curTpl }); if (r.error) throw new Error(r.error);
+    const r = await api("/api/task/new", { text, mode: curMode, project: homeProj(), template: curTpl, judge: homeJudge() }); if (r.error) throw new Error(r.error);
     const names = [];
     for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(r.id, f)); }
     const s = await api("/api/task/submit", { id: r.id, files: names }); if (s.error) throw new Error(s.error);
@@ -857,6 +878,7 @@ function renderTask() {
   const sc0 = document.querySelector(".scroll"), wasBottom = !sc0 || sc0.scrollHeight - sc0.scrollTop - sc0.clientHeight < 80;
   const acts = [];
   acts.push(`<button class="ghost icon ${actOpen ? "on" : ""}" id="bAct" title="Activity" aria-label="Activity"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></button>`);
+  acts.push(watchBtn());
   acts.push(projBtn());
   if (["paused", "failed"].includes(t.status)) acts.push(`<button class="pri" data-act="resume">Tiếp tục</button>`);
   if (t.kind === "code") acts.unshift(`<span class="kchip" title="${esc(t.pdir || "")}">${I.code} Code</span>`);
@@ -926,7 +948,7 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec],[data-opset],[data-paste],[data-fb]");
+  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec],[data-opset],[data-paste],[data-fb],[data-watch]");
   if (!el) return;
   const d = el.dataset;
   if (d.libtab) { libTab = d.libtab; return renderLib(); }
@@ -959,6 +981,11 @@ document.addEventListener("click", async (e) => {
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
   else if (d.relogin) { await api("/api/ai/cancel", { ai: "claude" }); setTimeout(() => api("/api/ai/login", { ai: "claude" }), 1500); }
   else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; el.innerHTML = '<span class="spin"></span>'; const r = await api("/api/ai/code", { ai: d.code, code: v }); if (r.error) toast(r.error); setTimeout(() => { if (el.isConnected) { el.disabled = false; el.textContent = "Gửi"; toast("Mã chưa được chấp nhận — thử lại hoặc bấm Hủy rồi Đăng nhập lại"); } }, 12000); }
+  else if (d.watch) {
+    if (T && $("taskComp")) { const on = !T.judge; const r = await api("/api/task/act", { id: T.id, action: "judge", text: on ? "on" : "off" }); if (r.error) return toast(r.error); T.judge = on; toast(on ? "Đã bật Giám sát (áp dụng từ lượt làm tiếp theo)" : "Đã tắt Giám sát"); }
+    else { lsSet("judge", homeJudge() ? "0" : "1"); }
+    repaintWatch();
+  }
   else if (d.opset) openSettings();
   else if (d.fb) { e.preventDefault(); fb[d.fb] = 1; renderSettings(); }
   else if (d.paste) { try { const v = (await navigator.clipboard.readText()).trim(); if (v) { $("code_" + d.paste).value = v; document.querySelector(`[data-code=${d.paste}]`)?.click(); } } catch (e) { toast("Trình duyệt chặn đọc bộ nhớ tạm — bấm chuột phải vào ô rồi chọn Dán"); } }
@@ -968,6 +995,37 @@ document.addEventListener("click", async (e) => {
 $("btnLib").onclick = () => openLib();
 $("btnNew").onclick = () => { view = ""; sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
 $("btnSet").onclick = () => openSettings();
+/* ---------------- mức dùng (góc dưới thanh bên, kiểu ChatGPT) ---------------- */
+const MANAGE = { claude: "https://claude.ai/settings/usage", codex: "https://chatgpt.com/codex/settings/usage" };
+function leftRow(name, w) {
+  if (!w || w.left == null) return "";
+  const left = Math.round(w.left), rs = w.resets_at ? Math.max(0, w.resets_at - Date.now() / 1000) : null;
+  const when = rs == null ? "" : rs < 3600 ? ` · reset ${Math.ceil(rs / 60)}m` : rs < 86400 ? ` · reset ${Math.floor(rs / 3600)}h${String(Math.round(rs % 3600 / 60)).padStart(2, "0")}m` : ` · reset ${new Date(w.resets_at * 1000).toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit" })}`;
+  return `<div class="ur ${left <= 10 ? "low" : ""}"><span>${name}</span><span>còn ${left}%${when}</span></div><div class="bar2"><i style="width:${left}%"></i></div>`;
+}
+async function openUsage(force) {
+  const m = $("uMenu"); m.classList.add("show");
+  if (!m.innerHTML) m.innerHTML = `<div class="note"><span class="spin"></span> Đang kiểm tra…</div>`;
+  const u = await api("/api/usage", { force: !!force }); if (u.error) { m.innerHTML = `<div class="note">${esc(u.error)}</div>`; return; }
+  const plan = (k) => (u.plans || {})[k] ? planTxt(u.plans[k]) : "";
+  const cnt = (k) => { const c = u.counts || {}; const d = (c.today || {})[k] || {}, w = (c.week || {})[k] || {}; return `<div class="note">Maestro đã dùng: hôm nay ${d.runs || 0} lượt · ${d.mins || 0} phút · 7 ngày ${w.runs || 0} lượt</div>`; };
+  const block = (k, name) => {
+    const a = u[k] || {};
+    const cr = a.credits ? (k === "claude" ? `<div class="ur"><span>Extra usage</span><span>${a.credits.has ? "đang bật" : "tắt"}</span></div>` : `<div class="ur"><span>Credits</span><span>${a.credits.unlimited ? "không giới hạn" : (a.credits.balance ?? 0) + " credits"}</span></div>`) : "";
+    const body = a.known ? leftRow("Giới hạn 5 giờ", a.five_hour) + leftRow("Giới hạn tuần", a.week) + cr : `<div class="note">${esc(a.note || "Chưa có dữ liệu")}</div>`;
+    const lim = a.limit_until ? `<div class="ur low"><span>Hết lượt</span><span>dùng lại ${new Date(a.limit_until * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</span></div>` : "";
+    const sw = k in (u.in_plan || {}) ? `<label class="sw"><input type="checkbox" data-inplan="${k}" ${u.in_plan[k] ? "checked" : ""}> Chỉ dùng trong gói (không dùng credit)</label>` : "";
+    return `<div class="ua"><div class="un">${esc(name)}${plan(k)}<span style="flex:1"></span>${MANAGE[k] ? `<a href="${MANAGE[k]}" target="_blank" rel="noopener">Quản lý ↗</a>` : ""}</div>${body}${lim}${cnt(k)}${sw}</div>`;
+  };
+  m.innerHTML = `<div class="uh">Mức dùng gói AI · cập nhật ${new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</div>
+    ${block("claude", "Claude")}${block("codex", "ChatGPT / Codex")}${block("gemini", "Gemini")}
+    <div class="uf"><button id="uRef">${I.refresh} Kiểm tra lại</button><span style="flex:1"></span><small class="note">Gói gần hết → Maestro dừng AI đó tới giờ reset</small></div>`;
+  $("uRef").onclick = (e) => { e.stopPropagation(); $("uRef").innerHTML = '<span class="spin"></span> Đang kiểm tra…'; openUsage(true); };
+  m.querySelectorAll("[data-inplan]").forEach((c) => c.onchange = async () => { await api("/api/usage", { ai: c.dataset.inplan, in_plan: c.checked }); toast(c.checked ? "Chỉ dùng trong gói: bật" : "Đã tắt — khi hết gói, AI này có thể dùng credit/extra usage nếu tài khoản cho phép"); });
+}
+$("btnUse").onclick = (e) => { e.stopPropagation(); const m = $("uMenu"); if (m.classList.contains("show")) return m.classList.remove("show"); openUsage(false); };
+$("uMenu").onclick = (e) => e.stopPropagation();
+document.addEventListener("click", () => $("uMenu").classList.remove("show"));
 $("btnOut").onclick = () => (S.output ? api("/api/open-output", {}) : openSettings());
 /* ---------------- settings ---------------- */
 function openSettings() { form = { output: S.output }; renderSettings(); $("ov").classList.add("show"); api("/api/ai/refresh", {}); kick(); }
@@ -1024,9 +1082,8 @@ function renderSettings() {
   $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI${st.free ? ` <span class="plan">Chế độ Free</span>` : st.pm === "codex" ? ` <span class="plan">ChatGPT làm quản lý</span>` : ""}</span>${acc}</div>${gkBox}
     <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>
     <div class="f"><span class="k">Memory</span>
-      <small style="display:block;color:var(--mute);font-size:12px;margin-bottom:6px">Ghi nhớ của bạn — áp dụng cho mọi task (cách xưng hô, phong cách, quy tắc riêng).</small>
-      <textarea id="memTxt" rows="4" style="width:100%;box-sizing:border-box" placeholder="Vd: Xưng hô tôi – bạn. Trả lời ngắn, tiếng Việt.">${esc(S.instructions || "")}</textarea>
-      <div class="row" style="margin-top:6px"><span style="flex:1;color:var(--mute);font-size:12px" id="memInfo">${(() => { const L = S.learn || {}; return `Bài học chung của team: <b>${(L.rules || []).length}</b> đang áp dụng · Maestro tự gửi bài học về team (không gửi dữ liệu riêng)${L.sent ? ` · đã gửi ${L.sent}` : ""}${L.pending ? ` · chờ gửi ${L.pending}` : ""}`; })()}</span></div>
+      <textarea id="memTxt" rows="4" style="width:100%;box-sizing:border-box" placeholder="Ghi nhớ cho mọi task — vd: Xưng hô tôi – bạn. Trả lời ngắn, tiếng Việt.">${esc(S.instructions || "")}</textarea>
+
       ${(S.learn?.rules || []).length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--mute)">Xem bài học chung</summary><ul style="font-size:12px;color:var(--mute);margin:6px 0 0 16px">${S.learn.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></details>` : ""}</div>
     <div class="f"><span class="k">Ứng dụng</span><div class="row"><label class="sw"><input type="checkbox" id="oAuto" ${S.autostart ? "checked" : ""}><span>Mở Maestro khi đăng nhập máy</span></label><span style="flex:1"></span><button id="oQuit" title="Tắt hẳn Maestro. Task đang chạy sẽ tự chạy tiếp khi mở lại.">Thoát Maestro</button></div></div>`;
   $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><button class="icon" id="mBell" title="Thông báo" aria-label="Thông báo"><svg class="i" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button><button id="mLog" title="Lưu log (.zip) vào thư mục kết quả">Export log</button><button id="mClr" title="Xóa file nháp, file trùng. Giữ lịch sử.">Clear cache</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
