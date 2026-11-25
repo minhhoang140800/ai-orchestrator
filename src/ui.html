@@ -226,6 +226,7 @@ main{position:relative}
 .mdt{overflow-x:auto;margin:8px 0}.mdt table{border-collapse:collapse;font-size:13px;width:100%}.mdt th,.mdt td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
 .mdt th{background:var(--soft);font-weight:600}
 .dec .dx{margin-right:6px;font-size:16px;line-height:1;color:var(--mute);width:28px;height:28px;padding:0}.dec .dx:hover{color:var(--ink)}
+.sw{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px}.sw input{width:16px;height:16px;accent-color:#202020}
 .smenu{min-width:160px}.smenu button{align-items:center;font-size:13px}
 .claude.stage{margin-top:12px;color:var(--ink)}.claude.stage .txt{border-left:2px solid var(--line);padding-left:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -339,6 +340,7 @@ function ftype(n) { const e = n.split(".").pop().toLowerCase(); return { csv: "S
 
 /* ---------------- state ---------------- */
 async function refresh() {
+  if (window.QUIT) return;
   try { S = await api("/api/state"); } catch { return; }
   for (const t of S.tasks) {
     const p = prev[t.id];
@@ -796,7 +798,8 @@ function renderSettings() {
   const acc = Object.entries(S.ais).map(([k, a]) => `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${accState(k, a)}</span>
       ${a.pending ? `<button data-cancel="${k}">Hủy</button>` : `<button class="${a.ok ? "" : "pri"}" data-login="${k}" data-switch="${a.ok ? 1 : ""}" ${a.installed ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button>`}</div>`).join("");
   $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI</span>${acc}</div>
-    <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>`;
+    <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>
+    <div class="f"><span class="k">Ứng dụng</span><div class="row"><label class="sw"><input type="checkbox" id="oAuto" ${S.autostart ? "checked" : ""}><span>Mở Maestro khi đăng nhập máy</span></label><span style="flex:1"></span><button id="oQuit" title="Tắt hẳn Maestro. Task đang chạy sẽ tự chạy tiếp khi mở lại.">Thoát Maestro</button></div></div>`;
   $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><button class="icon" id="mBell" title="Thông báo" aria-label="Thông báo"><svg class="i" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button><button id="mLog" title="Lưu log (.zip) vào thư mục kết quả">Export log</button><button id="mClr" title="Xóa file nháp, file trùng. Giữ lịch sử.">Clear cache</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
   $("mClr").onclick = async () => { const b = $("mClr"); b.disabled = true; b.innerHTML = '<span class="spin"></span> Đang dọn…'; const r = await api("/api/clear-cache", {}); toast(r.error || r.msg); b.disabled = false; b.textContent = "Clear cache"; };
   $("mBell").onclick = async () => {
@@ -804,6 +807,13 @@ function renderSettings() {
     if (Notification.permission === "default") await Notification.requestPermission();
     if (Notification.permission === "granted") { new Notification("Maestro", { body: "Thông báo đang bật", icon: "/icon.svg" }); toast("Đã gửi thông báo thử"); }
     else toast("Thông báo đang bị chặn. Bật lại ở biểu tượng ổ khóa cạnh thanh địa chỉ.");
+  };
+  $("oAuto").onchange = async (e) => { const r = await api("/api/autostart", { on: e.target.checked }); toast(r.error || (e.target.checked ? "Sẽ tự mở khi đăng nhập máy" : "Đã tắt tự mở khi đăng nhập máy")); S.autostart = e.target.checked; };
+  $("oQuit").onclick = async () => {
+    const run = S.tasks.filter((t) => t.status === "running").length;
+    if (!confirm(run ? `Thoát Maestro? ${run} task đang chạy sẽ dừng và tự chạy tiếp khi mở lại.` : "Thoát Maestro?")) return;
+    await api("/api/quit", {}); closeSettings(); window.QUIT = true;
+    document.body.innerHTML = `<div style="display:grid;place-items:center;height:100vh;font:15px system-ui;color:#555;text-align:center">Đã thoát Maestro.<br>Mở lại từ ${S.os === "mac" ? "Launchpad / Applications" : "Start Menu"} (Maestro).</div>`;
   };
   $("mLog").onclick = async () => { const r = await api("/api/export-log", {}); toast(r.error || r.msg); };
   $("oPick").onclick = async () => { const r = await api("/api/pick", {}); if (r.path) { form.output = r.path; const s = await api("/api/setup", form); if (s.error) toast(s.error); else S.output = form.output; renderSettings(); } };

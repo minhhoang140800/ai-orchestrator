@@ -44,6 +44,7 @@ def app_url(port=None):
     port = port or PORT
     return f"http://{HOSTNAME}{'' if port == 80 else ':' + str(port)}/"
 IS_WIN = os.name == "nt"
+IS_MAC = sys.platform == "darwin"
 NO_WINDOW = 0x08000000 if IS_WIN else 0
 def machine():
     """Số luồng CPU và RAM (GB) của máy."""
@@ -190,6 +191,9 @@ def open_path(p, select=""):
             return
         except Exception:
             pass
+    if IS_MAC:                            # Finder: mở và đưa lên trên cùng; select -> chọn sẵn file
+        subprocess.Popen(["open", "-R", select] if select else ["open", p])
+        return
     if IS_WIN:
         os.startfile(p)  # noqa
     elif shutil.which("xdg-open"):
@@ -199,6 +203,13 @@ def open_path(p, select=""):
 def refresh_path():
     """Lấy PATH mới nhất từ registry (CLI vừa cài xong vẫn tìm thấy) + tìm Node.js ở các nơi hay cài
     (Program Files, nvm, volta, fnm, scoop...) để Codex (chạy bằng node) luôn chạy được."""
+    if IS_MAC:     # app mở từ Launchpad/đăng nhập máy có PATH rất ngắn -> thêm chỗ Homebrew, npm, Claude, agy hay cài
+        h = str(Path.home())
+        extra = ["/opt/homebrew/bin", "/usr/local/bin", h + "/.local/bin", h + "/.npm-global/bin", h + "/.agy/bin",
+                 h + "/.local/share/agy/bin", "/opt/homebrew/opt/node/bin"]
+        cur = os.environ.get("PATH", "").split(":")
+        os.environ["PATH"] = ":".join([x for x in extra if os.path.isdir(x) and x not in cur] + cur)
+        return
     if not IS_WIN:
         return
     import glob
@@ -297,6 +308,13 @@ def save_cfg():
 
 
 def pick_folder():
+    if IS_MAC:     # tkinter không chạy được ngoài luồng chính trên Mac -> dùng hộp thoại của macOS
+        try:
+            r = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "Chọn thư mục nhận kết quả")'],
+                               capture_output=True, text=True, timeout=600)
+            return r.stdout.strip().rstrip("/") if r.returncode == 0 else ""
+        except Exception:
+            return ""
     try:
         import tkinter
         from tkinter import filedialog
@@ -318,6 +336,8 @@ def drives():
     if IS_WIN:
         import string
         return [f"{c}:\\" for c in string.ascii_uppercase[2:] if os.path.isdir(f"{c}:\\")]
+    if IS_MAC:
+        return [str(Path.home())] + [str(p) for p in Path("/Volumes").glob("*") if p.is_dir() and not p.is_symlink()]
     return [str(Path.home())]
 
 
@@ -1832,7 +1852,7 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"ais": ai_state(), "output": CFG["output"],
                                    "projects": [{"id": p["id"], "name": p["name"]} for p in projects()],
                                    "templates": [{"id": x["id"], "name": x["name"], "steps": len(x.get("steps", []))} for x in templates()], "instructions": CFG["instructions"],
-                                   "tasks": ts, "version": VERSION, "release": RELEASE, "updated": upd, "update_fail": fail,
+                                   "tasks": ts, "version": VERSION, "release": RELEASE, "autostart": autostart_on(), "os": "mac" if IS_MAC else "win" if IS_WIN else "other", "updated": upd, "update_fail": fail,
                                    "machine": {"cpu": CPU, "ram": RAM_GB, "max": MAX_RUNNING}})
         if u.path == "/api/registry":
             return self.send(200, registry(force=q.get("force", [""])[0] == "1"))
@@ -1889,6 +1909,11 @@ class H(BaseHTTPRequestHandler):
             if busy_tasks():
                 return {"error": "Đang có task chạy. Dọn cache sau khi task xong."}
             return clear_cache()
+        if path == "/api/autostart":
+            return set_autostart(bool(d.get("on")))
+        if path == "/api/quit":
+            threading.Thread(target=lambda: (time.sleep(0.4), quit_app()), daemon=True).start()
+            return {"ok": True}
         if path == "/api/export-log":
             return export_log()
         if path == "/api/ai/refresh":
@@ -2105,6 +2130,59 @@ def clear_cache():
         pass
     mb = freed / 1048576
     return {"ok": True, "msg": f"Đã dọn {mb:.0f} MB" if mb >= 1 else "Không có gì cần dọn"}
+
+
+MAC_AGENT = Path.home() / "Library" / "LaunchAgents" / "com.maestro.app.plist"
+
+
+def autostart_on():
+    if IS_MAC:
+        return MAC_AGENT.exists()
+    if IS_WIN:
+        return (Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup/Maestro.lnk").exists()
+    return False
+
+
+def set_autostart(on):
+    """Bật/tắt: tự chạy nền khi đăng nhập máy (task dở tự chạy tiếp)."""
+    boot_py = HOME / "app.py"
+    if IS_MAC:
+        if on:
+            MAC_AGENT.parent.mkdir(parents=True, exist_ok=True)
+            MAC_AGENT.write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>com.maestro.app</string>
+<key>ProgramArguments</key><array><string>{sys.executable}</string><string>{boot_py}</string><string>--background</string></array>
+<key>RunAtLoad</key><true/>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>{os.environ.get("PATH", "")}</string></dict>
+<key>StandardOutPath</key><string>{DATA / "launchd.log"}</string><key>StandardErrorPath</key><string>{DATA / "launchd.log"}</string>
+</dict></plist>
+""", encoding="utf-8")
+        else:
+            subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/com.maestro.app"], capture_output=True)
+            MAC_AGENT.unlink(missing_ok=True)
+        return {"ok": True}
+    if IS_WIN:
+        lnk = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup/Maestro.lnk"
+        if on:
+            pyw = Path(sys.executable).with_name("pythonw.exe")
+            ps = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');$s.TargetPath='{pyw if pyw.exists() else sys.executable}';"
+                  f"$s.Arguments='\"{boot_py}\" --background';$s.WorkingDirectory='{HOME}';$s.IconLocation='{HOME / 'icon.ico'}';$s.Save()")
+            _run_hidden(["powershell", "-NoProfile", "-Command", ps], 30)
+        else:
+            lnk.unlink(missing_ok=True)
+        return {"ok": True}
+    return {"error": "Chưa hỗ trợ trên hệ điều hành này"}
+
+
+def quit_app():
+    """Thoát Maestro: task đang chạy giữ trạng thái để lần mở sau tự chạy tiếp."""
+    for t in [t for t in TASKS.values() if t["status"] == "running"]:
+        t["_quit"] = True
+        kill_tree(PROCS.get(t["id"]))
+    time.sleep(1.5)
+    os._exit(0)
 
 
 def export_log():

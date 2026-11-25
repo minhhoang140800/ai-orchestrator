@@ -93,3 +93,20 @@ for old in (d / "dist").glob("*.bat"):
 out = d / "dist" / f"Maestro_v{rel}.bat"
 out.write_bytes(bat.replace("\r\n", "\n").replace("\n", "\r\n").encode("ascii"))
 print(out, out.stat().st_size, ver)
+
+# ---- bản Mac: Maestro_setup.command (đóng zip để giữ quyền chạy khi tải về)
+import zipfile
+sh = (d / "install_mac.tpl.sh").read_text(encoding="utf-8")
+sh = (sh.replace("__APP_B64__", base64.b64encode(built.encode("utf-8")).decode())
+        .replace("__PNG_B64__", base64.b64encode((d / "icon1024.png").read_bytes()).decode())
+        .replace("__VER__", ver).replace("__REL__", "v" + rel))
+cmdf = d / "dist" / "Maestro_setup.command"
+cmdf.write_bytes(sh.encode("utf-8"))
+os.chmod(cmdf, 0o755)
+zp = d / "dist" / "Maestro_mac.zip"
+with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+    zi = zipfile.ZipInfo("Maestro_setup.command")
+    zi.external_attr = (0o100755 & 0xFFFF) << 16
+    zi.compress_type = zipfile.ZIP_DEFLATED
+    z.writestr(zi, sh.encode("utf-8"))
+print(zp, zp.stat().st_size)
