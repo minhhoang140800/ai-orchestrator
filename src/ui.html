@@ -31,7 +31,7 @@ aside{background:var(--side);border-right:1px solid var(--line);display:flex;fle
 .titem:hover{background:rgba(0,0,0,.04)}.titem.on{background:var(--panel);box-shadow:0 0 0 1px var(--line)}
 .titem span.t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sd{width:8px;height:8px;border-radius:50%;flex:none;background:#c4c1b6}
-.sd.running,.sd.queued{background:var(--run)}.sd.waiting{background:var(--wait)}.sd.done{background:var(--ok)}.sd.failed{background:var(--bad)}
+.sd.running,.sd.queued{background:var(--run)}.sd.waiting{background:var(--wait)}.sd.done{background:var(--ok)}.sd.failed,.sd.limit{background:var(--bad)}
 .sd.running{animation:pulse 1.4s ease-in-out infinite}@keyframes pulse{50%{opacity:.35}}
 .foot{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:8px 10px;border-top:1px solid var(--line)}
 .ais{flex:1 1 100%;display:flex;gap:12px;font-size:12px;color:var(--mute);white-space:nowrap;padding:2px 4px 4px}
@@ -225,6 +225,7 @@ main.drop::after{content:"Thả file vào đây";position:absolute;inset:8px;bor
 main{position:relative}
 .mdt{overflow-x:auto;margin:8px 0}.mdt table{border-collapse:collapse;font-size:13px;width:100%}.mdt th,.mdt td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
 .mdt th{background:var(--soft);font-weight:600}
+.dec .dx{margin-right:6px;font-size:16px;line-height:1;color:var(--mute);width:28px;height:28px;padding:0}.dec .dx:hover{color:var(--ink)}
 .smenu{min-width:160px}.smenu button{align-items:center;font-size:13px}
 .claude.stage{margin-top:12px;color:var(--ink)}.claude.stage .txt{border-left:2px solid var(--line);padding-left:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -341,7 +342,7 @@ async function refresh() {
   try { S = await api("/api/state"); } catch { return; }
   for (const t of S.tasks) {
     const p = prev[t.id];
-    if (p && p !== t.status && ["waiting", "done"].includes(t.status)) notify(t.title, t.status === "waiting" ? "Cần bạn trả lời" : "Đã xong");
+    if (p && p !== t.status && ["waiting", "done", "limit"].includes(t.status)) notify(t.title, t.status === "waiting" ? "Cần bạn trả lời" : t.status === "limit" ? "Claude hết hạn mức, sẽ tự chạy tiếp" : "Đã xong");
     prev[t.id] = t.status;
   }
   $("ver").textContent = S.release && S.release !== "dev" ? "v" + S.release : "";
@@ -378,7 +379,9 @@ async function loadTask() {
 document.addEventListener("selectionchange", () => { if (pendingRender && !selecting() && T && !renaming) { pendingRender = false; lastSnap = JSON.stringify({ ...T, _now: undefined }); renderTask(); } });
 
 /* ---------------- sidebar ---------------- */
-function aiDot(a) { return a.pending ? "pend" : a.ok ? "ok" : a.ok === false ? "bad" : ""; }
+function aiDot(a) { return a.pending ? "pend" : a.limit_until ? "bad" : a.ok ? "ok" : a.ok === false ? "bad" : ""; }
+const hhmm = (ts) => { const d = new Date(ts * 1000); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+const limTxt = (a) => a.limit_until ? `Hết hạn mức · Reset vào ${hhmm(a.limit_until)}${a.limit_known === false ? " (ước tính)" : ""}` : "";
 let sMenuFor = "";
 async function taskAct(id, action, text) { const r = await api("/api/task/act", { id, action, text }); if (r.error) toast(r.error); return r; }
 $("sMenu").onclick = async (e) => {
@@ -433,7 +436,7 @@ function renderSide() {
   const ls = [...S.tasks.filter((t) => t.pinned), ...S.tasks.filter((t) => !t.pinned)];
   $("tlist").innerHTML = ls.length ? ls.map((t) => `<div class="titem ${t.id === sel ? "on" : ""} ${sMenuFor === t.id ? "menu" : ""}" data-sel="${t.id}" title="${esc(ST[t.status])}" role="button" tabindex="0"><span class="sd ${t.status}"></span><span class="t">${esc(t.title)}</span>${t.pinned ? `<span class="pin">${I.pin}</span>` : ""}<button class="tmore" data-more="${t.id}" aria-label="Tùy chọn">${I.more}</button></div>`).join("")
     : `<div class="hint" style="padding:6px 10px">Chưa có task</div>`;
-  $("aiDots").innerHTML = Object.entries(S.ais).map(([k, a]) => `<span><span class="dot ${aiDot(a)}"></span>${AIN[k]}</span>`).join("");
+  $("aiDots").innerHTML = Object.entries(S.ais).map(([k, a]) => `<span title="${esc(limTxt(a))}"><span class="dot ${aiDot(a)}"></span>${AIN[k]}</span>`).join("");
 }
 
 /* ---------------- composer ---------------- */
@@ -653,7 +656,8 @@ function decHtml(t) {
 function decHtml0(t) {
   const gs = (t.decisions || []).filter((g) => g.items.length); if (!gs.length) return "";
   const n = gs.reduce((s, g) => s + g.items.length, 0), open = gs.reduce((s, g) => s + g.items.filter((i) => i.type !== "decision" && i.status !== "done").length, 0);
-  return `<div class="dec"><button data-dec="1" class="whead ${decOpen ? "open" : ""}" style="color:var(--ink)">Feedback &amp; quyết định · ${n}${open ? ` · ${open} đang xử lý` : ""}${I.chev}</button>
+  const key = "dechide:" + t.id; if (+(localStorage.getItem(key) || -1) === n) return "";   // đã tắt (hiện lại khi có mục mới)
+  return `<div class="dec"><div class="row" style="gap:0"><button data-dec="1" class="whead ${decOpen ? "open" : ""}" style="color:var(--ink);flex:1">Feedback &amp; quyết định · ${n}${open ? ` · ${open} đang xử lý` : ""}${I.chev}</button><button class="ghost icon dx" data-dechide="${n}" title="Ẩn" aria-label="Ẩn">×</button></div>
     ${decOpen ? gs.map((g) => `<div class="g"><b>${esc(g.group)}</b>${g.items.map((i) => `<div class="it ${i.type !== "decision" && i.status === "done" ? "done" : ""}"><span class="tag ${i.type === "decision" ? "decision" : "feedback"}">${i.type === "decision" ? "Đã chốt" : i.status === "done" ? "Đã sửa" : "Góp ý"}</span><span>${esc(i.text)}</span></div>`).join("")}</div>`).join("") : ""}</div>`;
 }
 function renderTask() {
@@ -684,7 +688,7 @@ function renderTask() {
     $("taskComp").dataset.t = t.id;
     bindComposer(sendMore); curTpl = ""; bindTpl();
   }
-  $("thead").innerHTML = `<span class="pill ${t.status}">${ST[t.status]}</span>
+  $("thead").innerHTML = `<span class="pill ${t.status}" title="${t.hold_until ? "Tự chạy tiếp lúc " + hhmm(t.hold_until) : ""}">${ST[t.status]}${t.hold_until ? " · " + hhmm(t.hold_until) : ""}</span>
       <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1><button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
       <span class="grow"></span>${acts.join("")}`;
   $("decbar").innerHTML = decHtml(t);
@@ -723,7 +727,7 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec]");
+  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec]");
   if (!el) return;
   const d = el.dataset;
   if (d.libtab) { libTab = d.libtab; return renderLib(); }
@@ -740,6 +744,7 @@ document.addEventListener("click", async (e) => {
     if (d.act === "delete") { sel = ""; sessionStorage.removeItem("sel"); }
     T = null; lastSnap = ""; refresh();
   }
+  else if (d.dechide) { localStorage.setItem("dechide:" + T.id, d.dechide); $("decbar").innerHTML = decHtml(T); }
   else if (d.savet) { const n = prompt("Tên template:", T.title); if (n === null) return; const r = await api("/api/template", { action: "save", task: T.id, name: n }); toast(r.error || "Đã lưu template. Gõ / ở Task mới để dùng."); T = null; lastSnap = ""; await refresh(); }
   else if (d.bacc || d.brej) { const r = await api("/api/project", { action: d.bacc ? "accept" : "reject", id: T.project, task: T.id, idx: +(d.bacc || d.brej) }); if (r.error) toast(r.error); T = null; lastSnap = ""; await refresh(); }
   else if (d.untpl) { curTpl = ""; paintTpl(); if ($("txt")) $("txt").placeholder = $("homeComp") ? PH_NEW : PH_MORE; }
@@ -777,6 +782,7 @@ function autoLogin() {      // tự mở lần lượt trang đăng nhập của
   tried.add(next[0]); S.ais[next[0]].pending = "login"; api("/api/ai/login", { ai: next[0] });
 }
 function accState(k, a) {
+  if (a.limit_until && !a.pending) return `<small class="bad">${esc(limTxt(a))}</small>`;
   if (!a.installed) return `<small class="bad">Chưa cài — bấm đúp lại file cài Maestro (.bat)</small>`;
   if (a.window === "logout") return `<small>Trong cửa sổ Gemini: gõ <b>/logout</b>, đăng nhập tài khoản mới trên trình duyệt, rồi đóng cửa sổ.</small>`;
   if (a.code && k === "claude") return `<small>1. Trong cửa sổ đăng nhập bấm <b>Authorize</b> → copy mã hiện ra${a.url ? ` (<a href="${esc(a.url)}" target="aio_login">mở lại</a>)` : ""}. 2. Dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Dán mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`;

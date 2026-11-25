@@ -726,7 +726,7 @@ def start_run(t):
     try:
         proc = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-                                env=dict(os.environ, AIO_INPUT=str(tdir(t) / "input")),
+                                env=dict(os.environ, AIO_INPUT=str(tdir(t) / "input"), AIO_MODE=t.get("mode", "balanced")),
                                 creationflags=NO_WINDOW | BELOW_NORMAL)
     except Exception as e:
         end_work(t, "failed")
@@ -912,10 +912,19 @@ def watch(t, p, nxt):
             tmsg(t, "claude", rt, files=fs, dir=fd)
             threading.Thread(target=finish_clean, args=(t,), daemon=True).start()
         else:
-            end_work(t, "failed")
             msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {p.returncode}"
-            t["status"] = "failed"
-            tmsg(t, "claude", msg, kind="error")
+            if is_limit(msg + "\n" + err[-2000:]):          # Claude hết hạn mức: chờ tới giờ reset rồi tự chạy tiếp
+                lm = note_limit("claude", msg + "\n" + err[-2000:])
+                end_work(t, "limit")
+                t["status"] = "queued"
+                t["hold_until"] = lm["until"]
+                t["next"] = {"kind": "resume"}
+                hh = datetime.datetime.fromtimestamp(lm["until"]).strftime("%H:%M")
+                tmsg(t, "claude", f"Claude hết hạn mức. Tự chạy tiếp lúc **{hh}**{'' if lm['known'] else ' (ước tính, thử lại mỗi 30 phút)'}.", kind="error")
+            else:
+                end_work(t, "failed")
+                t["status"] = "failed"
+                tmsg(t, "claude", msg, kind="error")
         t["_redirect"] = None
         tsave(t)
     try:
@@ -968,9 +977,14 @@ def sched_tick():
         if True:
             running = sum(1 for t in TASKS.values() if t["status"] == "running")
             queued = sorted((t for t in TASKS.values() if t["status"] == "queued"), key=lambda x: x["created"])
+            cl = limits().get("claude")
             for t in queued:
                 if running >= MAX_RUNNING:
                     break
+                if t.get("hold_until", 0) > time.time() or cl:
+                    continue          # Claude hết hạn mức: chờ tới giờ reset (mọi task xếp hàng cùng chờ)
+                if t.pop("hold_until", None):
+                    tsave(t)
                 if not claude_ready(t):
                     continue          # chờ đăng nhập Claude (đã tự mở trang đăng nhập)
                 if t.get("titling") and time.time() - t.get("created_ts", 0) < 30:
@@ -1275,7 +1289,10 @@ def ai_email(ai):
 
 
 def ai_state():
-    return {k: {"installed": bool(find_bin(v["bin"])), **CFG["ais"].get(k, {})} for k, v in AIS.items()}
+    lm = limits()
+    return {k: {"installed": bool(find_bin(v["bin"])), **CFG["ais"].get(k, {}),
+                **({"limit_until": lm[k]["until"], "limit_known": lm[k].get("known", True)} if k in lm else {})}
+            for k, v in AIS.items()}
 
 
 LOGINS = {}          # ai -> Popen của tiến trình đăng nhập đang chạy
@@ -1662,6 +1679,9 @@ def task_detail(t):
     d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished", "mode")}
     if t.get("need_login") and t["status"] == "queued":
         d["status"] = "login"
+    if t["status"] == "queued" and (t.get("hold_until", 0) > time.time() or "claude" in limits()):
+        d["status"] = "limit"
+        d["hold_until"] = max(t.get("hold_until", 0), limits().get("claude", {}).get("until", 0))
     msgs = [dict(m) for m in t.get("messages", [])]
     subs = subtasks(t)
     works = [m for m in msgs if m["role"] == "work"]
@@ -1675,11 +1695,16 @@ def task_detail(t):
     if t["status"] == "running" and works and works[-1].get("status") == "running":
         cur = works[-1]
         pl = rjson(wdir(t) / "tasks" / "plan.json", {}) or {}
-        st = [str(x.get("status", "")).lower() for x in (pl.get("subtasks") or []) if isinstance(x, dict)]
-        if st:
-            fin = sum(x in ("done", "completed", "partial", "failed", "skipped", "pass", "ok") for x in st)
-            cur["progress"] = min(99, round(100 * fin / len(st)))
-            cur["nsteps"] = len(st)
+        if pl and wdir(t).joinpath("tasks", "plan.json").stat().st_mtime < cur.get("started_ts", 0) - 5:
+            pl = {}                                          # kế hoạch của lượt trước -> bỏ qua
+        st = [str(x.get("status", "")).lower().strip() for x in (pl.get("subtasks") or []) if isinstance(x, dict)]
+        pfin = sum(x not in ("", "todo", "pending", "running", "in_progress", "in progress", "queued", "wait", "waiting") for x in st)
+        ws = cur.get("subtasks") or []                       # worker đã giao trong lượt này (status.json)
+        wfin = sum(x.get("status") not in ("running",) for x in ws)
+        tot = max(len(st), len(ws) + (1 if ws else 0))       # +1: bước Claude tổng hợp sau cùng
+        if tot:
+            cur["progress"] = min(99, round(100 * max(pfin, wfin) / tot))
+            cur["nsteps"] = tot
         sd = wdir(t) / "stages"
         if sd.is_dir():
             cur["stages"] = [f.read_text("utf-8", "replace")[:6000] for f in sorted(sd.glob("*.md"),
@@ -1773,7 +1798,8 @@ class H(BaseHTTPRequestHandler):
                 SCHED["beat"] = time.time()
                 threading.Thread(target=scheduler, daemon=True).start()
             with _tlock:
-                ts = [{k: t.get(k) for k in ("id", "title", "status", "created", "pinned")}
+                ts = [{**{k: t.get(k) for k in ("id", "title", "status", "created", "pinned")},
+           **({"status": "limit"} if t["status"] == "queued" and (t.get("hold_until", 0) > time.time() or "claude" in limits()) else {})}
                       for t in TASKS.values() if t["status"] != "draft"]
                 for x in ts:
                     if TASKS[x["id"]].get("need_login") and x["status"] == "queued":
@@ -2434,6 +2460,8 @@ def cmd_worker(argv):
                    "--output-last-message", str(v / "result.md")]
             if a.model:
                 cmd += ["-m", a.model]
+            if os.environ.get("AIO_MODE") in ("turbo", "saver"):   # Turbo/Eco: Codex suy nghĩ ít -> nhanh, ít hạn mức
+                cmd += ["-c", 'model_reasoning_effort="low"']
             cmd.append(prompt)
             cwd = v
         else:
@@ -2454,7 +2482,10 @@ def cmd_worker(argv):
         if to:
             st.update(status="timeout", error=f"Quá {a.timeout}s")
         elif any(k in low for k in ("usage limit", "rate limit", "quota", "resource_exhausted", "429")) and code != 0:
-            st.update(status="limit", error="Worker hết hạn mức: " + (se or so).strip()[-300:])
+            lm = note_limit(a.worker, se + "\n" + so)
+            st.update(status="limit", reset=lm["until"], error="Worker hết hạn mức, dùng lại lúc " +
+                      datetime.datetime.fromtimestamp(lm["until"]).strftime("%H:%M") + ("" if lm["known"] else " (ước tính)")
+                      + ": " + (se or so).strip()[-300:])
         elif code != 0:
             st.update(status="failed", error=(se or so).strip()[-500:])
         elif not res.exists() or not res.read_text(encoding="utf-8").strip():
@@ -2466,6 +2497,62 @@ def cmd_worker(argv):
     wjson(v / "status.json", st)
     print(json.dumps(st, ensure_ascii=False))
     sys.exit(0 if st["status"] == "completed" else 1)
+
+
+LIMIT_WORDS = ("usage limit", "limit reached", "hit your limit", "rate limit", "quota", "resource_exhausted",
+               "too many requests", "429", "limit will reset", "resets")
+
+
+def is_limit(text):
+    low = (text or "").lower()
+    return any(k in low for k in LIMIT_WORDS) and ("limit" in low or "quota" in low or "429" in low or "exhausted" in low)
+
+
+def parse_reset(text, now_ts=None):
+    """Đọc giờ được dùng lại từ thông báo hết hạn mức (Claude/Codex/Gemini). Không đọc được -> None."""
+    now_ts = now_ts or time.time()
+    s = (text or "").lower()
+    m = re.search(r"\|(\d{10})\b", s) or re.search(r"reset[^0-9]{0,20}(\d{10})\b", s)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"(?:in|after)\s+((?:\d+\s*(?:days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b[\s,and]*)+)", s)
+    if m:
+        sec = 0
+        for n, u in re.findall(r"(\d+)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b", m.group(1)):
+            sec += int(n) * (86400 if u.startswith("d") else 3600 if u.startswith("h") else 60 if u.startswith("m") else 1)
+        if sec:
+            return int(now_ts + sec)
+    m = re.search(r"(?:resets?|reset at|try again at|available at|retry at)\s*(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", s)
+    if m:
+        h, mi, ap = int(m.group(1)), int(m.group(2) or 0), m.group(3)
+        if ap == "pm" and h < 12:
+            h += 12
+        if ap == "am" and h == 12:
+            h = 0
+        if h < 24 and mi < 60:
+            d = datetime.datetime.fromtimestamp(now_ts).replace(hour=h, minute=mi, second=0, microsecond=0)
+            if d.timestamp() <= now_ts:
+                d += datetime.timedelta(days=1)
+            return int(d.timestamp())
+    return None
+
+
+def note_limit(ai, text):
+    """Ghi hạn mức của 1 AI (worker chạy ở tiến trình riêng -> dùng file chung)."""
+    f = DATA / "limits.json"
+    d = rjson(f, {}) or {}
+    until = parse_reset(text)
+    d[ai] = {"until": until or int(time.time() + 1800), "known": bool(until), "msg": (text or "").strip()[-300:], "at": int(time.time())}
+    try:
+        wjson(f, d)
+    except Exception:
+        pass
+    return d[ai]
+
+
+def limits():
+    d = rjson(DATA / "limits.json", {}) or {}
+    return {k: v for k, v in d.items() if isinstance(v, dict) and v.get("until", 0) > time.time()}
 
 
 def wait_status(v, limit=1200):
