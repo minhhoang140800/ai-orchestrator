@@ -70,8 +70,21 @@ def machine():
 
 
 CPU, RAM_GB = machine()
-# mỗi task đang chạy cần khoảng 4 luồng + 4 GB (Claude Code + worker); tối thiểu 1, tối đa 4
-MAX_RUNNING = max(1, min(4, CPU // 4, int(RAM_GB // 4)))
+
+
+def machine_tier(cpu, ram):
+    """Mức máy -> (số task chạy cùng lúc, worker song song mỗi task, chạy AI ưu tiên thấp?).
+    AI chạy trên máy chủ của hãng; máy chủ yếu tốn RAM (~1–1,5 GB/Claude, 0,5–1 GB/worker) và CPU lúc ghép ảnh/chạy script."""
+    if cpu >= 16 and ram >= 30:
+        return 6, 3, False
+    if cpu >= 10 and ram >= 15:
+        return 4, 3, False
+    if cpu >= 6 and ram >= 11:
+        return 3, 2, True
+    return 1, 1, True
+
+
+MAX_RUNNING, MAX_WORKERS, LOW_PRIO = machine_tier(CPU, RAM_GB)
 LOW_SPEC = MAX_RUNNING == 1
 MODES = {"pro": "Pro (mạnh nhất, chấm kỹ)", "balanced": "Balanced (cân bằng)", "turbo": "Turbo (nhanh nhất, giảm thẩm định)",
          "eco": "Eco (tiết kiệm hạn mức)", "code": "Code (sửa code, chạy thử)"}
@@ -83,7 +96,7 @@ def norm_mode(m):
     return m if m in MODES else "balanced"
 CATEGORIES = ["video", "ảnh/asset", "playable", "code", "phân tích/research", "ý tưởng/kịch bản", "bảng tính/dữ liệu",
               "tài liệu/văn bản", "sửa file", "hỏi đáp", "khác"]
-BELOW_NORMAL = 0x00004000 if IS_WIN else 0     # ưu tiên thấp: máy vẫn mượt khi AI đang chạy
+BELOW_NORMAL = 0x00004000 if IS_WIN and LOW_PRIO else 0     # máy yếu: AI chạy ưu tiên thấp để máy vẫn mượt
 PING = "Reply with the single word PONG and nothing else."
 
 CODEX_SANDBOX = (["--sandbox", "workspace-write", "-c", 'windows.sandbox="unelevated"'] if IS_WIN
@@ -578,28 +591,106 @@ def subtasks(t):
 
 MODE_RULES = {
     "code": "",          # Code mode có quy trình riêng (CODE_MD)
-    "pro": """- Ưu tiên THỜI GIAN và chất lượng. Chạy song song tối đa {n} worker/sub-agent cho các phần độc lập.
-- Dùng model mạnh ngay từ đầu để ít phải sửa. Giám khảo được dùng model mạnh, tối đa 2 vòng sửa.""",
-    "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song tối đa {n} worker/sub-agent cho phần độc lập; tuần tự khi phụ thuộc.
-- Model nhỏ/nhanh cho việc đơn giản; model mạnh cho việc khó. Nâng model khi kết quả không đạt, hạ khi việc lặp lại.""",
-    "turbo": """- Ưu tiên TỐC ĐỘ TỐI ĐA. Bắt tay làm ngay, kế hoạch tối giản (vài dòng), không hỏi lại trừ khi thiếu dữ kiện bắt buộc.
-- Song song tối đa {n} worker/sub-agent cho mọi phần độc lập; chọn model nhanh (sonnet/haiku, model nhỏ cho worker).
-- GIẢM THẨM ĐỊNH: KHÔNG gọi giám khảo, không làm mẫu thử trước lô, không vòng sửa. Chỉ chạy check kỹ thuật (kích thước,
-  định dạng, số file) bằng lệnh check; sai thì sửa đúng chỗ sai. Không viết criteria.md dài — vài dòng là đủ.
-- Tự xem ảnh/sản phẩm tối đa 1 lần; lỗi nhỏ về thẩm mỹ thì ghi chú cho người dùng, không làm lại.
-- Không làm thêm ngoài yêu cầu (không preview/ghép so sánh, không cập nhật ghi chú phụ).
-- Trả kết quả ngay khi đủ dùng; ghi rõ phần chưa được kiểm tra kỹ.""",
-    "eco": """- Ưu tiên TIẾT KIỆM HẠN MỨC. Làm tuần tự, 1 worker tại một thời điểm. Việc nào tự làm được bằng lệnh/script thì không gọi AI.
-- Dùng model nhỏ nhất đủ làm được việc cho worker và sub-agent (--model); chỉ nâng khi đã thất bại 1 lần.
-- Giám khảo: dùng model nhỏ, chỉ chấm sản phẩm cuối, tối đa 1 vòng sửa. Không làm thêm ngoài yêu cầu.""",
+    "pro": """- Ưu tiên chất lượng và thời gian. Song song tối đa {n} worker cho phần độc lập.
+- Giám khảo chấm kỹ (được dùng model mạnh), tối đa 2 vòng sửa.""",
+    "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song tối đa {n} worker cho phần độc lập; tuần tự khi phụ thuộc.
+- Giám khảo 1 lần ở cuối (model nhỏ), tối đa 1 vòng sửa.""",
+    "turbo": """- TỐC ĐỘ TỐI ĐA: bắt tay làm ngay, kế hoạch vài dòng, không hỏi lại trừ khi thiếu dữ kiện bắt buộc. Song song tối đa {n} worker.
+- Không giám khảo, không mẫu thử trước lô, không vòng sửa: chỉ check kỹ thuật, sai thì sửa đúng chỗ; tự xem sản phẩm tối đa 1 lần.
+- Không làm thêm ngoài yêu cầu (không preview/ghép so sánh). Trả kết quả ngay khi đủ dùng; ghi rõ phần chưa kiểm tra kỹ.""",
+    "eco": """- TIẾT KIỆM HẠN MỨC: tuần tự, 1 worker một lúc; việc tự làm được bằng lệnh/script thì không gọi AI.
+- Không giám khảo, tối đa 1 vòng sửa. Không làm thêm ngoài yêu cầu.""",
 }
+
+
+# ---------------------------------------------------------------- hướng dẫn theo nhu cầu (mô-đun)
+IMG_RE = re.compile(r"ảnh|hình|image|png|jpe?g|webp|keyframe|storyboard|asset|banner|icon|thumbnail|poster|sprite|"
+                    r"art\b|artwork|vẽ|render|minh hoạ|minh họa|background|\bbg\b|logo|gif", re.I)
+EDIT_RE = re.compile(r"sửa|chỉnh|edit|cập nhật|thay|đổi tên|xóa|xoá|clear|\.xlsx|\.docx|\.pptx|\.csv|[A-Za-z]:\\|\\\\|/Users/", re.I)
+
+
+def md_needs(t):
+    """Task cần mô-đun hướng dẫn nào (theo mọi tin nhắn + file đính kèm của task)."""
+    text = " ".join([t.get("text", "")] + [m.get("text", "") for m in t.get("messages", []) if m.get("role") == "user"])
+    inp = tdir(t) / "input"
+    names = [f.name.lower() for f in inp.iterdir()] if inp.is_dir() else []
+    need = set()
+    if IMG_RE.search(text) or any(n.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")) for n in names):
+        need.add("image")
+    if "_danhdau" in text or "đánh dấu" in text.lower() or any("_danhdau" in n for n in names):
+        need.add("markup")
+    if GOOGLE_LINK.search(text) or re.search(r"google (drive|sheet|doc|slide)", text, re.I):
+        need.add("drive")
+    if EDIT_RE.search(text) or "drive" in need:
+        need.add("edit")
+    return need
+
+
+def md_image(py, app, pm):
+    return f"""## Ảnh & storyboard
+- Storyboard: mặc định viết BẢNG CHỮ (cảnh, thời lượng, hình ảnh, chữ trên màn hình, âm thanh, CTA). Chỉ vẽ khung hình khi người
+  dùng yêu cầu rõ (keyframe/vẽ/render storyboard).
+- Tạo ảnh: {"Gemini (--write) trước, lỗi thì codex ($imagegen)" if pm != "codex" else "gemini (--write), lỗi thì tự tạo ($imagegen)"}.
+  Không tạo được (lỗi, hết hạn mức): viết prompt vào OUTPUT/prompts/, hỏi người dùng (question.md) dán vào ChatGPT, lưu ảnh
+  vào OUTPUT/images/ rồi trả lời "xong"; sau đó check + chấm như trên.
+- Ảnh PNG: kiểm tra size/nền trong suốt bằng lệnh check png trước khi xem bằng mắt.
+
+"""
+
+
+def md_markup(py, app, pm):
+    return """## Ảnh có đánh dấu
+- Ảnh "_danhdau.png" người dùng gửi: tin nhắn có dòng [Đánh dấu trên ...] với toạ độ pixel thật của ảnh gốc. Đỏ = lỗi/cần xoá;
+  cam = cần xem/sửa/thêm; số 1,2,3 khớp ghi chú "1) ... 2) ...". Sửa ĐÚNG vùng được đánh dấu.
+- BẠN đánh dấu ảnh (báo lỗi QA, trước/sau): Pillow, đọc kích thước trước; khung bo góc (radius ~14, nét ~5px với ảnh ~1400px,
+  lề 18px); đường dẫn 25–35px cùng độ dày; nhãn 1–3 chữ cùng màu, đặt sát, KHÔNG viền trắng; đỏ #E63946 chỉ cho lỗi/xoá, cam
+  #FF9F1C cho phần còn lại; 2–6 chỗ/ảnh (nhiều hơn: đánh số + chú thích); không resize; xem lại ảnh trước khi giao; liệt kê
+  từng chỗ (số, màu, toạ độ, ý nghĩa).
+
+"""
+
+
+def md_drive(py, app, pm):
+    if pm == "codex":
+        return """## Google Drive / Sheets / Docs / Slides
+- Sửa TRỰC TIẾP file Google (giữ link): tự dùng kết nối Google Drive của bạn nếu có.
+- Không có: file chia sẻ "bất kỳ ai có link" thì tải bản xuất (Sheets .../export?format=xlsx, Docs .../export?format=docx,
+  Slides .../export/pptx), sửa, lưu vào OUTPUT và chỉ cách thay (File > Import > Upload > Replace). File riêng tư: hỏi người
+  dùng tải về gửi kèm. Không đổi quyền chia sẻ file.
+
+"""
+    return """## Google Drive / Sheets / Docs / Slides
+- Công cụ Google Drive của BẠN (mcp__claude_ai_Google_Drive, nạp bằng ToolSearch): tìm, đọc, tải, tạo file — KHÔNG sửa được ô.
+  Chỉ đọc/tóm tắt: tự đọc.
+- SỬA TRỰC TIẾP file Google (giữ link): giao codex kèm --drive (ChatGPT dùng kết nối Google Drive của nó). Ghi rõ link, tab/vùng
+  cần sửa, phần phải giữ (tiêu đề, định dạng, checkbox...); sửa xong giao codex đọc lại để kiểm tra.
+- Codex không có kết nối / bị chặn: tải file về work/drive/<tên>/ (.xlsx/.docx/.pptx), giao --edit work/drive/<tên>, kiểm tra,
+  cập nhật lại trên Drive nếu công cụ cho phép; không thì lưu vào OUTPUT và chỉ cách thay (File > Import > Upload > Replace).
+  Không đổi quyền chia sẻ file.
+
+"""
+
+
+def md_edit(py, app, pm):
+    return """## Sửa file (--edit)
+- --edit <thư mục>: worker SỬA TRỰC TIẾP file trong thư mục đó (file người dùng yêu cầu sửa, OUTPUT, file Drive đã tải về). Dùng
+  khi sửa nhiều/lặp lại (nhiều file, bảng tính lớn) để khỏi tự chép/sửa. Chọn thư mục NHỎ NHẤT chứa file cần sửa (cả ổ/thư mục
+  người dùng sẽ bị từ chối). App tự sao lưu vào work/<ID>/vN/_backup; status.json có "edited" = file đã đổi. Mở lại file đã sửa
+  để kiểm tra.
+
+"""
+
+
+MD_MODULES = {"image": md_image, "markup": md_markup, "drive": md_drive, "edit": md_edit}
+MD_TITLES = {"image": "tạo ảnh, storyboard", "markup": "ảnh có đánh dấu (đọc/vẽ khung lỗi)",
+             "drive": "Google Drive/Sheets/Docs/Slides (đọc, sửa trực tiếp)", "edit": "worker sửa file trực tiếp (--edit)"}
 
 
 def write_claude_md(t):
     py, app = py_console(), str(APP)
     mode = norm_mode(t.get("mode"))
     mode_name = MODES[mode]
-    mode_rules = MODE_RULES[mode].format(n="1 (máy cấu hình thấp)" if LOW_SPEC else str(min(3, MAX_RUNNING + 1)))
+    mode_rules = MODE_RULES[mode].format(n="1 (máy cấu hình thấp)" if LOW_SPEC else str(MAX_WORKERS))
     pm = t.get("pm") or "claude"
     agy_ok = bool(find_bin("agy")) and CFG["ais"].get("gemini", {}).get("ok") is not False
     can = {"codex": bool(find_bin("codex")) and CFG["ais"].get("codex", {}).get("ok") is not False,
@@ -626,145 +717,80 @@ Tiêu chí đã dùng:
 {tp.get('criteria', '').strip() or '(không lưu)'}
 
 """) if tp else ""
+    judge = mode in ("pro", "balanced") and pm == "claude"   # giám khảo độc lập (Claude): chỉ Balanced trở lên
+    need = md_needs(t)
+    mods = {k: f(py, app, pm) for k, f in MD_MODULES.items()}
+    inline = "".join(mods[k] for k in mods if k in need)
+    extra = [k for k in mods if k not in need]
+    rd = wdir(t) / "rules"
+    rd.mkdir(parents=True, exist_ok=True)
+    for k in mods:                              # mô-đun không cần lúc này: để sẵn file, cần thì Claude tự đọc
+        (rd / f"{k}.md").write_text(mods[k], encoding="utf-8")
+    extra_md = ("## Hướng dẫn thêm — CHỈ đọc khi task cần tới\n" + "\n".join(
+        f"- {MD_TITLES[k]}: ./rules/{k}.md" for k in extra) + "\n\n") if extra else ""
     txt = f"""# Task {t['id']}
 
 ## Hướng dẫn của người dùng (ưu tiên áp dụng)
 {CFG.get('instructions', '').strip() or '(không)'}
 
 ## Vai trò
-Bạn là PM. Phân tích yêu cầu, tự quyết cách làm, chia sub-task, chọn worker và model, giao việc,
-nghiệm thu trên file thật, sửa đúng phần lỗi, báo cáo. Task này là một cuộc trò chuyện nhiều lượt.
+Bạn là PM. Phân tích yêu cầu, tự quyết cách làm, chia sub-task, chọn worker, giao việc, nghiệm thu trên file thật,
+sửa đúng phần lỗi, báo cáo. Task là cuộc trò chuyện nhiều lượt.
 
 ## Đường dẫn
-- Thư mục làm việc (nháp, brief, log): thư mục hiện tại. Bị XÓA TOÀN BỘ khi task xong -> không để sản phẩm ở đây.
-- File người dùng gửi: {tdir(t) / "input"}
-- Được ĐỌC mọi ổ đĩa của máy: {', '.join(drives())}. Người dùng nhắc tới file/thư mục nào thì tự tìm.
-- OUTPUT (nơi lưu sản phẩm giao người dùng): {out_dir(t)}
-  Người dùng chỉ định nơi lưu cụ thể -> lưu đúng nơi đó, ghi đường dẫn đầy đủ trong câu trả lời.
-- Sửa file có sẵn trên máy: CHỈ khi người dùng yêu cầu sửa chính file/thư mục đó. Không xóa/di chuyển file nào ngoài
-  thư mục làm việc và OUTPUT. Ghi rõ trong câu trả lời đã sửa file nào.
-- Sản phẩm của các task trước (để dùng lại, tránh làm lại): danh mục ở {STORE / "registry.json"}
+- Thư mục hiện tại: nháp/brief/log, bị XÓA khi task xong -> không để sản phẩm ở đây. File người dùng gửi: {tdir(t) / "input"}
+- OUTPUT (sản phẩm giao người dùng): {out_dir(t)} — người dùng chỉ định nơi khác thì lưu đúng nơi đó, ghi đường dẫn đầy đủ.
+- Được ĐỌC mọi ổ: {', '.join(drives())}. Chỉ sửa file có sẵn khi người dùng yêu cầu sửa chính file đó; không xóa/di chuyển
+  file ngoài thư mục hiện tại và OUTPUT. Sản phẩm task trước (dùng lại, tránh làm lại): {STORE / "registry.json"}
 
-## Worker sẵn có trên máy
+## Worker
 {chr(10).join('- ' + desc[w] for w in on) or '- (không có — tự làm)'}
-Tự chọn worker cho từng sub-task, không bắt buộc dùng. Việc nhỏ hoặc cần phán đoán thì tự làm.
-Worker lỗi đăng nhập/không chạy: coi như không có, chuyển worker khác hoặc tự làm.
-
-Giao sub-task: viết yêu cầu đầy đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy
-cuộc trò chuyện), rồi chạy:
-  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--edit <thư mục>] [--drive] [--model <model>] [--timeout 900]
-  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>] [--hard]
-  --write: Gemini được tạo file/ảnh trong work/S2/vN. --hard: việc khó -> Gemini mức high. Giao lại cùng --out tự nâng mức.
-  --edit <thư mục>: worker SỬA TRỰC TIẾP file trong thư mục đó (file người dùng yêu cầu sửa, OUTPUT, hoặc file Drive đã tải về).
-     Dùng khi việc sửa nhiều/lặp lại (nhiều file, bảng tính lớn, sửa hàng loạt) để khỏi tự chép/sửa lại. Chọn thư mục NHỎ NHẤT
-     chứa file cần sửa (không phải cả ổ/thư mục người dùng — app sẽ từ chối). App tự sao lưu trước khi sửa vào
-     work/<ID>/vN/_backup (hoàn tác bằng cách chép lại), status.json có "edited" = danh sách file đã đổi.
-Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worker tạo). Sửa lỗi: giao lại cùng --out.
+Việc nhỏ hoặc cần phán đoán: tự làm. Worker lỗi/không chạy: coi như không có. Giao việc: viết yêu cầu đủ ngữ cảnh vào
+tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy cuộc trò chuyện), rồi chạy:
+  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--edit <thư mục>] [--drive] [--timeout 900]
+  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>]
+  --write: Gemini được tạo file/ảnh. --edit / --drive: xem mục sửa file / Google Drive.
+Kết quả: work/<ID>/vN/ (result.md, status.json, file worker tạo). Sửa lỗi: giao lại cùng --out. App tự chọn model — không truyền --model.
 
 ## Chia việc (Gemini nhanh, GPT chính xác hơn)
-- Research web, đối thủ, xu hướng: Gemini (mọi chế độ).
-- Pro: GPT làm trước mọi việc còn lại.
-- Balanced/Turbo/Eco — "Gemini trước, lỗi mới GPT": idea, kịch bản, brief, tạo/sửa ảnh giao Gemini; Balanced chia đều
-  idea/câu chữ: Gemini phần cần nhanh/rộng, GPT phần cần sắc (idea chính, hook) — không dồn hết cho GPT.
-- Code, script, phân tích số liệu, sửa Excel/Word/PowerPoint: GPT (việc rất đơn giản ở Turbo/Eco: Gemini).
-- Phần nào Gemini làm chưa đạt (sai size, sai nội dung, chữ lỗi, thiếu chi tiết bắt buộc) -> chỉ giao lại PHẦN đó cho GPT.
-- Việc phụ thuộc nhau (vd idea cần dựa trên research): giao research trước; còn lại chạy song song.
-- Nhiều sản phẩm độc lập cùng loại: chia 2–3 worker chạy song song (mỗi worker --out riêng), không dồn cả lô vào 1 worker.
-  Hai worker KHÔNG được --edit cùng một thư mục cùng lúc.
+- Research web, đối thủ, xu hướng: Gemini. Code, script, số liệu, Excel/Word/PowerPoint: GPT.
+- Pro: GPT làm trước mọi việc còn lại. Balanced/Turbo/Eco: Gemini trước (idea, kịch bản, brief, ảnh), lỗi mới giao lại
+  ĐÚNG PHẦN lỗi cho GPT; Balanced: idea/câu chữ chia Gemini phần cần nhanh/rộng, GPT phần cần sắc (idea chính, hook).
+- Việc phụ thuộc: làm trước; việc độc lập: chạy song song (mỗi worker --out riêng; không 2 worker --edit cùng thư mục).
 
 ## Tốc độ (quan trọng)
-- VIỆC ĐƠN GIẢN (hỏi đáp, 1 thao tác, sửa nhỏ — làm xong trong 1–2 bước): làm NGAY, không viết criteria.md/plan.json/decisions.json,
-  không gọi giám khảo, không chạy thử trước; giao worker thì giao thẳng việc thật (không giao bước "kiểm tra quyền" riêng).
-- Sản phẩm là VĂN BẢN do worker viết: dặn worker ghi TOÀN BỘ nội dung vào câu trả lời cuối (result.md), không chỉ liệt kê file.
-- Không chép lại/viết lại dài nội dung worker đã viết đạt. Viết nội dung cuối MỘT lần (câu trả lời cuối hoặc 1 file trong OUTPUT).
-- Ít bước nhỏ lẻ: gộp nhiều lệnh đọc/kiểm tra vào một lần chạy.
+- VIỆC ĐƠN GIẢN (hỏi đáp, 1 thao tác, sửa nhỏ): làm NGAY — không criteria/plan/decisions, không giám khảo, không bước "kiểm tra" riêng.
+- Văn bản do worker viết: dặn ghi TOÀN BỘ nội dung vào câu trả lời cuối. Không chép/viết lại phần đã đạt; viết nội dung cuối 1 lần.
+- Gộp nhiều lệnh đọc/kiểm tra vào một lần chạy.
 
 ## Nghiệm thu
-- status "completed" của worker chưa phải là xong: luôn kiểm tra file thật. Với --edit: mở lại file đã sửa để kiểm tra.
-- TIÊU CHÍ: trước khi làm, viết tasks/criteria.md ngắn, kiểm chứng được, từ chính yêu cầu (phải có gì, định dạng/kích thước,
-  style, lỗi cần tránh; đánh dấu BẮT BUỘC). Người dùng đổi yêu cầu -> cập nhật. Không hỏi duyệt. Turbo: vài dòng là đủ.
-- Đo được: "{py}" "{app}" check files|png ... (xem --help); bảng tính/dữ liệu: tự đọc lại bằng Python.
-- Chấm chất lượng (Turbo: bỏ qua, chỉ check kỹ thuật):
-  - Văn bản/task nhẹ (phân tích, research, idea, kịch bản, báo cáo): chấm 1 LẦN, nhanh — judge --model haiku hoặc giao
-    gemini đọc soát theo criteria.md. Chỉ sửa lỗi nêu, không chấm lại.
-  - Hình/âm thanh/code/bảng tính: check kỹ thuật trước; rồi gọi giám khảo 1 LẦN cho CẢ LÔ ở cuối:
-    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1 [--model <model>]
-    Kết quả work/J1/vN/review.json. Fail -> sửa đúng lỗi nêu, chỉ chấm lại file đã sửa.
-  - Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô.
-  - Giám khảo dùng model nhỏ (sonnet/haiku) trừ chế độ Pro.
-  Bỏ qua khi hỏi đáp/tra cứu hoặc người dùng bảo làm nhanh/nháp.
-- Lỗi: giao sửa đúng phần lỗi, tối đa 2 lần mỗi sub-task (số vòng theo chế độ bên dưới); quá thì ghi partial, báo người dùng.
+- Worker "completed" chưa phải là xong: kiểm tra file thật. Đo được: "{py}" "{app}" check files|png ... (xem --help).
+- Task có sản phẩm: trước khi làm, viết tasks/criteria.md ngắn, kiểm chứng được (đánh dấu BẮT BUỘC); đổi yêu cầu -> cập nhật.
+- Chấm chất lượng: {"giám khảo độc lập 1 LẦN cho CẢ LÔ ở cuối (sau check kỹ thuật):" if judge else "KHÔNG gọi giám khảo — tự xem lại theo criteria.md 1 lần; lỗi nhỏ thẩm mỹ thì ghi chú cho người dùng."}
+{f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1 [--model haiku|sonnet]
+  Văn bản/task nhẹ: --model haiku. Giám khảo model nhỏ trừ Pro. Fail -> sửa đúng lỗi nêu, chỉ chấm lại file đã sửa.
+""" if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial.
 
-## Ảnh có đánh dấu
-- Người dùng gửi ảnh "_danhdau.png": tin nhắn có dòng [Đánh dấu trên ...] với toạ độ pixel thật của ảnh gốc.
-  Đỏ = lỗi/cần xoá; cam = cần xem/sửa/thêm; số 1,2,3 khớp với ghi chú "1) ... 2) ..." trong tin nhắn. Sửa ĐÚNG vùng được đánh dấu.
-- Khi BẠN cần đánh dấu ảnh (báo lỗi QA, so sánh trước/sau, chỉ chỗ sửa): dùng Pillow, đọc kích thước ảnh trước; khung bo góc
-  (radius ~14, nét ~5px theo ảnh ~1400px, lề 18px quanh vùng); đường dẫn 25–35px cùng độ dày; nhãn 1–3 chữ, cùng màu, đặt sát;
-  KHÔNG viền trắng quanh chữ; đỏ #E63946 chỉ cho lỗi/xoá, cam #FF9F1C cho phần còn lại; 2–6 chỗ/ảnh, nhiều hơn thì đánh số +
-  chú thích hoặc tách ảnh; không resize ảnh khi đánh dấu; xem lại ảnh đã vẽ trước khi giao; liệt kê từng chỗ (số, màu, toạ độ, ý nghĩa).
-
-## Google Drive / Sheets / Docs / Slides
-Công cụ Google Drive của BẠN (mcp__claude_ai_Google_Drive, nạp bằng ToolSearch): tìm, đọc, tải, tạo file — KHÔNG sửa được ô/nội dung.
-- Chỉ đọc/tóm tắt: tự đọc, không cần worker.
-- SỬA TRỰC TIẾP trên file Google (giữ nguyên link): giao codex kèm --drive (ChatGPT dùng kết nối Google Drive của nó, có lệnh ghi
-  Sheets/Docs/Slides). Ghi rõ link, tab/vùng cần sửa, phần phải giữ (tiêu đề, định dạng, checkbox...). Sửa xong giao codex đọc lại
-  để kiểm tra. Codex báo không có kết nối Google Drive / bị chặn -> cách dự phòng bên dưới.
-- Dự phòng: tải file về work/drive/<tên>/ (Sheets -> .xlsx, Docs -> .docx, Slides -> .pptx), giao worker --edit work/drive/<tên>,
-  kiểm tra, rồi cập nhật bản trên Drive nếu công cụ cho phép; không thì lưu vào OUTPUT và chỉ cách thay (File > Import > Upload >
-  Replace spreadsheet). Không đổi quyền chia sẻ file Drive.
-
-## Storyboard
-Storyboard viết dạng BẢNG CHỮ (cảnh, thời lượng, hình ảnh, chữ trên màn hình, âm thanh, CTA) trong câu trả lời hoặc tài liệu.
-KHÔNG tự tạo ảnh/khung hình storyboard, trừ khi người dùng yêu cầu rõ (vẽ/minh hoạ/render storyboard).
-
-## Worker chạy tách rời
-Worker vẫn chạy tiếp khi phiên của bạn bị ngắt (app cập nhật/khởi động lại). Khi tiếp tục: đọc work/<ID>/vN/status.json —
-"running" thì CHỜ bằng lệnh: "{py}" "{app}" wait work/<ID>   (không chạy lại worker đó).
-
-## Trả kết quả theo từng chặng
-Task nhiều phần (vd phân tích → idea → sản phẩm): xong phần nào có ích cho người dùng thì ghi ngay nội dung phần đó (markdown
-ngắn gọn) vào ./stages/<số thứ tự>.md — giao diện hiện ngay cho người dùng đọc trong lúc bạn làm tiếp. Câu trả lời cuối vẫn phải
-đủ ý (gộp kết quả các chặng); các chặng sẽ được ẩn khi task xong.
-
-## Model
-Bạn chạy Opus, mức suy nghĩ theo chế độ (Pro high, Balanced/Turbo medium, Eco low). App TỰ chọn model cho worker theo chế độ
-(ChatGPT: GPT-6.2 Sol + mức suy nghĩ; Gemini: Neon medium ở Pro, Hydrogen medium ở Balanced (khó/giao lại: high), medium ở Turbo, low ở Eco;
-gói Free/thiếu model thì tự lùi model có sẵn) và tự hạ khi sắp hết hạn mức —
-KHÔNG truyền --model cho worker trừ khi có lý do rõ. {"Bước QUÁ khó (đã thử mà không ra): ghi xhigh vào tasks/effort.txt -> lượt sau bạn và worker chạy mức cao nhất (Gemini Neon high)." if t.get('mode') == 'pro' else ""}
-
-## Tạo ảnh
-Tạo theo mục Chia việc (Gemini trước, lỗi thì codex $imagegen). Chỉ khi không thể tạo được (lỗi, hết hạn mức): viết prompt vào
-OUTPUT/prompts/, rồi hỏi người dùng (question.md): "Dán prompt trong <đường dẫn> vào ChatGPT, lưu ảnh vào OUTPUT/images/
-rồi trả lời 'xong'". Khi được trả lời: check + chấm như trên.
-
-{brain_md}{tpl_md}## Chế độ làm việc người dùng chọn cho task này: {mode_name}
+{inline}{extra_md}{brain_md}{tpl_md}## Chế độ: {mode_name}
 {mode_rules}
-- Worker status "limit": chuyển worker khác hoặc tự làm nếu đảm bảo chất lượng; nếu không, hỏi người dùng.
+- Worker báo "limit": chuyển worker khác hoặc tự làm; không đảm bảo chất lượng thì hỏi người dùng.{" Bước QUÁ khó (đã thử không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if mode == 'pro' else ""}
 
-## Feedback và quyết định của người dùng (bắt buộc ghi lại)
-Mỗi khi người dùng góp ý, yêu cầu sửa, hoặc duyệt/chốt điều gì: ghi vào tasks/decisions.json, GOM THEO TỪNG PHẦN VIỆC
-(không ghi theo thứ tự thời gian tràn lan). Định dạng:
-  [{{"group": "<tên phần việc, vd: Ply33 - nhân vật Messi>", "items": [{{"type": "feedback" | "decision", "text": "<1 câu ngắn>",
-     "status": "open" | "done"}}]}}]
-- "decision" = điều người dùng đã duyệt/chốt (style, tên, cấu trúc thư mục, phương án...). "feedback" = góp ý cần xử lý;
-  xử lý xong đổi status thành "done". Sửa/gộp mục cũ thay vì thêm mục trùng. Phần việc mới -> group mới.
-- Đầu mỗi lượt: đọc file này và tuân theo các quyết định đã chốt; không hỏi lại điều đã chốt.
-
-## Tiến độ
-Cập nhật tasks/plan.json sau mỗi bước: goal, subtasks[id, title, worker, model, status(todo|running|done|failed), attempt, outputs].
-Liệt kê ĐỦ các bước dự kiến ngay từ đầu (cả bước bạn tự làm) — giao diện tính % tiến độ = số bước done / tổng bước.
-Có thể bị ngắt giữa chừng (người dùng gửi tin gấp, hoặc máy tắt): khi chạy tiếp, đọc plan.json, bỏ qua bước đã xong.
+## Ghi lại (để giao diện hiển thị)
+- tasks/plan.json: đủ các bước ngay từ đầu, cập nhật sau mỗi bước: goal, subtasks[id, title, worker, status(todo|running|done|failed)]
+  (giao diện tính % theo đó). Bị ngắt rồi chạy tiếp: đọc plan.json, bỏ bước đã xong.
+- tasks/decisions.json — khi người dùng góp ý/chốt điều gì, gom theo phần việc, sửa/gộp mục cũ thay vì thêm trùng:
+  [{{"group": "<phần việc>", "items": [{{"type": "feedback"|"decision", "text": "<1 câu>", "status": "open"|"done"}}]}}]
+  Đầu mỗi lượt đọc file này, theo đúng các quyết định đã chốt, không hỏi lại.
+- Task nhiều phần: xong phần nào hữu ích thì ghi ngay vào ./stages/<số>.md (giao diện hiện cho người dùng đọc trong lúc làm).
 
 ## Khi cần người dùng quyết định
-Chỉ hỏi khi thật sự quan trọng: thao tác không hoàn tác, tốn nhiều hạn mức, yêu cầu mâu thuẫn, thiếu dữ liệu không suy ra được.
-Cách hỏi: ghi câu hỏi ngắn + các phương án vào ./question.md rồi DỪNG. Việc khác: tự quyết, ghi giả định.
+Chỉ hỏi khi thật sự quan trọng (không hoàn tác được, tốn nhiều hạn mức, mâu thuẫn, thiếu dữ liệu): ghi câu hỏi ngắn + phương án
+vào ./question.md rồi DỪNG. Còn lại tự quyết, ghi giả định.
 
 ## Kết thúc mỗi lượt
-Báo cáo, đề xuất, kết quả nghiên cứu, concept, so sánh: viết thẳng trong câu trả lời, KHÔNG tạo file .md/.txt.
-Chỉ tạo file khi sản phẩm vốn là file (ảnh, code, Excel/CSV, tài liệu người dùng cần mang đi dùng) hoặc người dùng yêu cầu.
-Sản phẩm dạng file lưu vào OUTPUT. Câu trả lời cuối gửi người dùng: chỉ thông tin cần thiết —
-kết quả đạt/chưa đạt, điểm cần người dùng biết, việc người dùng cần làm. Không liệt kê lại từng file
-(giao diện có nút mở thư mục kết quả). Có thể dùng **đậm**, `code`, gạch đầu dòng.
+Báo cáo, research, concept, so sánh: viết thẳng trong câu trả lời, KHÔNG tạo file .md/.txt. Chỉ tạo file khi sản phẩm vốn là file
+hoặc người dùng yêu cầu; lưu vào OUTPUT. Câu trả lời cuối ngắn: đạt/chưa đạt, điểm cần biết, việc người dùng cần làm.
+Không liệt kê lại từng file (giao diện có nút mở thư mục). Dùng được **đậm**, `code`, gạch đầu dòng.
 
 ## Cấm
 Không dùng API key. Không ghi mật khẩu/token vào file.
@@ -793,11 +819,9 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
     f.write_text(txt, encoding="utf-8")
 
 
-LESSON_MD = f"""## Bài học cho cả team (khi task xong)
-Ghi ./lessons.json: {{"category": "<1 trong: {', '.join(CATEGORIES)}>", "lessons": ["<1 câu>", ...]}}
-- Bài học = điều rút ra giúp MỌI task sau nhanh/đúng hơn: cách chia việc, worker/model hợp việc gì, lỗi hay gặp và cách tránh,
-  bước thừa nên bỏ. Tối đa 3; không có gì thật sự mới -> "lessons": [] (vẫn ghi category).
-- KHÔNG ghi tên dự án/game/khách hàng/người, link, đường dẫn, nội dung sản phẩm, số liệu riêng. App gửi ẩn danh về team.
+LESSON_MD = f"""## Bài học cho team (khi task xong)
+Ghi ./lessons.json: {{"category": "<{'|'.join(CATEGORIES)}>", "lessons": ["<tối đa 3 câu>"]}} — điều giúp MỌI task sau
+nhanh/đúng hơn (chia việc, worker hợp việc gì, lỗi hay gặp, bước thừa). Không có gì mới: []. KHÔNG tên dự án/người, link, đường dẫn, số liệu riêng.
 """
 
 
@@ -815,21 +839,8 @@ def _section(txt, title, body):
 
 
 def pm_codex_md(txt):
-    """Hướng dẫn khi ChatGPT (Codex) làm quản lý thay Claude: không có giám khảo Claude, không có công cụ Google Drive."""
-    txt = re.sub(r"(?ms)^- Chấm chất lượng .*?^  Bỏ qua khi hỏi đáp[^\n]*\n",
-                 "- Chấm chất lượng: không có giám khảo riêng — tự mở lại file thật, đối chiếu từng mục BẮT BUỘC trong criteria.md;\n"
-                 "  văn bản dài có thể giao gemini đọc soát theo criteria.md. Lô lớn (từ 5 sản phẩm): làm 1 mẫu, tự xem rồi mới chạy cả lô.\n", txt)
-    txt = _section(txt, "Google Drive / Sheets / Docs / Slides", """
-Bạn KHÔNG có công cụ Google Drive. Link Google người dùng gửi:
-- File chia sẻ "Bất kỳ ai có đường liên kết": tự tải bản xuất bằng lệnh (curl/python) — Sheets:
-  https://docs.google.com/spreadsheets/d/<ID>/export?format=xlsx, Docs: .../document/d/<ID>/export?format=docx,
-  Slides: .../presentation/d/<ID>/export/pptx — rồi đọc/sửa bản tải về, lưu kết quả vào OUTPUT.
-- Không tải được (file riêng tư): hỏi người dùng (question.md) tải file về rồi gửi kèm. Sửa xong: chỉ cách thay trên Drive
-  (File > Import > Upload > Replace). Không đổi quyền chia sẻ file.""")
-    txt = _section(txt, "Model", """
-Bạn là ChatGPT (Codex) làm quản lý thay Claude. App tự chọn model cho worker Gemini theo chế độ và tự hạ khi sắp hết hạn mức —
-KHÔNG truyền --model cho worker trừ khi có lý do rõ. Không có sub-agent: việc code/file nhỏ thì tự làm bằng lệnh.""")
-    txt = txt.replace("Tạo theo mục Chia việc (Gemini trước, lỗi thì codex $imagegen)", "Tạo bằng gemini, lỗi thì tự tạo ($imagegen)")
+    """Hướng dẫn khi ChatGPT (Codex) làm quản lý thay Claude: không có giám khảo Claude, không có công cụ Drive của Claude."""
+    txt = txt.replace("## Vai trò\n", "## Vai trò\nBạn là ChatGPT (Codex) làm quản lý thay Claude; không có sub-agent — việc code/file nhỏ tự làm bằng lệnh.\n", 1)
     if IS_WIN:      # Codex chạy lệnh bằng PowerShell: chương trình có đường dẫn trong ngoặc kép phải gọi bằng "&"
         cmd = f'"{py_console()}" "{APP}"'
         txt = txt.replace(cmd, "& " + cmd).replace("## Worker sẵn có trên máy\n",
@@ -855,12 +866,14 @@ def build_prompt(t, nxt):
         fl += f"\n{md_name(t)} vừa được cập nhật: đọc lại ./{md_name(t)} và áp dụng bản mới nhất (thay cho quy tắc cũ trong phiên)."
     if kind == "answer":
         return f"Người dùng trả lời:\n\n{text}\n{fl}\nTiếp tục task."
+    wait = (f'\nWorker vẫn chạy tiếp khi bạn bị ngắt: work/<ID>/vN/status.json còn "running" thì CHỜ bằng lệnh '
+            f'"{py_console()}" "{APP}" wait work/<ID> (không giao lại việc đó).')
     if kind == "urgent":
         return (f"Người dùng vừa gửi tin nhắn trong lúc bạn đang làm (bạn đã bị ngắt):\n\n{text}\n{fl}\n"
-                f"Đọc tasks/plan.json, điều chỉnh kế hoạch theo tin nhắn này rồi tiếp tục. Làm theo {md_name(t)}.")
+                f"Đọc tasks/plan.json, điều chỉnh kế hoạch theo tin nhắn này rồi tiếp tục. Làm theo {md_name(t)}.{wait}")
     if kind == "followup":
         return f"Tin nhắn mới của người dùng:\n\n{text}\n{fl}\nLàm theo {md_name(t)}."
-    return f"Task bị dừng giữa chừng. Đọc tasks/plan.json và chạy tiếp từ bước đang dở. Làm theo {md_name(t)}."
+    return f"Task bị dừng giữa chừng. Đọc tasks/plan.json và chạy tiếp từ bước đang dở. Làm theo {md_name(t)}.{wait}"
 
 
 def gen_title(t):
@@ -3016,7 +3029,7 @@ def api_worker(st, v, key, text, a):
     t0, log, limited, err, m = time.time(), [], False, "", ""
     try:
         models = models or gemini_api_models(key)
-        hard = a.hard or os.environ.get("AIO_HARD") == "1" or v.name != "v1"
+        hard = os.environ.get("AIO_HARD") == "1"
         for m in api_order([x for x in models if x not in bad_models("gemini_api")], hard)[:5]:
             body = {"contents": [{"role": "user", "parts": parts}], "tools": [{"google_search": {}}]}
             code, j = gemini_api_call(key, f"/v1beta/models/{m}:generateContent", body, a.timeout)
@@ -3314,10 +3327,9 @@ def code_md(txt, t):
     """Hướng dẫn Code mode: thay mục Vai trò/Chia việc/Nghiệm thu/chế độ bằng quy trình code + chạy thử."""
     code = CODE_MD.format(pdir=t.get("pdir", ""))
     txt = re.sub(r"(?ms)^## Vai trò\n.*?(?=^## )", lambda m: code + "\n", txt, count=1)
-    for sec in ("Chia việc (Gemini nhanh, GPT chính xác hơn)", "Nghiệm thu", "Ảnh có đánh dấu", "Storyboard", "Tạo ảnh",
-                "Trả kết quả theo từng chặng"):
+    for sec in ("Chia việc (Gemini nhanh, GPT chính xác hơn)", "Nghiệm thu", "Ảnh có đánh dấu", "Ảnh & storyboard"):
         txt = re.sub(r"(?ms)^## " + re.escape(sec) + r"\n.*?(?=^## )", "", txt, count=1)
-    txt = re.sub(r"(?ms)^## Chế độ làm việc người dùng chọn.*?(?=^## )",
+    txt = re.sub(r"(?ms)^## Chế độ: .*?(?=^## )",
                  "## Chế độ: Code (Opus, suy nghĩ medium)\n- Ưu tiên chạy được và đúng; chạy thử thật trước khi báo xong.\n\n", txt, count=1)
     return txt
 
@@ -3410,8 +3422,7 @@ def cmd_worker(argv):
             cwd = edit or v                 # Codex chỉ được ghi trong thư mục làm việc của nó (sandbox)
         else:
             md_ = os.environ.get("AIO_MODE", "balanced")
-            retry_ = v.name != "v1"                     # giao lại (sửa lỗi / thử lại) -> nâng mức
-            hard_ = os.environ.get("AIO_HARD") == "1" or (md_ == "balanced" and (a.hard or retry_))
+            hard_ = os.environ.get("AIO_HARD") == "1"   # chỉ Pro + bước quá khó (effort.txt); Balanced không tự lên high
             gm, _ = pick_model("gemini", md_, hard_)
             inp = inp_
             gtext = (f"{text}\n\n---\nFile đầu vào (chỉ đọc): {inp}. " + (edit_note or

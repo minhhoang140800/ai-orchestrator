@@ -202,9 +202,9 @@ main{background:var(--bg)}
 .pv button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;padding:0;border-radius:50%;border:0;background:var(--ink);color:#fff;font-size:13px;line-height:20px}
 .msel{position:relative}.mbtn{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;border-radius:6px;padding:6px 8px;font:inherit;font-size:13px;font-weight:500;color:var(--mute);cursor:pointer}.mbtn:hover{background:var(--hover);color:var(--ink)}.mbtn .i{width:16px;height:16px}
 .pop{display:none;position:absolute;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.08);padding:6px;z-index:20}.pop.show{display:block}
-.mmenu{right:0;bottom:calc(100% + 6px);min-width:300px}.mmenu.down{bottom:auto;top:calc(100% + 6px)}
+.mmenu{right:0;bottom:calc(100% + 6px);min-width:250px;width:max-content;padding:5px}.mmenu small{white-space:nowrap}.mmenu.down{bottom:auto;top:calc(100% + 6px)}
 .pop button{display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;border:0;background:transparent;border-radius:6px;padding:8px 10px;font:inherit;color:var(--ink);cursor:pointer}.pop button:hover{background:var(--hover)}.pop button.on{background:var(--acc2)}
-.mmenu .ck{width:18px;flex:none;margin-top:1px}.mmenu .ck .i{width:18px;height:18px}.pop b{display:block;font-weight:500}.pop small{display:block;color:var(--mute);font-size:12px;margin-top:1px}
+.mmenu .ck{width:18px;flex:none;margin-top:2px;display:flex;justify-content:center}.mmenu .ck .i{width:18px;height:18px}.pop b{display:block;font-weight:500}.pop small{display:block;color:var(--mute);font-size:12px;margin-top:1px}
 .pmenu{right:0;top:calc(100% + 6px);width:340px}.pmenu .sep{border-top:1px solid var(--line);margin:6px 0}
 .pmenu textarea{min-height:140px;font-size:13px;margin:4px 0 6px}.pmenu .row{padding:2px 4px}
 .tmenu{left:0;bottom:calc(100% + 6px);min-width:320px;max-height:300px;overflow:auto}
@@ -588,7 +588,7 @@ function composer(id, ph) {
       <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="pop mmenu" id="modeMenu" role="menu"></div></span>
       <button class="pri sq" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
-const MODE = { pro: ["Pro", "Suy nghĩ sâu nhất, chấm kỹ, tốn hạn mức hơn"], balanced: ["Balanced", "Cân bằng chất lượng và tốc độ"], turbo: ["Turbo", "Nhanh nhất, giảm thẩm định"], eco: ["Eco", "Ít hạn mức nhất, chậm hơn"], code: ["Code", "Sửa code trong thư mục dự án, tự chạy thử (Opus)"] };
+const MODE = { pro: ["Pro", "Suy nghĩ sâu, chấm kĩ, tốn hạn mức"], balanced: ["Balanced", "Cân bằng chất lượng và tốc độ"], turbo: ["Turbo", "Nhanh nhất, giảm thẩm định"], eco: ["Eco", "Ít hạn mức nhất, chậm hơn"], code: ["Code", "Mạnh về coding, tự chạy thử"] };
 const normMode = m => ({ fast: "pro", saver: "eco" })[m] || (MODE[m] ? m : "balanced");
 const MICON = {
   pro: '<svg class="i" viewBox="0 0 24 24"><path d="M9.5 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"/><path d="M12.5 9h2a2 2 0 0 0 2-2M12.5 14h3a2 2 0 0 1 2 2v1M16.5 11h3"/></svg>',
