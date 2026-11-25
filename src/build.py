@@ -37,6 +37,9 @@ _lm = (d / "learnings.md").read_text(encoding="utf-8") if (d / "learnings.md").e
 _lf = (d / "learn_form.json").read_text(encoding="utf-8") if (d / "learn_form.json").exists() else ""
 assert 'LEARN_MD = ""' in built and 'LEARN_FORM = ""' in built
 built = built.replace('LEARN_MD = ""', "LEARN_MD = " + json.dumps(_lm), 1).replace('LEARN_FORM = ""', "LEARN_FORM = " + json.dumps(_lf), 1)
+_fonts = {f.name: base64.b64encode(f.read_bytes()).decode() for f in sorted((d / "fonts").glob("*.woff2"))}
+assert 'FONTS_B64 = ""' in built and len(_fonts) == 2, "Thiếu font Geist trong src/fonts"
+built = built.replace('FONTS_B64 = ""', "FONTS_B64 = " + json.dumps(json.dumps(_fonts)), 1)
 built = built.replace('ICO_B64 = ""', 'ICO_B64 = "' + base64.b64encode((d / "icon.ico").read_bytes()).decode() + '"', 1)
 import datetime
 ver = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d.%H%M") + "-" + hashlib.sha1(built.encode()).hexdigest()[:6]  # so sánh được theo thời gian

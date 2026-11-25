@@ -24,7 +24,8 @@ tác vụ hẹn giờ Chủ nhật làm theo `learning/WEEKLY.md`, gộp vào `s
   Model theo chế độ: `MODEL_PLAN`, `pick_model` (tự hạ khi sắp hết hạn mức: `limits.json`, `pressure`).
   Hết hạn mức: `is_limit`, `parse_reset`, `note_limit`. Tự cập nhật: `fetch_update` (GitHub API/raw/jsDelivr),
   `apply_update` → `boot()` chạy bản trong `versions/` có health-check, lỗi thì quay về bản cũ.
-- `ui.html` — toàn bộ giao diện (1 file, nhúng vào app.py khi build). Phong cách Porcelain (sáng, xám/than chì).
+- `ui.html` — toàn bộ giao diện (1 file, nhúng vào app.py khi build). Phong cách Porcelain 2.0 (sáng; chat kiểu ChatGPT,
+  task kiểu Linear; icon Lucide; lớp CSS "Porcelain 2.0" ở cuối thẻ style). `fonts/` — Geist + Geist Mono (OFL), nhúng khi build, phục vụ ở /fonts/.
 - `install.tpl.ps1` — bộ cài Windows (nhúng trong .bat tự giải nén; thông báo ASCII không dấu).
 - `install_mac.tpl.sh` — bộ cài Mac (`Maestro_setup.command`, đóng zip để giữ quyền chạy).
 - `uninstall.bat`, `build.py`, `release.py`, icon (`icon.ico`, `icon96.png`, `icon1024.png`), `RELEASE` (số bản).

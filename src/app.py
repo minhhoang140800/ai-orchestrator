@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 UI_B64 = ""  # filled at build time
 ICO_B64 = ""  # icon Windows (shortcut), filled at build time
+FONTS_B64 = ""  # font Geist/Geist Mono (src/fonts/*.woff2, OFL) dạng JSON {tên: base64}, filled at build time
 VERSION = "dev"  # filled at build time
 RELEASE = "dev"  # số phiên bản hiển thị (vd 1.6), filled at build time
 UPDATE_BASE = ""  # vd https://raw.githubusercontent.com/<owner>/<repo>/main/ (filled at build time)
@@ -2251,6 +2252,19 @@ def check_startup():
 
 
 # ---------------------------------------------------------------- HTTP
+FONT_NAMES = ("Geist-Variable.woff2", "GeistMono-Variable.woff2")
+
+
+def font_file(name):
+    if name not in FONT_NAMES:
+        return None
+    if FONTS_B64:
+        b = (json.loads(FONTS_B64) or {}).get(name)
+        return base64.b64decode(b) if b else None
+    f = APP.parent / "fonts" / name                 # chạy từ mã nguồn (dev)
+    return f.read_bytes() if f.is_file() else None
+
+
 def ui_html():
     if UI_B64:
         return base64.b64decode(UI_B64)
@@ -2360,7 +2374,8 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype + ("; charset=utf-8" if not ctype.startswith("image/") else ""))
         self.send_header("Content-Length", str(len(b)))
-        self.send_header("Cache-Control", "no-store")
+        if "Cache-Control" not in (headers or {}):
+            self.send_header("Cache-Control", "no-store")
         for k, v in (headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -2383,6 +2398,11 @@ class H(BaseHTTPRequestHandler):
         q = parse_qs(u.query)
         if u.path in ("/favicon.ico", "/icon.svg"):
             return self.send(200, ICON_SVG, "image/svg+xml")
+        if u.path.startswith("/fonts/"):            # font giao diện (nhúng sẵn, không tải từ mạng)
+            data = font_file(u.path[7:])
+            if not data:
+                return self.send(404, {"error": "not found"})
+            return self.send(200, data, "font/woff2", {"Cache-Control": "max-age=31536000, immutable"})
         if u.path == "/ping":                       # bộ khởi động kiểm tra đúng tiến trình vừa chạy đã lên
             return self.send(200, {"pid": os.getpid(), "release": RELEASE})
         if u.path == "/":

@@ -270,21 +270,120 @@ main.withact .scroll,main.withact .compwrap,main.withact #decbar{margin-right:32
 .smenu{min-width:160px}.smenu button{align-items:center;font-size:13px}
 .claude.stage{margin-top:12px;color:var(--ink)}.claude.stage .txt{border-left:2px solid var(--line);padding-left:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ===== Maestro · Porcelain 2.0 (chat theo ChatGPT, quản lý task theo Linear; chỉ giao diện sáng) ===== */
+@font-face{font-family:Geist;src:url(/fonts/Geist-Variable.woff2) format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"Geist Mono";src:url(/fonts/GeistMono-Variable.woff2) format("woff2");font-weight:100 900;font-display:swap}
+:root{--bg:#FFFFFF;--side:#F7F7F7;--panel:#FFFFFF;--soft:#FAFAFA;--hover:#EFEFEF;--sel:#EAEAEA;--acc2:#EAEAEA;--line:#E8E8E8;
+--ink:#202020;--mute:#737373;--ok:#42785A;--t:150ms ease;--mono:"Geist Mono",ui-monospace,Consolas,monospace;--col:820px}
+body{font:15px/1.6 Geist,"Segoe UI",Arial,sans-serif;font-feature-settings:"ss01" 0}
+code,pre,.path,.mono{font-family:var(--mono)}
+.tnum,.wtime,.wpct,.umenu .ur span:last-child{font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:6px}
+button,.newtask,.tlist button,.pop button{transition:background var(--t),border-color var(--t),color var(--t)}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation-duration:1ms!important}}
+svg.i{width:18px;height:18px;stroke-width:1.75}
+/* khung app + thanh bên */
+html,body{height:100%}.app{height:100dvh;grid-template-columns:264px minmax(0,1fr)}
+.app.nosb{grid-template-columns:minmax(0,1fr)}.app.nosb aside{display:none}
+aside{padding:0 12px;background:var(--side)}
+.brand{height:56px;padding:0 4px;gap:10px;font-size:16px;font-weight:600;box-sizing:border-box}
+.brand .sbt{margin-left:auto;color:var(--mute)}.brand .bt{display:flex;align-items:baseline;gap:6px}.ver{margin-left:0}
+.newtask{height:36px;padding:0 10px;gap:10px;border-radius:8px;font-size:14px;margin:2px 0}
+.newtask:hover{background:var(--hover)}.newtask.on{background:var(--sel)}#btnNew{font-weight:500}
+.lbl{margin:24px 10px 6px;font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--mute)}
+.tlist{gap:2px}.tlist button,.tlist .ti{min-height:36px;border-radius:8px;font-size:14px}
+.tlist button:hover{background:var(--hover)}.tlist .on,.tlist button.on{background:var(--sel)}
+.foot{border-top:1px solid var(--line);padding:10px 2px 12px}.ais{font-size:12px;color:var(--mute)}
+.dot{width:6px;height:6px}
+.icon,button.icon{min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center;padding:0}
+/* đầu trang: cao 56px, cùng trục với thanh bên */
+.thead,.crumb{height:56px;box-sizing:border-box;padding:0 16px 0 24px;gap:8px;display:flex;align-items:center;flex:none;border-bottom:1px solid var(--line)}
+.crumb{font-size:13px;color:var(--mute)}
+.sbshow{margin-left:-8px;color:var(--mute)}
+.thead h1{font-size:15px;font-weight:600;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw;cursor:text;border-radius:6px;padding:2px 4px}
+.thead h1:hover{background:var(--hover)}
+.sdot{width:8px;height:8px;border-radius:50%;flex:none;background:#B5B5B5}.sdot.done{background:var(--ok)}.sdot.running,.sdot.queued{background:var(--ink)}
+.sdot.waiting,.sdot.login,.sdot.limit{background:#946520}.sdot.failed{background:var(--bad)}
+.hst{font-size:12px;color:var(--mute);white-space:nowrap}
+.kchip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 7px;font-size:12px}.kchip svg.i{width:14px;height:14px}
+.thead button,.crumb button,.wbtn,.pbtn{height:32px;box-sizing:border-box}
+.wbtn{margin-right:0;border-radius:8px}.thead .icon.on{background:var(--sel)}
+.hmenu{min-width:240px}.hmenu button{align-items:center}
+/* cột chat: 820px, căn giữa vùng main (không phải cả cửa sổ) */
+.thread{max-width:var(--col);width:100%;box-sizing:border-box;padding:24px 24px 16px;margin:0 auto;gap:28px}
+@media (max-width:900px){.thread{padding:16px}.compwrap{padding:8px 16px 16px!important}}
+.mwrap.u{align-items:flex-end}
+.msg.user{align-self:flex-end;max-width:min(80%,640px);padding:12px 16px;border-radius:18px;background:#F3F3F3;border:0;font-size:15px;line-height:1.6;white-space:pre-wrap}
+.claude{border:0;background:transparent;padding:0;width:100%}
+.claude.question,.claude.error{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+/* chữ trong câu trả lời */
+.claude .txt{font-size:15.5px;line-height:1.65;color:var(--ink)}
+.claude .txt p{margin:0 0 14px}.claude .txt>:last-child{margin-bottom:0}
+.claude .txt h1,.claude .txt h2{font-size:20px;line-height:1.4;font-weight:600;margin:24px 0 10px}
+.claude .txt h3,.claude .txt h4{font-size:17px;line-height:1.4;font-weight:600;margin:20px 0 8px}
+.claude .txt>h1:first-child,.claude .txt>h2:first-child,.claude .txt>h3:first-child{margin-top:0}
+.claude .txt ul,.claude .txt ol{padding-left:22px;margin:0 0 14px}.claude .txt li{margin:0 0 6px}
+.claude .txt code{font:0.9em var(--mono);background:#F3F3F3;border-radius:5px;padding:1px 5px;overflow-wrap:anywhere}
+.claude .txt pre{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow-x:auto;font:13px/1.55 var(--mono)}
+.claude .txt pre code{background:none;padding:0}
+.claude .txt table{border-collapse:collapse;display:block;overflow-x:auto;max-width:100%;margin:0 0 14px;font-size:14px}
+.claude .txt th,.claude .txt td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}.claude .txt th{background:var(--soft);font-weight:600}
+.claude .txt a{color:var(--ink);text-underline-offset:2px;overflow-wrap:anywhere}
+.macts{opacity:.0;transition:opacity var(--t)}.mwrap:hover .macts,.mwrap:focus-within .macts{opacity:1}
+/* tiến trình: khung gọn, chỉ đầu mục quan trọng */
+.work{border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.whead2{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;padding:10px 14px;border-radius:12px;font-size:14px;color:var(--ink);cursor:pointer;text-align:left}
+.whead2:hover{background:var(--soft)}.whead2 b{font-weight:500}.whead2 .grow{flex:1}
+.wtime,.wpct{font-size:13px;color:var(--mute)}.wchev{color:var(--mute);width:16px!important;height:16px!important}
+.wic{display:inline-flex;color:var(--mute)}.wic svg.i{width:16px;height:16px}.wic.done,.wic.completed{color:var(--ok)}.wic.failed,.wic.cancelled,.wic.rejected,.wic.timeout,.wic.x{color:var(--bad)}
+.wrows{border-top:1px solid var(--line);margin:0 14px;padding:6px 0 8px}.att{display:flex;align-items:center;gap:6px}.att svg.i,.a svg.i{width:14px;height:14px}
+.wrow{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:36px;font-size:14px}
+.wrow .wl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.wrow .wa{font-size:12.5px;color:var(--mute);white-space:nowrap}
+.spin.sm{width:12px;height:12px;border-width:1.5px}
+.wmore{border:0;background:transparent;color:var(--mute);font-size:12.5px;padding:4px 0;margin-top:2px}.wmore:hover{color:var(--ink);background:transparent}
+/* thẻ kết quả */
+.art{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:14px;background:var(--panel);width:100%;box-sizing:border-box}
+.arth{display:flex;align-items:center;gap:12px}.artic{width:44px;height:44px;border-radius:10px;background:#F3F3F3;display:flex;align-items:center;justify-content:center;flex:none;color:var(--ink)}
+.artt{flex:1;min-width:0;display:flex;flex-direction:column}.artt b{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.artt small{font-size:12.5px;color:var(--mute);font-variant-numeric:tabular-nums}
+.arth>button{display:inline-flex;align-items:center;gap:6px;height:32px;font-size:13px;font-weight:500;border-radius:8px;flex:none}.arth>button svg.i{width:14px;height:14px}
+.artl{border-top:1px solid var(--line);margin-top:14px;padding-top:6px;display:flex;flex-direction:column}
+.artf{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:10px;align-items:center;height:34px;border:0;background:transparent;padding:0 6px;margin:0 -6px;border-radius:6px;text-align:left;font-size:13.5px}
+.artf:hover{background:var(--soft)}.artf svg.i{width:16px;height:16px;color:var(--mute)}
+.artn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.artx{font-size:12px;color:var(--mute)}
+.artm{border:0;background:transparent;color:var(--mute);font-size:12.5px;text-align:left;padding:6px 0 0}.artm:hover{color:var(--ink);background:transparent}
+.mfoot2{margin-top:10px}.opv{margin-top:12px}
+/* ô nhập: bo 24px, nút + trái, chế độ + gửi phải */
+.compwrap{padding:8px 24px 20px!important}
+.comp{max-width:var(--col);width:100%;box-sizing:border-box;border-radius:24px;padding:16px 16px 12px;border:1px solid #E4E4E4;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.comp:focus-within{border-color:#CFCFCF}
+.comp textarea{font-size:15.5px;line-height:1.55;min-height:48px;max-height:240px;resize:none;padding:0 4px}
+.home .comp textarea{min-height:72px}
+.comp .bar{display:flex;align-items:center;gap:12px;margin-top:10px}
+.attach{width:36px;height:36px;border-radius:50%!important;color:var(--ink)!important;padding:0!important}.attach:hover{background:var(--hover)}
+.attach svg.i{width:20px;height:20px}
+#bSend,#bSend.sq,#bSend.pri{width:36px;height:36px;min-width:36px;border-radius:50%!important;padding:0;display:inline-flex;align-items:center;justify-content:center;background:#202020;border-color:#202020;color:#fff}
+#bSend svg.i{width:20px;height:20px;stroke-width:2}#bSend:hover{background:#000}#bSend:disabled{opacity:.35}
+.mbtn{display:inline-flex;align-items:center;gap:6px;height:32px;line-height:20px;padding:0 10px;border-radius:8px}
+.mbtn svg.i{width:16px;height:16px}.mbtn svg.chev{width:14px;height:14px;display:block;flex-shrink:0;color:var(--mute);transition:transform var(--t)}
+.mbtn[aria-expanded="true"] svg.chev{transform:rotate(180deg)}
+.mmenu button:focus-visible{outline-offset:-2px}.mmenu{z-index:60}
 </style>
 </head>
 <body>
 <div class="app">
   <aside>
-    <div class="brand"><img src="/icon.svg" alt=""><span class="bt">Maestro<span class="ver" id="ver"></span></span></div>
-    <button class="newtask" id="btnNew"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Task mới</button>
-    <button class="newtask ghost" id="btnLib" style="justify-content:flex-start;border-color:transparent"><svg class="i" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Lịch sử &amp; file</button>
+    <div class="brand"><img src="/icon.svg" alt=""><span class="bt">Maestro<span class="ver" id="ver"></span></span><button class="ghost icon sbt" id="sbHide" title="Thu gọn thanh bên" aria-label="Thu gọn thanh bên"><svg class="i" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" /> <path d="M9 3v18" /></svg></button></div>
+    <button class="newtask" id="btnNew"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14" /> <path d="M12 5v14" /></svg>Task mới</button>
+    <button class="newtask ghost" id="btnLib" style="justify-content:flex-start;border-color:transparent"><svg class="i" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /> <path d="M3 3v5h5" /> <path d="M12 7v5l4 2" /></svg>Lịch sử &amp; file</button>
     <div class="lbl">Gần đây</div>
     <div class="tlist" id="tlist"></div>
     <div class="foot">
       <div class="ais" id="aiDots"></div>
-      <div class="fbtns"><button class="ghost" id="btnSet" aria-label="Cài đặt"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Cài đặt</button><span style="flex:1"></span>
-      <button class="ghost icon" id="btnUse" title="Mức dùng của các gói AI" aria-label="Mức dùng"><svg class="i" viewBox="0 0 24 24"><path d="M4.5 16.5a8 8 0 1 1 15 0"/><path d="M12 13.5l3.5-4"/><circle cx="12" cy="14" r="1.3"/></svg></button>
-      <button class="ghost icon" id="btnOut" title="Mở thư mục kết quả" aria-label="Mở thư mục kết quả"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button></div>
+      <div class="fbtns"><button class="ghost" id="btnSet" aria-label="Cài đặt"><svg class="i" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /> <circle cx="12" cy="12" r="3" /></svg>Cài đặt</button><span style="flex:1"></span>
+      <button class="ghost icon" id="btnUse" title="Mức dùng của các gói AI" aria-label="Mức dùng"><svg class="i" viewBox="0 0 24 24"><path d="m12 14 4-4" /> <path d="M3.34 19a10 10 0 1 1 17.32 0" /></svg></button>
+      <button class="ghost icon" id="btnOut" title="Mở thư mục kết quả" aria-label="Mở thư mục kết quả"><svg class="i" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" /></svg></button></div>
     </div>
   </aside>
   <main id="main"></main>
@@ -298,6 +397,7 @@ main.withact .scroll,main.withact .compwrap,main.withact #decbar{margin-right:32
 <div id="toast" role="status"></div>
 <div class="pop pmenu" id="pMenu" role="menu" style="position:fixed"></div>
 <div class="pop smenu" id="sMenu" role="menu" style="position:fixed"></div>
+<div class="pop hmenu" id="hMenu" role="menu" style="position:fixed"></div>
 <div class="ed" id="ed">
   <div class="edst" id="edSt"><canvas id="edC"></canvas><input id="edTx" class="edtx" type="text" placeholder="Nhập chữ, Enter"></div>
   <div class="edbar" id="edBar">
@@ -330,25 +430,27 @@ const AIN = { claude: "Claude", codex: "ChatGPT / Codex", gemini: "Gemini" };
 const WN = { codex: "ChatGPT", gemini: "Gemini", judge: "Chấm độc lập" };
 const PH_NEW = "Giao việc đi, Maestro chịu được";
 const PH_MORE = "Giao thêm việc đi, Maestro chịu được";
+const LU = {"plus": "<path d=\"M5 12h14\" /> <path d=\"M12 5v14\" />", "arrow-up": "<path d=\"m5 12 7-7 7 7\" /> <path d=\"M12 19V5\" />", "chevron-down": "<path d=\"m6 9 6 6 6-6\" />", "chevron-up": "<path d=\"m18 15-6-6-6 6\" />", "chevron-right": "<path d=\"m9 18 6-6-6-6\" />", "folder": "<path d=\"M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z\" />", "folder-open": "<path d=\"m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2\" />", "paperclip": "<path d=\"m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48\" />", "pencil": "<path d=\"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z\" /> <path d=\"m15 5 4 4\" />", "trash-2": "<path d=\"M3 6h18\" /> <path d=\"M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6\" /> <path d=\"M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2\" /> <line x1=\"10\" x2=\"10\" y1=\"11\" y2=\"17\" /> <line x1=\"14\" x2=\"14\" y1=\"11\" y2=\"17\" />", "file": "<path d=\"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z\" /> <path d=\"M14 2v4a2 2 0 0 0 2 2h4\" />", "file-text": "<path d=\"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z\" /> <path d=\"M14 2v4a2 2 0 0 0 2 2h4\" /> <path d=\"M10 9H8\" /> <path d=\"M16 13H8\" /> <path d=\"M16 17H8\" />", "file-spreadsheet": "<path d=\"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z\" /> <path d=\"M14 2v4a2 2 0 0 0 2 2h4\" /> <path d=\"M8 13h2\" /> <path d=\"M14 13h2\" /> <path d=\"M8 17h2\" /> <path d=\"M14 17h2\" />", "image": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" ry=\"2\" /> <circle cx=\"9\" cy=\"9\" r=\"2\" /> <path d=\"m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21\" />", "file-code": "<path d=\"M10 12.5 8 15l2 2.5\" /> <path d=\"m14 12.5 2 2.5-2 2.5\" /> <path d=\"M14 2v4a2 2 0 0 0 2 2h4\" /> <path d=\"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z\" />", "ellipsis": "<circle cx=\"12\" cy=\"12\" r=\"1\" /> <circle cx=\"19\" cy=\"12\" r=\"1\" /> <circle cx=\"5\" cy=\"12\" r=\"1\" />", "pin": "<path d=\"M12 17v5\" /> <path d=\"M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z\" />", "folder-kanban": "<path d=\"M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z\" /> <path d=\"M8 10v4\" /> <path d=\"M12 10v2\" /> <path d=\"M16 10v6\" />", "refresh-cw": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\" /> <path d=\"M21 3v5h-5\" /> <path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\" /> <path d=\"M8 16H3v5\" />", "layout-template": "<rect width=\"18\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\" /> <rect width=\"9\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\" /> <rect width=\"5\" height=\"7\" x=\"16\" y=\"14\" rx=\"1\" />", "activity": "<path d=\"M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2\" />", "check": "<path d=\"M20 6 9 17l-5-5\" />", "circle-check": "<circle cx=\"12\" cy=\"12\" r=\"10\" /> <path d=\"m9 12 2 2 4-4\" />", "circle-x": "<circle cx=\"12\" cy=\"12\" r=\"10\" /> <path d=\"m15 9-6 6\" /> <path d=\"m9 9 6 6\" />", "circle-pause": "<circle cx=\"12\" cy=\"12\" r=\"10\" /> <line x1=\"10\" x2=\"10\" y1=\"15\" y2=\"9\" /> <line x1=\"14\" x2=\"14\" y1=\"15\" y2=\"9\" />", "loader-circle": "<path d=\"M21 12a9 9 0 1 1-6.219-8.56\" />", "gauge": "<path d=\"m12 14 4-4\" /> <path d=\"M3.34 19a10 10 0 1 1 17.32 0\" />", "panel-left": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" /> <path d=\"M9 3v18\" />", "settings": "<path d=\"M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z\" /> <circle cx=\"12\" cy=\"12\" r=\"3\" />", "list": "<path d=\"M3 12h.01\" /> <path d=\"M3 18h.01\" /> <path d=\"M3 6h.01\" /> <path d=\"M8 12h13\" /> <path d=\"M8 18h13\" /> <path d=\"M8 6h13\" />", "brain": "<path d=\"M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z\" /> <path d=\"M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z\" /> <path d=\"M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4\" /> <path d=\"M17.599 6.5a3 3 0 0 0 .399-1.375\" /> <path d=\"M6.003 5.125A3 3 0 0 0 6.401 6.5\" /> <path d=\"M3.477 10.896a4 4 0 0 1 .585-.396\" /> <path d=\"M19.938 10.5a4 4 0 0 1 .585.396\" /> <path d=\"M6 18a4 4 0 0 1-1.967-.516\" /> <path d=\"M19.967 17.484A4 4 0 0 1 18 18\" />", "git-branch": "<line x1=\"6\" x2=\"6\" y1=\"3\" y2=\"15\" /> <circle cx=\"18\" cy=\"6\" r=\"3\" /> <circle cx=\"6\" cy=\"18\" r=\"3\" /> <path d=\"M18 9a9 9 0 0 1-9 9\" />", "zap": "<path d=\"M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z\" />", "leaf": "<path d=\"M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z\" /> <path d=\"M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12\" />", "code": "<polyline points=\"16 18 22 12 16 6\" /> <polyline points=\"8 6 2 12 8 18\" />", "square": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" />", "x": "<path d=\"M18 6 6 18\" /> <path d=\"m6 6 12 12\" />", "history": "<path d=\"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\" /> <path d=\"M3 3v5h5\" /> <path d=\"M12 7v5l4 2\" />", "rotate-ccw": "<path d=\"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\" /> <path d=\"M3 3v5h5\" />", "copy": "<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\" /> <path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\" />", "external-link": "<path d=\"M15 3h6v6\" /> <path d=\"M10 14 21 3\" /> <path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\" />"};   // Lucide (ISC)
+const lu = (n) => `<svg class="i" viewBox="0 0 24 24">${LU[n] || ""}</svg>`;
 const I = {
   chat: '<svg class="i" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></svg>',
   code: '<svg class="i" viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg>',
-  attach: '<svg class="i" viewBox="0 0 24 24"><path d="m21.4 11-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>',
-  send: '<svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
-  chev: '<svg class="i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
-  edit: '<svg class="i" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
-  trash: '<svg class="i" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
-  file: '<svg class="i" viewBox="0 0 24 24"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></svg>',
-  sheet: '<svg class="i" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M4 9h16M4 15h16M10 3v18"/></svg>',
-  img: '<svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg>',
-  code: '<svg class="i" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4"/></svg>',
-  folder: '<svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
-  more: '<svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/></svg>',
-  pin: '<svg class="i" viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/></svg>',
-  proj: '<svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M8 13h8"/></svg>',
-  down: '<svg class="i" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>',
-  tpl: '<svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16M9 9v11"/></svg>',
-  refresh: '<svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>',
+  attach: lu("plus"),
+  send: lu("arrow-up"),
+  chev: lu("chevron-right"),
+  edit: lu("pencil"),
+  trash: lu("trash-2"),
+  file: lu("file"),
+  sheet: lu("file-spreadsheet"),
+  img: lu("image"),
+  code: lu("file-code"),
+  folder: lu("folder"),
+  more: lu("ellipsis"),
+  pin: lu("pin"),
+  proj: lu("folder-kanban"),
+  down: lu("chevron-down"),
+  tpl: lu("layout-template"),
+  refresh: lu("refresh-cw"),
 };
 let S = null, T = null, sel = sessionStorage.getItem("sel") || "", files = [], prev = {}, tab = "acc", form = null, firstRun = false;
 let view = "", lib = null, libTab = "tasks", libQ = "";
@@ -379,21 +481,29 @@ document.addEventListener("drop", (e) => {
   files.push(...e.dataTransfer.files); renderAtts(); $("txt").focus();
 });
 function mdInline(l) { return l.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<i>$2</i>"); }
-function md(s) {
-  const out = []; let list = false, tb = null;
+function md(s) {      // markdown gọn: tiêu đề, danh sách (•/1.), bảng, khối code — chỉ đổi cách hiển thị, không đổi nội dung
+  const out = []; let list = "", tb = null, code = null;
+  const endList = () => { if (list) { out.push(`</${list}>`); list = ""; } };
   const flushT = () => { if (!tb) return; const rows = tb.filter((r) => !/^\|?\s*:?-{2,}/.test(r)).map((r) => r.replace(/^\||\|$/g, "").split("|").map((c) => mdInline(c.trim())));
     out.push(`<div class="mdt"><table>${rows.map((r, i) => `<tr>${r.map((c) => i ? `<td>${c}</td>` : `<th>${c}</th>`).join("")}</tr>`).join("")}</table></div>`); tb = null; };
   for (const raw of esc(s).split("\n")) {
-    if (/^\s*\|.*\|\s*$/.test(raw)) { if (list) { out.push("</ul>"); list = false; } (tb = tb || []).push(raw.trim()); continue; }
+    if (/^\s*```/.test(raw)) { if (code) { out.push(`<pre><code>${code.join("\n")}</code></pre>`); code = null; } else { endList(); flushT(); code = []; } continue; }
+    if (code) { code.push(raw); continue; }
+    if (/^\s*\|.*\|\s*$/.test(raw)) { endList(); (tb = tb || []).push(raw.trim()); continue; }
     flushT();
-    let l = mdInline(raw);
-    const m = l.match(/^(\s*)[-*•] (.*)$/), h = l.match(/^#{1,4} (.*)$/);
-    if (m) { if (!list) { out.push("<ul>"); list = true; } out.push(`<li style="margin-left:${Math.min(m[1].length, 8) * 8}px">${m[2]}</li>`); continue; }
-    if (list) { out.push("</ul>"); list = false; }
-    out.push(h ? `<p><b>${h[1]}</b></p>` : l.trim() ? `<p>${l}</p>` : "");
+    const l = mdInline(raw);
+    const ul = l.match(/^(\s*)[-*•] (.*)$/), ol = l.match(/^(\s*)\d{1,3}[.)] (.*)$/), h = l.match(/^(#{1,4}) (.*)$/);
+    if (ul || ol) {
+      const k = ul ? "ul" : "ol", m = ul || ol;
+      if (list !== k) { endList(); out.push(`<${k}>`); list = k; }
+      out.push(`<li${m[1].length ? ` style="margin-left:${Math.min(m[1].length, 8) * 8}px"` : ""}>${m[2]}</li>`); continue;
+    }
+    if (list && !l.trim()) continue;           // dòng trống giữa các mục vẫn giữ cùng danh sách
+    endList();
+    out.push(h ? `<h${h[1].length <= 2 ? 2 : 3}>${h[2]}</h${h[1].length <= 2 ? 2 : 3}>` : l.trim() ? `<p>${l}</p>` : "");
   }
-  flushT();
-  if (list) out.push("</ul>");
+  if (code) out.push(`<pre><code>${code.join("\n")}</code></pre>`);
+  flushT(); endList();
   return out.join("");
 }
 function dur(sec) { sec = Math.max(0, Math.round(sec)); const m = Math.floor(sec / 60), s = sec % 60; return m ? `${m}m ${s}s` : `${s}s`; }
@@ -602,19 +712,14 @@ function renderSide() {
 function composer(id, ph) {
   return `<div class="comp" id="${id}"><div class="atts" id="atts"></div>
     <textarea id="txt" placeholder="${ph}" aria-label="Tin nhắn"></textarea>
-    <div class="bar"><span class="msel"><button class="ghost" id="bFile" title="Đính kèm (hoặc dán / kéo thả)" aria-label="Đính kèm file">${I.attach}Đính kèm</button><div class="pop tmenu" id="tplMenu" role="menu"></div></span>
+    <div class="bar"><span class="msel"><button class="ghost icon attach" id="bFile" title="Đính kèm file (hoặc dán Ctrl+V / kéo thả)" aria-label="Đính kèm file">${lu("plus")}</button><div class="pop tmenu" id="tplMenu" role="menu"></div></span>
       <span style="flex:1"></span><span class="hint" id="cHint"></span>
       <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="pop mmenu" id="modeMenu" role="menu"></div></span>
       <button class="pri sq" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
 const MODE = { pro: ["Pro", "Suy nghĩ sâu, chấm kĩ, tốn hạn mức"], balanced: ["Balanced", "Cân bằng chất lượng và tốc độ"], turbo: ["Turbo", "Nhanh nhất, giảm thẩm định"], eco: ["Eco", "Ít hạn mức nhất, chậm hơn"], code: ["Code", "Mạnh về coding, tự chạy thử"] };
 const normMode = m => ({ fast: "pro", saver: "eco" })[m] || (MODE[m] ? m : "balanced");
-const MICON = {
-  pro: '<svg class="i" viewBox="0 0 24 24"><path d="M9.5 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"/><path d="M12.5 9h2a2 2 0 0 0 2-2M12.5 14h3a2 2 0 0 1 2 2v1M16.5 11h3"/></svg>',
-  balanced: '<svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 4v11.8M18 8.2a8 8 0 0 1-8 8H8.2"/></svg>',
-  turbo: '<svg class="i" viewBox="0 0 24 24"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg>',
-  eco: '<svg class="i" viewBox="0 0 24 24"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14z"/><path d="M5 19l7-7"/></svg>',
-  code: '<svg class="i" viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg>' };
+const MICON = { pro: lu("brain"), balanced: lu("git-branch"), turbo: lu("zap"), eco: lu("leaf"), code: lu("code") };
 let curMode = "balanced";
 function lsGet(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -624,10 +729,16 @@ function paintKind() {       // chế độ Code: Maestro tự tạo thư mục 
 }
 function paintMode() {
   if (!$("modeBtn")) return;
-  $("modeBtn").innerHTML = `${MICON[curMode]}${MODE[curMode][0]}<svg class="i" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>`;
+  $("modeBtn").innerHTML = `${MICON[curMode]}<span>${MODE[curMode][0]}</span><svg class="i chev" viewBox="0 0 24 24">${LU["chevron-down"]}</svg>`;
   $("modeMenu").innerHTML = Object.entries(MODE).map(([k, [n, d]]) => `<button data-mode="${k}" class="${k === curMode ? "on" : ""}" role="menuitem"><span class="ck">${MICON[k]}</span><span><b>${n}</b><small>${d}</small></span></button>`).join("");
 }
-document.addEventListener("click", () => $("modeMenu")?.classList.remove("show"));
+document.addEventListener("click", () => { $("modeMenu")?.classList.remove("show"); $("modeBtn")?.setAttribute("aria-expanded", "false"); });
+document.addEventListener("keydown", (e) => {      // menu chế độ: Esc đóng, mũi tên chọn
+  const m = $("modeMenu"); if (!m || !m.classList.contains("show")) return;
+  const items = [...m.querySelectorAll("[data-mode]")], i = items.indexOf(document.activeElement);
+  if (e.key === "Escape") { m.classList.remove("show"); $("modeBtn").setAttribute("aria-expanded", "false"); $("modeBtn").focus(); }
+  else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1) + (i < 0 ? 0 : 0)) % items.length]?.focus(); }
+});
 const STOP = '<svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>';
 function stopMode() { return !!(T && $("taskComp") && T.status === "running" && !$("txt").value.trim() && !files.length); }
 function sendIcon() { const b = $("bSend"); if (!b || b.disabled) return; const st = stopMode(); b.innerHTML = st ? STOP : I.send; b.classList.add("sq"); b.title = st ? "Dừng và hủy task đang làm" : "Gửi (Enter · Shift+Enter xuống dòng)"; }
@@ -657,11 +768,13 @@ function bindComposer(onSend) {
   if (c.id === "homeComp") paintKind();
   $("modeBtn").onclick = (e) => {      // menu mở lên trên; phía trên không đủ chỗ (trang chủ) thì mở xuống dưới
     e.stopPropagation(); const m = $("modeMenu"); m.classList.remove("down"); m.style.maxHeight = ""; m.classList.toggle("show");
+    $("modeBtn").setAttribute("aria-expanded", m.classList.contains("show"));
     if (!m.classList.contains("show")) return;
     const up = m.getBoundingClientRect().top, below = innerHeight - $("modeBtn").getBoundingClientRect().bottom;
-    if (up < 8 && below > $("modeBtn").getBoundingClientRect().top) m.classList.add("down");   // bên dưới rộng hơn -> mở xuống
+    const HEAD = 64;                     // thanh đầu trang cao 56px: menu không được nằm dưới nó
+    if (up < HEAD && below > $("modeBtn").getBoundingClientRect().top - HEAD) m.classList.add("down");   // bên dưới rộng hơn -> mở xuống
     const r = m.getBoundingClientRect();
-    if (r.top < 8 || r.bottom > innerHeight - 8) { m.style.maxHeight = (m.classList.contains("down") ? innerHeight - r.top - 8 : r.bottom - 8) + "px"; m.style.overflowY = "auto"; }
+    if (r.top < HEAD || r.bottom > innerHeight - 8) { m.style.maxHeight = (m.classList.contains("down") ? innerHeight - r.top - 8 : r.bottom - HEAD) + "px"; m.style.overflowY = "auto"; }
   };
   $("modeMenu").onclick = async (e) => {
     const b = e.target.closest("[data-mode]"); if (!b) return; e.stopPropagation();
@@ -677,7 +790,23 @@ function bindComposer(onSend) {
   ta.addEventListener("focus", chk); ta.addEventListener("input", chk);
   renderAtts();
 }
-function fit(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, innerHeight * 0.6) + "px"; }
+document.addEventListener("paste", (e) => {
+  const ae = document.activeElement, ta = $("txt");
+  if (!ta || e.defaultPrevented || (ae && (ae.matches("input,textarea,[contenteditable]")) ) || $("ov").classList.contains("show")) return;
+  const got = [...(e.clipboardData?.items || [])].filter((it) => it.kind === "file").map((it) => it.getAsFile()).filter(Boolean);
+  if (got.length) {                       // ảnh/file -> đính kèm
+    e.preventDefault();
+    const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
+    got.forEach((f, i) => { const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg"); const generic = !f.name || /^image\.(png|jpe?g|gif|webp)$/i.test(f.name);
+      files.push(generic ? new File([f], `anh-dan-${stamp}${got.length > 1 ? "-" + (i + 1) : ""}.${ext}`, { type: f.type }) : f); });
+    renderAtts(); ta.focus(); return;
+  }
+  const txt = e.clipboardData?.getData("text"); if (!txt) return;   // chữ -> chèn vào ô nhập
+  e.preventDefault(); ta.focus(); const p = ta.selectionStart ?? ta.value.length;
+  ta.value = ta.value.slice(0, p) + txt + ta.value.slice(ta.selectionEnd ?? p); ta.selectionStart = ta.selectionEnd = p + txt.length;
+  fit(ta); ta.dispatchEvent(new Event("input"));
+});
+function fit(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, 240) + "px"; }
 addEventListener("resize", () => $("txt") && fit($("txt")));
 const _purl = new WeakMap();
 function purl(f) { if (!_purl.has(f)) _purl.set(f, URL.createObjectURL(f)); return _purl.get(f); }
@@ -685,7 +814,7 @@ function renderAtts() {
   const a = $("atts"); if (!a) return;
   a.innerHTML = files.map((f, i) => f.type?.startsWith("image/")
     ? `<span class="pv" title="${esc(f.name)}"><img src="${purl(f)}" data-lbsrc="1" data-fi="${i}" style="cursor:zoom-in" alt="${esc(f.name)}"><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`
-    : `<span class="a"><span>📎 ${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
+    : `<span class="a">${lu("paperclip")}<span>${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
   a.style.display = files.length ? "flex" : "none";
   paintTpl(); sendIcon();
 }
@@ -734,7 +863,7 @@ const JUDGE_MODES = ["pro", "balanced", "code"];      // các chế độ tự b
 function homeJudge() { const v = lsGet("judge"); return v ? v === "1" : JUDGE_MODES.includes(normMode(lsGet("mode"))); }
 function watchBtn() {       // nút Giám sát: giám khảo chấm, sửa tới khi đạt (Pro/Balanced tự bật khi đổi chế độ)
   const on = T && $("taskComp") ? !!T.judge : homeJudge();
-  return `<button class="wbtn ${on ? "on" : ""}" id="wBtn" data-watch="1" aria-pressed="${on}" data-tip="Giám sát ${on ? "đang bật" : "đang tắt"}: lâu hơn nhưng sẽ check đến khi hoàn thiện">${WHISTLE}Giám sát</button>`;
+  return `<button class="wbtn ${on ? "on" : ""}" id="wBtn" data-watch="1" aria-pressed="${on}" data-tip="Giám sát: Lâu hơn, tự check và fix đến khi hoàn thiện">${WHISTLE}Giám sát</button>`;
 }
 function repaintWatch() { const b = $("wBtn"); if (b) b.outerHTML = watchBtn(); }
 function projBtn() { const p = S.projects.find((x) => x.id === curProj()); return `<button class="pbtn" id="pBtn" aria-haspopup="true" title="Dự án và bộ nhớ dự án">${I.proj}${p ? esc(p.name) : "Project"}${I.down}</button>`; }
@@ -795,7 +924,7 @@ function freeBar() {        // gói miễn phí: ChatGPT làm quản lý, mời 
 function renderHome() {
   T = null; lastSnap = "";
   const rec = S.tasks.slice(0, 5);
-  $("main").innerHTML = `<div class="crumb"><span>Workspace / Task mới</span><span class="grow"></span>${watchBtn()}${projBtn()}</div>
+  $("main").innerHTML = `<div class="crumb">${document.querySelector(".app").classList.contains("nosb") ? SBSHOW : ""}<span>Workspace / Task mới</span><span class="grow"></span>${watchBtn()}${projBtn()}</div>
     <div class="home"><div class="in"><h2>Hôm nay làm gì?</h2>
     ${freeBar()}${composer("homeComp", PH_NEW)}
     ${rec.length ? `<div class="recent"><div class="k">Task gần đây</div>${rec.map((t) => `<button data-sel="${t.id}"><span>${esc(t.title)}</span><small>${esc(whenTxt(t.created))}</small></button>`).join("")}</div>` : ""}</div></div>`;
@@ -816,27 +945,52 @@ async function sendNew() {
 }
 
 /* ---------------- task ---------------- */
+const TOOL_STEP = /^(Chạy|Đọc|Ghi|Sửa|Tìm|Xem|Sub-agent|Cập nhật kế hoạch|Giao |Kiểm tra|ToolSearch|mcp__|Web|Đang khởi động)/;
 function workBlock(m, i) {
+  // Trong chat chỉ hiện đầu mục quan trọng: việc đang làm (worker đang chạy, câu Claude báo đang làm gì);
+  // xong việc nào thì việc đó tự rời đi. Toàn bộ bước chi tiết ở tab Activity.
   const key = T.id + ":" + i, live = m.status === "running";
   const open = live ? !closedW.has(key) : openW.has(key);
   const el = live ? (T._now - m.started_ts) + (Date.now() - fetchedAt) / 1000 : (m.ended_ts || m.started_ts) - m.started_ts;
-  const label = live ? `<span class="spin"></span>Đang làm · <span data-timer="${m.started_ts}">${clock(el)}</span>`
-    : { done: `Đã làm trong ${dur(el)}`, interrupted: `Dừng để nhận tin mới · ${dur(el)}`, paused: `Tạm dừng sau ${dur(el)}`, cancelled: `Đã hủy sau ${dur(el)}`, failed: `Lỗi sau ${dur(el)}` }[m.status] || dur(el);
-  const nsub = live && m.progress != null ? ` · Process ${m.progress}%` : "";
-  const steps = m.steps;
-  const subs = m.subtasks.length ? `<div class="subs">${m.subtasks.map((s) => `<div class="sub" title="${esc(s.error)}"><span class="id">${esc(s.id)}</span><span class="tt">${esc(s.title || "—")}</span>
-      <span class="chip">${WN[s.worker] || s.worker || "…"}${s.model ? " · " + esc(s.model) : ""}${s.attempt > 1 ? " · lần " + s.attempt : ""}</span>
-      <span class="pill ${s.status}">${s.status === "running" ? "Đang làm" : ST[s.status] || s.status}</span></div>`).join("")}</div>` : "";
+  const ST2 = { done: ["circle-check", "Hoàn thành"], interrupted: ["circle-pause", "Dừng để nhận tin mới"], paused: ["circle-pause", "Tạm dừng"],
+    cancelled: ["circle-x", "Đã hủy"], failed: ["circle-x", "Lỗi"], limit: ["circle-pause", "Hết hạn mức"] }[m.status] || ["circle-check", "Xong"];
+  const head = live ? `<span class="spin"></span><b>Đang làm</b>` : `<span class="wic ${m.status}">${lu(ST2[0])}</span><b>${ST2[1]}</b>`;
+  const right = live ? `${m.progress != null ? `<span class="wpct">${m.progress}%</span>` : ""}<span class="wtime" data-timer="${m.started_ts}">${clock(el)}</span>` : `<span class="wtime">${dur(el)}</span>`;
+  const subs = m.subtasks || [], who = (w) => WN[w] || w || "";
+  let rows = [];
+  if (live) {
+    const narr = (m.steps || []).filter((s) => !TOOL_STEP.test(s));
+    const cur = narr[narr.length - 1];
+    if (cur) rows.push([`<span class="spin sm"></span>`, cur, "Claude"]);
+    subs.filter((s) => s.status === "running").forEach((s) => rows.push([`<span class="spin sm"></span>`, s.title || s.id, who(s.worker)]));
+    if (!rows.length) rows.push([`<span class="spin sm"></span>`, (m.steps || []).length ? m.steps[m.steps.length - 1] : "Đang khởi động…", ""]);
+  } else {
+    subs.forEach((s) => rows.push([`<span class="wic ${s.status === "completed" ? "done" : s.status}">${lu(s.status === "completed" ? "check" : ["failed", "rejected", "timeout"].includes(s.status) ? "x" : "check")}</span>`, s.title || s.id, who(s.worker)]));
+    if (!rows.length) (m.steps || []).filter((s) => !TOOL_STEP.test(s)).slice(-4).forEach((s) => rows.push([`<span class="wic done">${lu("check")}</span>`, s, "Claude"]));
+  }
+  const body = open ? `<div class="wrows">${rows.map(([ic, txt, ag]) => `<div class="wrow">${ic}<span class="wl" title="${esc(txt)}">${esc(txt)}</span><span class="wa">${esc(ag)}</span></div>`).join("")}
+      <button class="wmore" data-openact="1">Xem toàn bộ ở Activity</button></div>` : "";
   const stg = live && (m.stages || []).length ? m.stages.map((x) => `<div class="claude stage"><div class="txt">${md(x)}</div></div>`).join("") : "";
-  return `<div class="work"><button class="whead ${open ? "open" : ""}" data-w="${key}" data-live="${live ? 1 : 0}">${label}${nsub}${I.chev}</button>
-    ${open ? `<div class="wbody">${steps.map((s, j) => `<div class="wstep ${live && j === steps.length - 1 ? "cur" : ""}" title="${esc(s)}">${esc(s)}</div>`).join("") || "<div class='wstep'>Đang khởi động…</div>"}</div>` : ""}${live || open ? subs : ""}${stg}</div>`;
+  return `<div class="work ${live ? "live" : ""}"><button class="whead2" data-w="${key}" data-live="${live ? 1 : 0}" aria-expanded="${open}">${head}<span class="grow"></span>${right}<svg class="i wchev" viewBox="0 0 24 24">${LU[open ? "chevron-up" : "chevron-down"]}</svg></button>${body}</div>${stg}`;
+}
+const fMore = new Set();
+function artifact(m, i) {      // thẻ kết quả: tên thư mục, số file theo loại, vài file đầu, mở thư mục (đúng dữ liệu đã ghi nhận)
+  const fs = m.files || [], n = fs.length, dir = m.dir || T.output || "";
+  const name = (dir.split(/[\/]/).filter(Boolean).pop() || "Kết quả");
+  const by = {}; fs.forEach((f) => { const e = (f.split(".").pop() || "").toUpperCase(); if (e && e.length <= 5) by[e] = (by[e] || 0) + 1; });
+  const meta = [`${n}${n >= 30 ? "+" : ""} file`, ...Object.entries(by).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([e, c]) => `${c} ${e}`)].join(" · ");
+  const all = fMore.has(T.id + ":" + i), show = all ? fs : fs.slice(0, 3);
+  return `<div class="art"><div class="arth"><span class="artic">${lu("folder-open")}</span><span class="artt"><b title="${esc(dir)}">${esc(name)}</b><small>${esc(meta)}</small></span>
+    <button data-act="open" data-dir="${esc(m.dir || "")}" title="${esc(dir)}">Mở thư mục ${lu("external-link")}</button></div>
+    <div class="artl">${show.map((f) => `<button class="artf" data-ofo="${esc(f)}" data-oi="${i}" title="Mở ${esc(f)}">${ficon(f)}<span class="artn">${esc(f)}</span><span class="artx">${esc((f.split(".").pop() || "").toUpperCase())}</span></button>`).join("")}
+    ${!all && n > 3 ? `<button class="artm" data-fmore="${T.id}:${i}">+ ${n - 3} file</button>` : ""}</div></div>`;
 }
 function attHtml(fs) {
   if (!fs.length) return "";
   const isImg = (f) => /\.(png|jpe?g|gif|webp)$/i.test(f), src = (f) => `/api/input?t=${T.id}&name=${encodeURIComponent(f)}`;
   const imgs = fs.filter(isImg), rest = fs.filter((f) => !isImg(f));
   return (imgs.length ? `<div class="thumbs">${imgs.map((f) => `<a href="${src(f)}" data-lb="1" title="${esc(f)}"><img src="${src(f)}" alt="${esc(f)}" loading="lazy"></a>`).join("")}</div>` : "") +
-    (rest.length ? `<div class="att">📎 ${rest.map(esc).join(", ")}</div>` : "");
+    (rest.length ? `<div class="att">${lu("paperclip")}<span>${rest.map(esc).join(", ")}</span></div>` : "");
 }
 let decOpen = false;
 /* ---------------- Activity panel + thao tác trên tin nhắn ---------------- */
@@ -878,19 +1032,18 @@ function renderTask() {
   const t = T, live = ["running", "queued", "login"].includes(t.status);
   const sc0 = document.querySelector(".scroll"), wasBottom = !sc0 || sc0.scrollHeight - sc0.scrollTop - sc0.clientHeight < 80;
   const acts = [];
-  acts.push(`<button class="ghost icon ${actOpen ? "on" : ""}" id="bAct" title="Activity" aria-label="Activity"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></button>`);
-  acts.push(watchBtn());
-  acts.push(projBtn());
   if (["paused", "failed"].includes(t.status)) acts.push(`<button class="pri" data-act="resume">Tiếp tục</button>`);
-  if (t.kind === "code") acts.unshift(`<span class="kchip" title="${esc(t.pdir || "")}">${I.code} Code</span>`);
-  if (t.kind === "code" && t.can_restore && !live) acts.push(`<button data-act="restore" title="Đưa thư mục dự án về như trước lượt làm cuối">Khôi phục</button>`);
+  acts.push(watchBtn());
+  acts.push(`<button class="ghost icon ${actOpen ? "on" : ""}" id="bAct" title="Activity — toàn bộ tiến trình" aria-label="Activity" aria-pressed="${actOpen}">${lu("activity")}</button>`);
+  acts.push(projBtn());
+  acts.push(`<button class="ghost icon" id="bMore" title="Thêm" aria-label="Thêm" aria-haspopup="true">${lu("ellipsis")}</button>`);
   const lastC = t.messages.map((m) => m.role).lastIndexOf("claude");
   const nSubs = t.messages.reduce((a, m) => a + (m.subtasks || []).length, 0);
   const body = t.messages.map((m, i) => {
     if (m.role === "user") return `<div class="mwrap u"><div class="msg user">${esc(m.text)}${attHtml(m.files || [])}</div>${mActs(m, i, "user")}</div>`;
     if (m.role === "work") return workBlock(m, i);
     const n = (m.files || []).length;
-    const fl = n ? `<button class="openf" data-act="open" data-dir="${esc(m.dir || "")}" title="${esc(m.dir || T.output)}">${I.folder}Open folder · ${n} file</button>` : "";
+    const fl = n ? artifact(m, i) : "";
     const sv = i === lastC && t.status === "done" && nSubs >= 2
       ? (t.tpl_saved ? `<button class="savet" disabled>${I.tpl}Đã lưu template</button>` : `<button class="savet" data-savet="1">${I.tpl}Save Template</button>`) : "";
     const ims = n && n < 5 ? (m.files || []).filter((f) => /\.(png|jpe?g|gif|webp)$/i.test(f)) : [];
@@ -907,17 +1060,34 @@ function renderTask() {
     $("taskComp").dataset.t = t.id;
     bindComposer(sendMore); curTpl = ""; bindTpl();
   }
-  $("thead").innerHTML = `<span class="pill ${t.status}" title="${t.hold_until ? "Tự chạy tiếp lúc " + hhmm(t.hold_until) : ""}">${ST[t.status]}${t.hold_until ? " · " + hhmm(t.hold_until) : ""}</span>
-      <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1><button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
+  const stx = t.status === "done" ? "" : `${ST[t.status] || t.status}${t.hold_until ? " · tự chạy tiếp " + hhmm(t.hold_until) : ""}`;
+  $("thead").innerHTML = `${document.querySelector(".app").classList.contains("nosb") ? SBSHOW : ""}<span class="sdot ${t.status}" title="${esc(ST[t.status] || t.status)}"></span>
+      <h1 id="tTitle" title="${esc(t.title)} — bấm để đổi tên" tabindex="0">${esc(t.title)}</h1>${t.kind === "code" ? `<span class="kchip" title="${esc(t.pdir || "")}">${lu("code")}Code</span>` : ""}${stx ? `<span class="hst">${esc(stx)}</span>` : ""}
       <span class="grow"></span>${acts.join("")}`;
   $("decbar").innerHTML = decHtml(t);
   sendIcon(); if (curMode !== normMode(t.mode) && !$("modeMenu").classList.contains("show")) { curMode = normMode(t.mode); paintMode(); }
   $("thread").innerHTML = body + queued;
-  $("bRename").onclick = startRename; bindProj();
+  $("tTitle").onclick = startRename; $("tTitle").onkeydown = (e) => { if (e.key === "Enter") startRename(); }; bindProj();
+  $("bMore").onclick = (e) => { e.stopPropagation(); moreMenu($("bMore"), t, live); };
   $("bAct").onclick = () => { actOpen = !actOpen; localStorage.setItem("act", actOpen ? "1" : ""); renderTask(); };
   $("main").classList.toggle("withact", actOpen); $("actp").innerHTML = actOpen ? actHtml(t) : "";
   const sc = document.querySelector(".scroll"); if (wasBottom) sc.scrollTop = sc.scrollHeight;
 }
+function moreMenu(b, t, live) {       // menu "⋯" ở đầu trang task
+  const m = $("hMenu"), r = b.getBoundingClientRect();
+  if (m.classList.contains("show")) return m.classList.remove("show");
+  const its = [[`rename`, lu("pencil"), "Đổi tên"], [`open`, lu("folder"), "Mở thư mục kết quả"]];
+  if (t.kind === "code" && t.can_restore && !live) its.push([`restore`, lu("rotate-ccw"), "Khôi phục (trước lượt làm cuối)"]);
+  m.innerHTML = its.map(([k, ic, n]) => `<button data-hm="${k}" role="menuitem">${ic}<span>${n}</span></button>`).join("");
+  m.style.top = r.bottom + 6 + "px"; m.style.right = Math.max(8, innerWidth - r.right) + "px"; m.classList.add("show");
+  m.onclick = async (e) => {
+    const k = e.target.closest("[data-hm]")?.dataset.hm; if (!k) return; m.classList.remove("show");
+    if (k === "rename") return startRename();
+    if (k === "restore" && !confirm("Đưa thư mục dự án về như trước lượt làm cuối? Thay đổi của lượt đó sẽ mất.")) return;
+    const r2 = await api("/api/task/act", { id: T.id, action: k }); if (r2.error) toast(r2.error); else if (r2.msg) toast(r2.msg); T = null; lastSnap = ""; refresh();
+  };
+}
+document.addEventListener("click", (e) => { if (!e.target.closest("#hMenu,#bMore")) $("hMenu")?.classList.remove("show"); });
 function startRename() {
   renaming = true;
   const h = $("tTitle"), inp = document.createElement("input");
@@ -949,7 +1119,7 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec],[data-opset],[data-paste],[data-fb],[data-watch]");
+  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec],[data-opset],[data-paste],[data-fb],[data-watch],[data-openact],[data-ofo],[data-fmore]");
   if (!el) return;
   const d = el.dataset;
   if (d.libtab) { libTab = d.libtab; return renderLib(); }
@@ -982,6 +1152,9 @@ document.addEventListener("click", async (e) => {
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
   else if (d.relogin) { await api("/api/ai/cancel", { ai: "claude" }); setTimeout(() => api("/api/ai/login", { ai: "claude" }), 1500); }
   else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; el.innerHTML = '<span class="spin"></span>'; const r = await api("/api/ai/code", { ai: d.code, code: v }); if (r.error) toast(r.error); setTimeout(() => { if (el.isConnected) { el.disabled = false; el.textContent = "Gửi"; toast("Mã chưa được chấp nhận — thử lại hoặc bấm Hủy rồi Đăng nhập lại"); } }, 12000); }
+  else if (d.openact) { actOpen = true; lsSet("act", "1"); renderTask(); }
+  else if (d.fmore) { fMore.add(d.fmore); lastSnap = ""; renderTask(); }
+  else if (d.ofo) { const r = await api("/api/ofile", { t: T.id, i: d.oi, f: d.ofo, op: "open" }); if (r.error) toast(r.error); }
   else if (d.watch) {
     if (T && $("taskComp")) { const on = !T.judge; const r = await api("/api/task/act", { id: T.id, action: "judge", text: on ? "on" : "off" }); if (r.error) return toast(r.error); T.judge = on; toast(on ? "Đã bật Giám sát (áp dụng từ lượt làm tiếp theo)" : "Đã tắt Giám sát"); }
     else { lsSet("judge", homeJudge() ? "0" : "1"); }
@@ -996,6 +1169,11 @@ document.addEventListener("click", async (e) => {
 $("btnLib").onclick = () => openLib();
 $("btnNew").onclick = () => { view = ""; sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
 $("btnSet").onclick = () => openSettings();
+function sbSet(hide) { document.querySelector(".app").classList.toggle("nosb", hide); lsSet("sb", hide ? "0" : ""); if (T && $("taskComp")) { lastSnap = ""; renderTask(); } else if ($("homeComp")) renderHome(); }
+$("sbHide").onclick = () => sbSet(true);
+document.addEventListener("click", (e) => { if (e.target.closest("#sbShow")) sbSet(false); });
+const SBSHOW = `<button class="ghost icon sbshow" id="sbShow" title="Mở thanh bên" aria-label="Mở thanh bên">${lu("panel-left")}</button>`;
+if (lsGet("sb") === "0") document.querySelector(".app").classList.add("nosb");
 /* ---------------- mức dùng (góc dưới thanh bên, kiểu ChatGPT) ---------------- */
 const MANAGE = { claude: "https://claude.ai/settings/usage", codex: "https://chatgpt.com/codex/settings/usage" };
 function leftRow(name, w) {
