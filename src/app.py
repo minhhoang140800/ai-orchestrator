@@ -580,16 +580,18 @@ Worker lỗi đăng nhập/không chạy: coi như không có, chuyển worker k
 Giao sub-task: viết yêu cầu đầy đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy
 cuộc trò chuyện), rồi chạy:
   "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--model <model>] [--timeout 900]
-  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write]   (--write: cho Gemini tạo file/ảnh trong work/S2/vN)
+  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--hard]
+     (--write: cho Gemini tạo file/ảnh trong work/S2/vN; --hard: việc khó -> Gemini mức high. Giao lại cùng --out tự nâng mức)
 Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worker tạo). Sửa lỗi: giao lại cùng --out.
 
-## Chia việc (Gemini nhanh, GPT chính xác hơn) — "Gemini trước, lỗi mới GPT"
+## Chia việc (Gemini nhanh, GPT chính xác hơn) — Balanced trở xuống: "Gemini trước, lỗi mới GPT"
 - Research web, đối thủ, xu hướng: Gemini.
 - Idea, kịch bản, storyboard chữ, brief: Turbo/Eco: Gemini. Balanced: chia đều — Gemini phần cần nhanh/rộng, GPT phần
   cần sắc (vd idea chính, câu chữ hook); KHÔNG dồn hết cho GPT. Pro: GPT.
 - Code, script, phân tích số liệu: GPT (việc rất đơn giản ở Turbo/Eco: Gemini).
-- Tạo/sửa ảnh: Gemini trước (nhanh, đẹp). Check kỹ thuật + tự xem 1 lần: sai yêu cầu (sai size, sai nội dung, chữ lỗi,
-  thiếu chi tiết bắt buộc) -> chỉ phần lỗi giao GPT sửa/tạo lại. Ở Pro: GPT ngay nếu cần độ chính xác cao.
+- Tạo/sửa ảnh: Balanced/Turbo/Eco: Gemini trước (nhanh, đẹp). Check kỹ thuật + tự xem 1 lần: sai yêu cầu (sai size,
+  sai nội dung, chữ lỗi, thiếu chi tiết bắt buộc) -> chỉ phần lỗi giao GPT sửa/tạo lại. Pro: GPT ngay.
+- "Gemini trước" CHỈ áp dụng cho Balanced, Turbo, Eco. Pro: GPT làm trước mọi việc trừ research web (Gemini).
 - Phần nào Gemini làm chưa đạt -> chỉ giao lại PHẦN đó cho GPT, không làm lại cả bài.
 - Việc phụ thuộc nhau (vd idea cần dựa trên research): giao research trước; còn lại chạy song song.
 
@@ -631,7 +633,7 @@ ngắn gọn) vào ./stages/<số thứ tự>.md — giao diện hiện ngay cho
 
 ## Model
 Bạn chạy Opus, mức suy nghĩ theo chế độ (Pro high, Balanced/Turbo medium, Eco low). App TỰ chọn model cho worker theo chế độ
-(ChatGPT: GPT-6.2 Sol + mức suy nghĩ; Gemini: Neon medium ở Pro, Hydrogen high/medium/low ở Balanced/Turbo/Eco;
+(ChatGPT: GPT-6.2 Sol + mức suy nghĩ; Gemini: Neon medium ở Pro, Hydrogen medium ở Balanced (khó/giao lại: high), medium ở Turbo, low ở Eco;
 gói Free/thiếu model thì tự lùi model có sẵn) và tự hạ khi sắp hết hạn mức —
 KHÔNG truyền --model cho worker trừ khi có lý do rõ. {"Bước QUÁ khó (đã thử mà không ra): ghi xhigh vào tasks/effort.txt -> lượt sau bạn và worker chạy mức cao nhất (Gemini Neon high)." if t.get('mode') == 'fast' else ""}
 
@@ -2556,6 +2558,7 @@ def cmd_worker(argv):
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--vdir")
     ap.add_argument("--write", action="store_true")
+    ap.add_argument("--hard", action="store_true")
     a = ap.parse_args(argv)
     proj = Path.cwd()
     task = Path(a.task).resolve()
@@ -2603,7 +2606,10 @@ def cmd_worker(argv):
             cmd = cands[0]
             cwd = v
         else:
-            gm, _ = pick_model("gemini", os.environ.get("AIO_MODE", "balanced"), os.environ.get("AIO_HARD") == "1")
+            md_ = os.environ.get("AIO_MODE", "balanced")
+            retry_ = v.name != "v1"                     # giao lại (sửa lỗi / thử lại) -> nâng mức
+            hard_ = os.environ.get("AIO_HARD") == "1" or (md_ == "balanced" and (a.hard or retry_))
+            gm, _ = pick_model("gemini", md_, hard_)
             inp = os.environ.get("AIO_INPUT") or str(proj / "input")
             gtext = (f"{text}\n\n---\nFile đầu vào (chỉ đọc): {inp}. Lưu mọi file kết quả (ảnh, tài liệu) vào thư mục hiện tại: {v}. "
                      "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung; nếu tạo file thì liệt kê tên file.")
@@ -2730,7 +2736,7 @@ MODEL_PLAN = {
               "turbo": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "low"),
               "saver": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "low")},
     # Gemini: Neon cho Pro (bước quá khó: high), Hydrogen cho các chế độ khác; chỉ dùng model mà `agy models` liệt kê
-    "gemini": {"fast": ("neon", "medium"), "balanced": ("hydrogen", "high"), "turbo": ("hydrogen", "medium"),
+    "gemini": {"fast": ("neon", "medium"), "balanced": ("hydrogen", "medium"), "turbo": ("hydrogen", "medium"),
                "saver": ("hydrogen", "low")},
 }
 GEM_FALLBACK = {"neon": ["hydrogen", "flash"], "hydrogen": ["flash", "neon"]}
@@ -2771,7 +2777,7 @@ def gem_pick(key, eff):
 def pick_model(ai, mode, hard=False):
     m, eff = MODEL_PLAN[ai].get(mode) or MODEL_PLAN[ai]["balanced"]
     if hard:
-        eff = {"claude": "xhigh", "codex": "xhigh", "gemini": "high"}[ai]
+        eff = {"claude": "xhigh", "codex": "xhigh", "gemini": "high"}[ai] if mode == "fast" or ai != "gemini" else "high"
     elif pressure(ai) and eff != "low":
         eff = EFFORTS[max(0, EFFORTS.index(eff) - 1)]
     if ai == "gemini":

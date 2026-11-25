@@ -227,6 +227,17 @@ main{position:relative}
 .mdt th{background:var(--soft);font-weight:600}
 .dec .dx{margin-right:6px;font-size:16px;line-height:1;color:var(--mute);width:28px;height:28px;padding:0}.dec .dx:hover{color:var(--ink)}
 .sw{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px}.sw input{width:16px;height:16px;accent-color:#202020}
+.ed{position:fixed;inset:0;background:rgba(17,17,17,.82);display:none;z-index:40}.ed.show{display:block}
+.edst{position:absolute;inset:0 0 72px 0;overflow:hidden;touch-action:none}
+.edst canvas{position:absolute;left:0;top:0;transform-origin:0 0;box-shadow:0 8px 30px rgba(0,0,0,.4);image-rendering:auto}
+.edtx{position:absolute;display:none;min-width:180px;border:1px solid #fff;background:rgba(0,0,0,.6);color:#fff;border-radius:6px;padding:4px 8px;font:14px Inter,system-ui}
+.edbar{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;gap:2px;background:#1f1f1f;border:1px solid #333;border-radius:10px;padding:5px 6px;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+.edbar button{border:0;background:transparent;color:#ddd;min-width:34px;height:34px;border-radius:7px;padding:0 8px;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+.edbar button:hover{background:#2e2e2e;color:#fff}.edbar button.on{background:#3a3a3a;color:#fff}.edbar .i{width:18px;height:18px}
+.edsep{width:1px;height:22px;background:#3a3a3a;margin:0 4px}.edcol{display:inline-flex;gap:4px;padding:0 4px}
+.edbar .edc{min-width:18px;width:18px;height:18px;padding:0;border-radius:50%;border:2px solid #1f1f1f;box-shadow:0 0 0 1px #555}.edbar .edc.on{box-shadow:0 0 0 2px #fff}
+.edwd{display:block;width:18px;background:#ddd;border-radius:4px}
+.edbar .edsave{background:#fff;color:#111;font-weight:600;padding:0 14px}.edbar .edsave:hover{background:#e8e8e8;color:#111}
 .smenu{min-width:160px}.smenu button{align-items:center;font-size:13px}
 .claude.stage{margin-top:12px;color:var(--ink)}.claude.stage .txt{border-left:2px solid var(--line);padding-left:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -257,7 +268,25 @@ main{position:relative}
 <div id="toast" role="status"></div>
 <div class="pop pmenu" id="pMenu" role="menu" style="position:fixed"></div>
 <div class="pop smenu" id="sMenu" role="menu" style="position:fixed"></div>
-<div class="lb" id="lb"><img id="lbImg" alt=""><button class="lbx" aria-label="Đóng">×</button></div>
+<div class="ed" id="ed">
+  <div class="edst" id="edSt"><canvas id="edC"></canvas><input id="edTx" class="edtx" type="text" placeholder="Nhập chữ, Enter"></div>
+  <div class="edbar" id="edBar">
+    <button data-tool="hand" title="Kéo ảnh (H)"><svg class="i" viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10V4.5a1.5 1.5 0 0 1 3 0V11M14 10.5V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L3 14.5a1.5 1.5 0 0 1 2.5-1.6L8 15.5"/></svg></button>
+    <button data-tool="pen" title="Bút (P)"><svg class="i" viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></button>
+    <button data-tool="rect" title="Khung (R)"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1.5"/></svg></button>
+    <button data-tool="arrow" title="Mũi tên (A)"><svg class="i" viewBox="0 0 24 24"><path d="M5 19L19 5M10 5h9v9"/></svg></button>
+    <button data-tool="text" title="Chữ (T)"><svg class="i" viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></button>
+    <span class="edsep"></span>
+    <span class="edcol" id="edCols"></span>
+    <button id="edW" title="Độ dày nét"><span class="edwd"></span></button>
+    <button id="edUndo" title="Hoàn tác (Ctrl+Z)"><svg class="i" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+    <span class="edsep"></span>
+    <button id="edOut" title="Thu nhỏ (-)">−</button><button id="edZ" title="Vừa màn hình (0)">100%</button><button id="edIn" title="Phóng to (+)">+</button>
+    <span class="edsep"></span>
+    <button id="edSave" class="edsave" title="Đưa ảnh đã đánh dấu vào ô nhập">Save</button>
+    <button id="edX" title="Đóng (Esc)">×</button>
+  </div>
+</div>
 <div class="pop smenu" id="cMenu" role="menu" style="position:fixed"><button data-co="open">Mở</button><button data-co="reveal">Mở vị trí file</button><button data-co="copy">Copy ảnh</button><button data-co="path">Copy đường dẫn</button></div>
 <input type="file" id="fileIn" multiple hidden>
 
@@ -408,12 +437,84 @@ $("tlist").addEventListener("click", (e) => {
   m.innerHTML = `<button data-sm="pin">${I.pin}${t && t.pinned ? "Bỏ ghim" : "Pin"}</button><button data-sm="rename">${I.edit}Rename</button><button data-sm="delete" style="color:var(--bad)">${I.trash}Delete</button>`;
   m.style.left = r.left + "px"; m.style.top = r.bottom + 4 + "px"; m.classList.add("show");
 }, true);
-document.addEventListener("click", (e) => {      // bấm ảnh kết quả: xem lớn ngay trong trang
+document.addEventListener("click", (e) => {      // bấm ảnh: xem lớn + đánh dấu ngay trong trang
   const a = e.target.closest("[data-lb],[data-lbsrc]"); if (!a) return; e.preventDefault(); e.stopPropagation();
-  $("lbImg").src = a.dataset.lb ? a.getAttribute("href") : a.src; $("lb").classList.add("show");
+  const src = a.dataset.lb ? a.getAttribute("href") : a.src;
+  edOpen(src, a.dataset.fi != null ? +a.dataset.fi : -1, (a.getAttribute("title") || a.getAttribute("alt") || "anh").split("/").pop());
 }, true);
-$("lb").onclick = (e) => { if (e.target.id !== "lbImg") { $("lb").classList.remove("show"); $("lbImg").src = ""; } };
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("lb").classList.remove("show"); });
+/* ---------------- bộ đánh dấu ảnh: kéo, bút, khung, mũi tên, chữ, màu, nét, hoàn tác, zoom ---------------- */
+const ED = { img: null, shapes: [], tool: "hand", color: "#E5484D", w: 1, z: 1, x: 0, y: 0, fi: -1, name: "", cur: null, drag: null };
+const ECOLS = ["#E5484D", "#F5A524", "#30A46C", "#3E63DD", "#FFFFFF", "#111111"], EWID = [2, 4, 8];
+$("edCols").innerHTML = ECOLS.map((c) => `<button class="edc" data-col="${c}" style="background:${c}" title="Màu"></button>`).join("");
+function edLw() { return EWID[ED.w] * Math.max(1, ED.img.naturalWidth / 900); }
+function edOpen(src, fi, name) {
+  const im = new Image();
+  im.onload = () => { Object.assign(ED, { img: im, shapes: [], fi, name, cur: null }); const c = $("edC"); c.width = im.naturalWidth; c.height = im.naturalHeight; $("ed").classList.add("show"); edFit(); edTool(ED.tool); edDraw(); };
+  im.onerror = () => toast("Không mở được ảnh");
+  im.src = src;
+}
+function edClose() { $("ed").classList.remove("show"); $("edTx").style.display = "none"; ED.img = null; }
+function edFit() { const st = $("edSt").getBoundingClientRect(); ED.z = Math.min(1, (st.width - 40) / ED.img.naturalWidth, (st.height - 40) / ED.img.naturalHeight); ED.x = (st.width - ED.img.naturalWidth * ED.z) / 2; ED.y = (st.height - ED.img.naturalHeight * ED.z) / 2; edView(); }
+function edView() { $("edC").style.transform = `translate(${ED.x}px,${ED.y}px) scale(${ED.z})`; $("edZ").textContent = Math.round(ED.z * 100) + "%"; }
+function edZoom(f, cx, cy) {
+  const st = $("edSt").getBoundingClientRect(); cx = cx ?? st.width / 2; cy = cy ?? st.height / 2;
+  const nz = Math.min(8, Math.max(0.05, ED.z * f)); ED.x = cx - (cx - ED.x) * (nz / ED.z); ED.y = cy - (cy - ED.y) * (nz / ED.z); ED.z = nz; edView();
+}
+function edPt(e) { const r = $("edSt").getBoundingClientRect(); return { x: (e.clientX - r.left - ED.x) / ED.z, y: (e.clientY - r.top - ED.y) / ED.z }; }
+function edShape(g, s) {
+  g.strokeStyle = g.fillStyle = s.c; g.lineWidth = s.w; g.lineCap = g.lineJoin = "round";
+  if (s.t === "pen") { g.beginPath(); s.p.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.stroke(); }
+  if (s.t === "rect") g.strokeRect(Math.min(s.a.x, s.b.x), Math.min(s.a.y, s.b.y), Math.abs(s.b.x - s.a.x), Math.abs(s.b.y - s.a.y));
+  if (s.t === "arrow") { const an = Math.atan2(s.b.y - s.a.y, s.b.x - s.a.x), h = s.w * 4; g.beginPath(); g.moveTo(s.a.x, s.a.y); g.lineTo(s.b.x, s.b.y); g.stroke();
+    g.beginPath(); g.moveTo(s.b.x, s.b.y); g.lineTo(s.b.x - h * Math.cos(an - 0.45), s.b.y - h * Math.sin(an - 0.45)); g.lineTo(s.b.x - h * Math.cos(an + 0.45), s.b.y - h * Math.sin(an + 0.45)); g.closePath(); g.fill(); }
+  if (s.t === "text") { g.font = `600 ${s.w * 9}px Inter, system-ui, sans-serif`; g.textBaseline = "top"; g.lineWidth = s.w * 1.2; g.strokeStyle = s.c === "#111111" ? "#fff" : "#111"; g.strokeText(s.s, s.a.x, s.a.y); g.fillText(s.s, s.a.x, s.a.y); }
+}
+function edDraw() { const c = $("edC"), g = c.getContext("2d"); g.clearRect(0, 0, c.width, c.height); g.drawImage(ED.img, 0, 0); ED.shapes.forEach((s) => edShape(g, s)); if (ED.cur) edShape(g, ED.cur); }
+function edTool(t) { ED.tool = t; document.querySelectorAll("#edBar [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === t)); $("edSt").style.cursor = t === "hand" ? "grab" : t === "text" ? "text" : "crosshair";
+  document.querySelectorAll(".edc").forEach((b) => b.classList.toggle("on", b.dataset.col === ED.color)); $("edW").querySelector(".edwd").style.height = EWID[ED.w] + "px"; }
+$("edBar").onclick = (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.tool) edTool(b.dataset.tool);
+  else if (b.dataset.col) { ED.color = b.dataset.col; if (ED.tool === "hand") ED.tool = "pen"; edTool(ED.tool); }
+  else if (b.id === "edW") { ED.w = (ED.w + 1) % EWID.length; edTool(ED.tool); }
+  else if (b.id === "edUndo") { ED.shapes.pop(); edDraw(); }
+  else if (b.id === "edIn") edZoom(1.25); else if (b.id === "edOut") edZoom(0.8); else if (b.id === "edZ") edFit();
+  else if (b.id === "edX") edClose();
+  else if (b.id === "edSave") edSave();
+};
+$("edSt").addEventListener("wheel", (e) => { if (!ED.img) return; e.preventDefault(); const r = $("edSt").getBoundingClientRect(); edZoom(e.deltaY < 0 ? 1.12 : 0.89, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+$("edSt").addEventListener("pointerdown", (e) => {
+  if (!ED.img || e.target.id === "edTx") return; const p = edPt(e);
+  if (ED.tool === "hand" || e.button === 1) { ED.drag = { sx: e.clientX, sy: e.clientY, x: ED.x, y: ED.y }; $("edSt").style.cursor = "grabbing"; }
+  else if (ED.tool === "text") { const tx = $("edTx"), r = $("edSt").getBoundingClientRect(); tx.style.left = e.clientX - r.left + "px"; tx.style.top = e.clientY - r.top + "px"; tx.style.display = "block"; tx.value = ""; tx.dataset.x = p.x; tx.dataset.y = p.y; setTimeout(() => tx.focus(), 0); return; }
+  else ED.cur = ED.tool === "pen" ? { t: "pen", c: ED.color, w: edLw(), p: [p] } : { t: ED.tool, c: ED.color, w: edLw(), a: p, b: p };
+  $("edSt").setPointerCapture(e.pointerId);
+});
+$("edSt").addEventListener("pointermove", (e) => {
+  if (ED.drag) { ED.x = ED.drag.x + e.clientX - ED.drag.sx; ED.y = ED.drag.y + e.clientY - ED.drag.sy; return edView(); }
+  if (!ED.cur) return; const p = edPt(e); if (ED.cur.t === "pen") ED.cur.p.push(p); else ED.cur.b = p; edDraw();
+});
+$("edSt").addEventListener("pointerup", () => { if (ED.drag) { ED.drag = null; edTool(ED.tool); } if (ED.cur) { ED.shapes.push(ED.cur); ED.cur = null; edDraw(); } });
+$("edTx").addEventListener("keydown", (e) => {
+  e.stopPropagation(); const tx = $("edTx");
+  if (e.key === "Enter" && tx.value.trim()) { ED.shapes.push({ t: "text", c: ED.color, w: edLw(), s: tx.value.trim(), a: { x: +tx.dataset.x, y: +tx.dataset.y } }); tx.style.display = "none"; edDraw(); }
+  if (e.key === "Escape" || e.key === "Enter") tx.style.display = "none";
+});
+document.addEventListener("keydown", (e) => {
+  if (!$("ed").classList.contains("show") || e.target.id === "edTx") return;
+  const k = e.key.toLowerCase();
+  if (k === "escape") edClose(); else if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); ED.shapes.pop(); edDraw(); }
+  else if (k === "+" || k === "=") edZoom(1.25); else if (k === "-") edZoom(0.8); else if (k === "0") edFit();
+  else if ({ h: "hand", p: "pen", r: "rect", a: "arrow", t: "text" }[k]) edTool({ h: "hand", p: "pen", r: "rect", a: "arrow", t: "text" }[k]);
+});
+function edSave() {
+  if (!$("txt")) return toast("Mở một task hoặc Task mới để đính kèm ảnh");
+  $("edC").toBlob((b) => {
+    const nm = (ED.name || "anh").replace(/\.[^.]+$/, "") + "_danhdau.png", f = new File([b], nm, { type: "image/png" });
+    if (ED.fi >= 0 && files[ED.fi]) files[ED.fi] = f; else files.push(f);
+    renderAtts(); edClose(); toast(ED.shapes.length ? "Đã đưa ảnh đã đánh dấu vào ô nhập" : "Đã đưa ảnh vào ô nhập"); $("txt").focus();
+  }, "image/png");
+}
 let cTarget = null;
 document.addEventListener("contextmenu", (e) => {
   const a = e.target.closest("[data-of]"); if (!a) return;
@@ -509,7 +610,7 @@ function purl(f) { if (!_purl.has(f)) _purl.set(f, URL.createObjectURL(f)); retu
 function renderAtts() {
   const a = $("atts"); if (!a) return;
   a.innerHTML = files.map((f, i) => f.type?.startsWith("image/")
-    ? `<span class="pv" title="${esc(f.name)}"><img src="${purl(f)}" data-lbsrc="1" style="cursor:zoom-in" alt="${esc(f.name)}"><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`
+    ? `<span class="pv" title="${esc(f.name)}"><img src="${purl(f)}" data-lbsrc="1" data-fi="${i}" style="cursor:zoom-in" alt="${esc(f.name)}"><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`
     : `<span class="a"><span>📎 ${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
   a.style.display = files.length ? "flex" : "none";
   paintTpl(); sendIcon();
