@@ -354,6 +354,11 @@ aside{padding:0 12px;background:var(--side)}
 .artn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.artx{font-size:12px;color:var(--mute)}
 .artm{border:0;background:transparent;color:var(--mute);font-size:12.5px;text-align:left;padding:6px 0 0}.artm:hover{color:var(--ink);background:transparent}
 .mfoot2{margin-top:10px}.opv{margin-top:12px}
+/* nút cuộn xuống cuối (kiểu Claude): tròn, nổi giữa cột chat ngay trên ô nhập */
+.compwrap{position:relative}
+.tobot{position:absolute;left:50%;top:-44px;transform:translateX(-50%);width:36px;height:36px;border-radius:50%!important;padding:0!important;
+display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid var(--line);color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,.08);z-index:5}
+.tobot:hover{background:var(--soft)}.tobot svg.i{width:18px;height:18px}.tobot[hidden]{display:none}
 /* ô nhập: bo 24px, nút + trái, chế độ + gửi phải */
 .compwrap{padding:8px 24px 20px!important}
 .comp{max-width:var(--col);width:100%;box-sizing:border-box;border-radius:24px;padding:16px 16px 12px;border:1px solid #E4E4E4;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.04)}
@@ -1056,7 +1061,10 @@ function renderTask() {
   const comp = $("taskComp");
   if (!comp || comp.dataset.t !== t.id) {          // chỉ tạo ô nhập 1 lần cho mỗi task
     $("main").innerHTML = `<div class="thead" id="thead"></div><div id="decbar"></div><div class="scroll"><div class="thread" id="thread"></div></div>
-      <div class="compwrap">${composer("taskComp", PH_MORE)}</div><aside class="actp" id="actp"></aside>`;
+      <div class="compwrap"><button class="tobot" id="toBot" type="button" title="Cuộn xuống cuối" aria-label="Cuộn xuống cuối" hidden><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg></button>${composer("taskComp", PH_MORE)}</div><aside class="actp" id="actp"></aside>`;
+    const sc1 = document.querySelector(".scroll");      // nút cuộn xuống: hiện khi đang xem phần trên của đoạn chat
+    sc1.addEventListener("scroll", botBtn, { passive: true });
+    $("toBot").onclick = () => sc1.scrollTo({ top: sc1.scrollHeight, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     $("taskComp").dataset.t = t.id;
     bindComposer(sendMore); curTpl = ""; bindTpl();
   }
@@ -1072,6 +1080,11 @@ function renderTask() {
   $("bAct").onclick = () => { actOpen = !actOpen; localStorage.setItem("act", actOpen ? "1" : ""); renderTask(); };
   $("main").classList.toggle("withact", actOpen); $("actp").innerHTML = actOpen ? actHtml(t) : "";
   const sc = document.querySelector(".scroll"); if (wasBottom) sc.scrollTop = sc.scrollHeight;
+  botBtn();
+}
+function botBtn() {
+  const sc = document.querySelector(".scroll"), b = $("toBot"); if (!sc || !b) return;
+  b.hidden = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 160;
 }
 function moreMenu(b, t, live) {       // menu "⋯" ở đầu trang task
   const m = $("hMenu"), r = b.getBoundingClientRect();
