@@ -110,6 +110,10 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .accrow{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .accrow .n{flex:1;min-width:0}.accrow small{display:block;color:var(--mute);font-size:12px;overflow-wrap:anywhere}
 .accrow small.bad{color:var(--bad)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-right:4px}
+.seg button{border:0;border-radius:0;background:transparent;padding:4px 8px;color:var(--mute)}.seg button.on{background:#ececea;color:var(--ink,#222)}
+.kchip{display:inline-block;padding:1px 7px;border:1px solid var(--line);border-radius:6px;font-size:12px;color:var(--mute);margin-right:6px}
+.inst{margin-top:8px;font-size:13px}.inst li{margin:2px 0}
 .plan{display:inline-block;margin-left:6px;padding:0 6px;border:1px solid var(--line);border-radius:6px;font-size:11px;color:var(--mute);font-weight:500}
 .freebar{margin:0 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fafaf9;font-size:13px;color:var(--mute);display:flex;gap:10px;align-items:center}
 .freebar b{color:var(--ink,#222)}.freebar .grow{flex:1}
@@ -315,6 +319,8 @@ const WN = { codex: "ChatGPT", gemini: "Gemini", judge: "Chấm độc lập" };
 const PH_NEW = "Giao việc đi, Claude chịu được";
 const PH_MORE = "Giao thêm việc đi, Claude chịu được";
 const I = {
+  chat: '<svg class="i" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></svg>',
+  code: '<svg class="i" viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg>',
   attach: '<svg class="i" viewBox="0 0 24 24"><path d="m21.4 11-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>',
   send: '<svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
   chev: '<svg class="i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
@@ -400,7 +406,7 @@ async function refresh() {
   renderSide();
   if (sel && !S.tasks.find((t) => t.id === sel)) sel = "";
   if (view === "lib") { /* đang xem thư viện */ } else if (sel) await loadTask(); else if (!$("homeComp")) renderHome();
-  if ($("ov").classList.contains("show") && !$("mUpd")?.disabled && !(document.activeElement?.id || "").startsWith("code_") && document.activeElement?.id !== "gKey" && !Object.entries(S.ais).some(([k, x]) => x.code && document.querySelector(`[data-code=${k}]:disabled`))) renderSettings();
+  if ($("ov").classList.contains("show") && !$("mUpd")?.disabled && !(document.activeElement?.id || "").startsWith("code_") && !["gKey", "memTxt"].includes(document.activeElement?.id) && !document.querySelector("#mbody details[open]") && !Object.entries(S.ais).some(([k, x]) => x.code && document.querySelector(`[data-code=${k}]:disabled`))) renderSettings();
   feedLoginWin();
   if (!firstRun) { firstRun = true; if (!S.output || !S.ais.claude.ok) openSettings(); }
 }
@@ -579,7 +585,7 @@ function renderSide() {
 function composer(id, ph) {
   return `<div class="comp" id="${id}"><div class="atts" id="atts"></div>
     <textarea id="txt" placeholder="${ph}" aria-label="Tin nhắn"></textarea>
-    <div class="bar"><span class="msel"><button class="ghost" id="bFile" title="Đính kèm (hoặc dán / kéo thả)" aria-label="Đính kèm file">${I.attach}Đính kèm</button><div class="pop tmenu" id="tplMenu" role="menu"></div></span>
+    <div class="bar">${id === "homeComp" ? `<span class="seg" role="group" aria-label="Loại việc"><button id="kChat" type="button" title="Chat: giao việc bình thường">${I.chat}</button><button id="kCode" type="button" title="Code: sửa code, chạy thử như Claude Code">${I.code}</button></span><button class="ghost" id="bDir" type="button" hidden></button>` : ""}<span class="msel"><button class="ghost" id="bFile" title="Đính kèm (hoặc dán / kéo thả)" aria-label="Đính kèm file">${I.attach}Đính kèm</button><div class="pop tmenu" id="tplMenu" role="menu"></div></span>
       <span style="flex:1"></span><span class="hint" id="cHint"></span>
       <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="pop mmenu" id="modeMenu" role="menu"></div></span>
       <button class="pri sq" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
@@ -591,7 +597,18 @@ const MICON = {
   balanced: '<svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 4v11.8M18 8.2a8 8 0 0 1-8 8H8.2"/></svg>',
   turbo: '<svg class="i" viewBox="0 0 24 24"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg>',
   eco: '<svg class="i" viewBox="0 0 24 24"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14z"/><path d="M5 19l7-7"/></svg>' };
-let curMode = "balanced";
+let curMode = "balanced", curKind = lsGet("kind") === "code" ? "code" : "";
+function lsGet(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function paintKind() {       // Chat / Code: Code mode cần thư mục dự án, dùng Opus (không chọn chế độ)
+  if (!$("kChat")) return;
+  $("kChat").classList.toggle("on", curKind !== "code"); $("kCode").classList.toggle("on", curKind === "code");
+  const p = lsGet("pdir"), name = p ? p.split(/[\\/]/).filter(Boolean).pop() : "";
+  $("bDir").hidden = curKind !== "code"; $("bDir").innerHTML = `${I.folder}${esc(name || "Chọn thư mục dự án")}`; $("bDir").title = p || "Thư mục chứa code cần sửa";
+  $("modeBtn").parentElement.style.display = curKind === "code" ? "none" : "";
+  if ($("txt")) $("txt").placeholder = curKind === "code" ? "Mô tả việc cần làm với code: sửa lỗi, thêm tính năng, chạy thử…" : PH_NEW;
+}
+async function pickDir() { const r = await api("/api/pick", {}); if (r.path) { lsSet("pdir", r.path); paintKind(); } }
 function paintMode() {
   if (!$("modeBtn")) return;
   $("modeBtn").innerHTML = `${MICON[curMode]}${MODE[curMode][0]}<svg class="i" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>`;
@@ -623,6 +640,13 @@ function bindComposer(onSend) {
   });
   curMode = normMode(c.id === "homeComp" ? localStorage.getItem("mode") : (T && T.mode));
   paintMode();
+  if (c.id !== "homeComp" && T && T.kind === "code") $("modeBtn").parentElement.style.display = "none";   // Code mode: luôn Opus
+  if (c.id === "homeComp") {
+    paintKind();
+    $("kChat").onclick = () => { curKind = ""; lsSet("kind", ""); paintKind(); };
+    $("kCode").onclick = () => { curKind = "code"; lsSet("kind", "code"); paintKind(); if (!lsGet("pdir")) pickDir(); };
+    $("bDir").onclick = () => pickDir();
+  }
   $("modeBtn").onclick = (e) => { e.stopPropagation(); $("modeMenu").classList.toggle("show"); };
   $("modeMenu").onclick = async (e) => {
     const b = e.target.closest("[data-mode]"); if (!b) return; e.stopPropagation();
@@ -759,7 +783,8 @@ async function sendNew() {
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   busy(true);
   try {
-    const r = await api("/api/task/new", { text, mode: curMode, project: homeProj(), template: curTpl }); if (r.error) throw new Error(r.error);
+    if (curKind === "code" && !lsGet("pdir")) { busy(false); await pickDir(); if (!lsGet("pdir")) return; busy(true); }
+    const r = await api("/api/task/new", { text, mode: curMode, project: homeProj(), template: curTpl, kind: curKind, pdir: curKind === "code" ? lsGet("pdir") : "" }); if (r.error) throw new Error(r.error);
     const names = [];
     for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(r.id, f)); }
     const s = await api("/api/task/submit", { id: r.id, files: names }); if (s.error) throw new Error(s.error);
@@ -833,6 +858,8 @@ function renderTask() {
   acts.push(`<button class="ghost icon ${actOpen ? "on" : ""}" id="bAct" title="Activity" aria-label="Activity"><svg class="i" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></button>`);
   acts.push(projBtn());
   if (["paused", "failed"].includes(t.status)) acts.push(`<button class="pri" data-act="resume">Tiếp tục</button>`);
+  if (t.kind === "code") acts.unshift(`<span class="kchip" title="${esc(t.pdir || "")}">${I.code} Code</span>`);
+  if (t.kind === "code" && t.can_restore && !live) acts.push(`<button data-act="restore" title="Đưa thư mục dự án về như trước lượt làm cuối">Khôi phục</button>`);
   const lastC = t.messages.map((m) => m.role).lastIndexOf("claude");
   const nSubs = t.messages.reduce((a, m) => a + (m.subtasks || []).length, 0);
   const body = t.messages.map((m, i) => {
@@ -844,9 +871,11 @@ function renderTask() {
       ? (t.tpl_saved ? `<button class="savet" disabled>${I.tpl}Đã lưu template</button>` : `<button class="savet" data-savet="1">${I.tpl}Save Template</button>`) : "";
     const ims = n && n < 5 ? (m.files || []).filter((f) => /\.(png|jpe?g|gif|webp)$/i.test(f)) : [];
     const pv = ims.length ? `<div class="opv">${ims.map((f) => { const q = `t=${T.id}&i=${i}&f=${encodeURIComponent(f)}`; return `<a href="/api/ofile?${q}&full=1" data-lb="1" data-of="${esc(f)}" data-oi="${i}" title="${esc(f)}"><img src="/api/ofile?${q}" alt="${esc(f)}" loading="lazy"><span>${esc(f.split("/").pop())}</span></a>`; }).join("")}</div>` : "";
-    return `<div class="mwrap c"><div class="claude ${m.kind || ""}"><div class="txt">${md(m.text)}</div>${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>${mActs(m, i, "claude")}</div>`;
+    const inst = m.kind === "install" ? `<div class="inst">Cần cài: <ul>${(m.items || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${i === lastC && t.status === "waiting"
+      ? (t.installing ? `<span class="spin"></span> Đang cài — xem cửa sổ cài đặt vừa mở` : `<button class="pri" data-act="install">Cài đặt</button> <small style="color:var(--mute)">Maestro tự chạy mọi thứ, xong tự làm tiếp</small>`) : ""}</div>` : "";
+    return `<div class="mwrap c"><div class="claude ${m.kind === "install" ? "question" : m.kind || ""}"><div class="txt">${md(m.text)}</div>${inst}${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>${mActs(m, i, "claude")}</div>`;
   }).join("");
-  const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Claude chưa đăng nhập. Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>${esc(t.wait || "Đang chuẩn bị…")}</span></div>` : "";
+  const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Chưa có AI quản lý (Claude gói trả phí hoặc ChatGPT). Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>${esc(t.wait || "Đang chuẩn bị…")}</span></div>` : "";
   const comp = $("taskComp");
   if (!comp || comp.dataset.t !== t.id) {          // chỉ tạo ô nhập 1 lần cho mỗi task
     $("main").innerHTML = `<div class="thead" id="thead"></div><div id="decbar"></div><div class="scroll"><div class="thread" id="thread"></div></div>
@@ -908,8 +937,9 @@ document.addEventListener("click", async (e) => {
   else if (d.act) {
     if (d.act === "cancel" && !confirm("Hủy task này?")) return;
     if (d.act === "delete" && !confirm("Xóa task khỏi danh sách? File kết quả vẫn giữ nguyên.")) return;
+    if (d.act === "restore" && !confirm("Đưa thư mục dự án về như trước lượt làm cuối? Thay đổi của lượt đó sẽ mất.")) return;
     el.disabled = true;
-    const r = await api("/api/task/act", { id: T.id, action: d.act, text: d.dir || "" }); if (r.error) toast(r.error);
+    const r = await api("/api/task/act", { id: T.id, action: d.act, text: d.dir || "" }); if (r.error) toast(r.error); else if (r.msg) toast(r.msg);
     if (d.act === "delete") { sel = ""; sessionStorage.removeItem("sel"); }
     T = null; lastSnap = ""; refresh();
   }
@@ -989,6 +1019,11 @@ function renderSettings() {
     <small style="display:block;color:var(--mute);font-size:12px;margin-top:6px">Dùng khi Gemini hết lượt hoặc chưa đăng nhập. Bấm <b>Lấy key</b> → <b>Create API key</b> → copy → quay lại đây, Maestro tự dán và lưu. Key chỉ lưu trên máy này.<br>Lưu ý: dữ liệu gửi qua key miễn phí có thể được Google dùng để cải thiện sản phẩm — không dùng cho tài liệu mật.</small></div>`;
   $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI${st.free ? ` <span class="plan">Chế độ Free</span>` : st.pm === "codex" ? ` <span class="plan">ChatGPT làm quản lý</span>` : ""}</span>${acc}</div>${gkBox}
     <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>
+    <div class="f"><span class="k">Memory</span>
+      <small style="display:block;color:var(--mute);font-size:12px;margin-bottom:6px">Ghi nhớ của bạn — áp dụng cho mọi task (cách xưng hô, phong cách, quy tắc riêng).</small>
+      <textarea id="memTxt" rows="4" style="width:100%;box-sizing:border-box" placeholder="Vd: Xưng hô tôi – bạn. Trả lời ngắn, tiếng Việt.">${esc(S.instructions || "")}</textarea>
+      <div class="row" style="margin-top:6px"><span style="flex:1;color:var(--mute);font-size:12px">${(() => { const L = S.learn || {}; return `Bài học chung của team: <b>${(L.rules || []).length}</b> đang áp dụng · Maestro tự gửi bài học về team (không gửi dữ liệu riêng)${L.sent ? ` · đã gửi ${L.sent}` : ""}${L.pending ? ` · chờ gửi ${L.pending}` : ""}`; })()}</span><button id="memSave">Lưu ghi nhớ</button></div>
+      ${(S.learn?.rules || []).length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--mute)">Xem bài học chung</summary><ul style="font-size:12px;color:var(--mute);margin:6px 0 0 16px">${S.learn.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></details>` : ""}</div>
     <div class="f"><span class="k">Ứng dụng</span><div class="row"><label class="sw"><input type="checkbox" id="oAuto" ${S.autostart ? "checked" : ""}><span>Mở Maestro khi đăng nhập máy</span></label><span style="flex:1"></span><button id="oQuit" title="Tắt hẳn Maestro. Task đang chạy sẽ tự chạy tiếp khi mở lại.">Thoát Maestro</button></div></div>`;
   $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><button class="icon" id="mBell" title="Thông báo" aria-label="Thông báo"><svg class="i" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button><button id="mLog" title="Lưu log (.zip) vào thư mục kết quả">Export log</button><button id="mClr" title="Xóa file nháp, file trùng. Giữ lịch sử.">Clear cache</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
   $("mClr").onclick = async () => { const b = $("mClr"); b.disabled = true; b.innerHTML = '<span class="spin"></span> Đang dọn…'; const r = await api("/api/clear-cache", {}); toast(r.error || r.msg); b.disabled = false; b.textContent = "Clear cache"; };
@@ -1009,6 +1044,7 @@ function renderSettings() {
   if ($("gSave")) $("gSave").onclick = () => { const v = $("gKey").value.trim(); if (v) saveKey(v); else $("gKey").focus(); };
   if ($("gGet")) $("gGet").onclick = () => { window.open("https://aistudio.google.com/apikey", "_blank"); keyWait = true; };
   if ($("gDel")) $("gDel").onclick = () => { if (confirm("Xoá Gemini API key khỏi máy này?")) saveKey(""); };
+  $("memSave").onclick = async () => { const r = await api("/api/memory", { instructions: $("memTxt").value }); toast(r.error || r.msg); if (!r.error) S.instructions = $("memTxt").value; };
   $("mLog").onclick = async () => { const r = await api("/api/export-log", {}); toast(r.error || r.msg); };
   $("oPick").onclick = async () => { const r = await api("/api/pick", {}); if (r.path) { form.output = r.path; const s = await api("/api/setup", form); if (s.error) toast(s.error); else S.output = form.output; renderSettings(); } };
   $("mDone").onclick = () => { if (!S.output) return toast("Chọn thư mục nhận kết quả"); closeSettings(); };

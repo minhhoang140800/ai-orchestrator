@@ -28,6 +28,8 @@ ICO_B64 = ""  # icon Windows (shortcut), filled at build time
 VERSION = "dev"  # filled at build time
 RELEASE = "dev"  # số phiên bản hiển thị (vd 1.6), filled at build time
 UPDATE_BASE = ""  # vd https://raw.githubusercontent.com/<owner>/<repo>/main/ (filled at build time)
+LEARN_MD = ""  # bài học chung đã duyệt (src/learnings.md), filled at build time
+LEARN_FORM = ""  # nơi nhận bài học gửi về (src/learn_form.json: Google Form), filled at build time
 
 APP = Path(__file__).resolve()
 HOME = Path(os.environ.get("AIO_HOME") or APP.parent)
@@ -79,6 +81,8 @@ MODE_ALIAS = {"fast": "pro", "saver": "eco"}          # tên cũ (task/template/
 def norm_mode(m):
     m = MODE_ALIAS.get(m, m)
     return m if m in MODES else "balanced"
+CATEGORIES = ["video", "ảnh/asset", "playable", "code", "phân tích/research", "ý tưởng/kịch bản", "bảng tính/dữ liệu",
+              "tài liệu/văn bản", "sửa file", "hỏi đáp", "khác"]
 BELOW_NORMAL = 0x00004000 if IS_WIN else 0     # ưu tiên thấp: máy vẫn mượt khi AI đang chạy
 PING = "Reply with the single word PONG and nothing else."
 
@@ -414,6 +418,7 @@ def wdir(t):
 
 def finish_clean(t):
     """Task xong: lưu lại bảng sub-task + feedback/quyết định vào lịch sử, rồi xóa toàn bộ nháp/hướng dẫn/bản trùng."""
+    learn_queue(t)                         # bài học chung (đã lọc dữ liệu riêng) -> hàng đợi gửi về team
     try:
         subs = subtasks(t)
         works = [m for m in t.get("messages", []) if m["role"] == "work"]
@@ -526,6 +531,7 @@ def load_tasks():
         if not t.get("w2") and t.get("session_started"):
             t["legacy"] = True
         t["mode"] = norm_mode(t.get("mode"))
+        t.pop("installing", None)              # app tắt giữa lúc cài: cho bấm Cài lại
         if t.get("status") == "running":      # app bị tắt khi đang chạy -> tự chạy tiếp
             kill_orphan(t.get("pid"))
             end_work(t, "interrupted")
@@ -764,13 +770,27 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
     wdir(t).mkdir(parents=True, exist_ok=True)
     if IS_WIN and wdir(t).name == ".work":
         subprocess.run(["attrib", "+h", str(wdir(t))], creationflags=NO_WINDOW, capture_output=True)
+    rules = learn_rules()
+    learn_md = (("## Bài học chung của team (đã kiểm chứng, hợp với hầu hết loại task — áp dụng)\n"
+                 + "\n".join("- " + r for r in rules) + "\n\n") if rules else "") + LESSON_MD
+    txt = txt.replace("\n## Cấm\n", "\n" + learn_md + "\n## Cấm\n", 1)
     if "codex" not in on:
         txt = "\n".join(x for x in txt.split("\n") if '" worker codex ' not in x)
+    if t.get("kind") == "code":
+        txt = code_md(txt, t)
     if pm == "codex":
         txt = pm_codex_md(txt)
     if free_setup():
         txt = txt.replace("\n## Cấm\n", "\n" + FREE_RULES + "\n## Cấm\n", 1)
     (wdir(t) / ("AGENTS.md" if pm == "codex" else "CLAUDE.md")).write_text(txt, encoding="utf-8")
+
+
+LESSON_MD = f"""## Bài học cho cả team (khi task xong)
+Ghi ./lessons.json: {{"category": "<1 trong: {', '.join(CATEGORIES)}>", "lessons": ["<1 câu>", ...]}}
+- Bài học = điều rút ra giúp MỌI task sau nhanh/đúng hơn: cách chia việc, worker/model hợp việc gì, lỗi hay gặp và cách tránh,
+  bước thừa nên bỏ. Tối đa 3; không có gì thật sự mới -> "lessons": [] (vẫn ghi category).
+- KHÔNG ghi tên dự án/game/khách hàng/người, link, đường dẫn, nội dung sản phẩm, số liệu riêng. App gửi ẩn danh về team.
+"""
 
 
 FREE_RULES = """## Chế độ Free (người dùng không có tài khoản AI trả phí — áp dụng THAY mọi luật chế độ ở trên khi mâu thuẫn)
@@ -885,7 +905,10 @@ def start_run(t):
         q.unlink()
     ef = (wdir(t) / "tasks" / "effort.txt")
     hard = t.get("mode") == "pro" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh"
-    cm, ce = pick_model(pm, t.get("mode", "balanced"), hard)   # Pro + bước quá khó: mức cao nhất
+    code = t.get("kind") == "code"
+    cm, ce = pick_model(pm, "code" if code else t.get("mode", "balanced"), hard)   # Pro + bước quá khó: mức cao nhất
+    if code:
+        code_checkpoint(t)                      # điểm khôi phục trước khi sửa code (nút Khôi phục)
     t["_effort"], t["_hard"] = ce, hard
     if pm == "codex":
         # ChatGPT làm quản lý: không sandbox (như Claude: cần gọi worker, ghi OUTPUT, mạng); model mặc định của tài khoản
@@ -906,7 +929,7 @@ def start_run(t):
         else:
             t["session"] = str(uuid.uuid4())
             args += ["--session-id", t["session"]]
-        for f in dict.fromkeys([str(out_dir(t))] + drives()):
+        for f in dict.fromkeys([str(out_dir(t))] + ([t["pdir"]] if code else []) + drives()):
             args += ["--add-dir", f]
     t.update(status="running", started=now(), _pause=False, _cancel=False, _quit=False, _redirect=None)
     t["wi"] = tmsg(t, "work", "", status="running", started=now(), started_ts=time.time(), steps=[])
@@ -914,7 +937,7 @@ def start_run(t):
     try:
         proc = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-                                env=dict(os.environ, AIO_INPUT=str(tdir(t) / "input"), AIO_MODE=t.get("mode", "balanced"),
+                                env=dict(os.environ, AIO_INPUT=str(tdir(t) / "input"), AIO_MODE="code" if code else t.get("mode", "balanced"),
                                          AIO_HARD="1" if t.pop("_hard", False) else "",
                                          CLAUDE_CODE_EFFORT_LEVEL=t.pop("_effort", "medium") or "medium"),
                                 creationflags=NO_WINDOW | BELOW_NORMAL)
@@ -1138,6 +1161,13 @@ def watch(t, p, nxt):
         elif t.get("_pause"):
             end_work(t, "paused")
             t["status"] = "paused"
+        elif t.get("kind") == "code" and read_install(t):
+            end_work(t, "done")
+            t["status"] = "waiting"
+            t["install"] = read_install(t)
+            (wdir(t) / "install_request.json").unlink(missing_ok=True)
+            tmsg(t, "claude", t["install"]["why"] or "Cần cài thêm phần mềm để làm tiếp.", kind="install",
+                 items=[i["name"] for i in t["install"]["items"]])
         elif q.exists() and q.read_text(encoding="utf-8").strip():
             end_work(t, "done")
             t["status"] = "waiting"
@@ -1296,6 +1326,13 @@ def act(tid, action, text="", files=None, template=""):
         elif action == "mode" and MODE_ALIAS.get(text, text) in MODES:
             t["mode"] = norm_mode(text)                           # áp dụng từ lượt chạy kế tiếp
             write_claude_md(t)
+        elif action == "install" and s == "waiting" and t.get("install") and not t.get("installing"):
+            t["installing"] = True
+            threading.Thread(target=run_install, args=(t,), daemon=True).start()
+        elif action == "restore" and t.get("kind") == "code" and s not in ("running", "queued"):
+            r = code_restore(t)
+            tsave(t)
+            return r
         elif action == "pin":
             t["pinned"] = not t.get("pinned")
         elif action == "rename" and text:
@@ -1328,6 +1365,125 @@ def open_task_file(tid, rel):
         return {"error": "Không tìm thấy file"}
     open_path(f)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- Learning: bài học chung của mọi người dùng
+# Mỗi task xong: Claude ghi bài học chung vào lessons.json -> app lọc dữ liệu riêng, ghi hàng đợi learn_queue.jsonl ->
+# gửi về Google Form (Sheet của team). Hàng tuần tác vụ hẹn giờ lọc, gộp vào src/learnings.md -> phát hành bản mới.
+def learn_src(name, embedded):
+    if embedded or VERSION != "dev":
+        return embedded
+    f = APP.parent / name                       # chạy từ mã nguồn (dev): đọc thẳng file trong src/
+    return f.read_text("utf-8") if f.is_file() else ""
+
+
+def learn_rules():
+    """Quy tắc đang áp dụng (mục '## Đang áp dụng' trong learnings.md: mỗi dòng '- ...')."""
+    txt = learn_src("learnings.md", LEARN_MD)
+    m = re.search(r"(?ms)^## Đang áp dụng\s*\n(.*?)(?=^## |\Z)", txt)
+    return [x.strip()[2:].strip() for x in (m.group(1) if m else "").splitlines() if x.strip().startswith("- ")]
+
+
+PRIVATE_RE = [
+    (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "<email>"),
+    (re.compile(r"https?://\S+|www\.\S+"), "<link>"),
+    (re.compile(r"\\\\[^\s\\]+(?:\\[^\s\\]+)*|[A-Za-z]:[\\/][^\s,;\"']*|(?:/Users|/Volumes|/home|~)/[^\s,;\"']*"), "<đường dẫn>"),
+    (re.compile(r"\b(?:AIza[\w-]{20,}|sk-[\w-]{20,}|gh[pousr]_[\w]{20,})\b"), "<key>"),
+    (re.compile(r"\b\d{6,}\b"), "<số>"),
+]
+
+
+def scrub(text, n=300):
+    """Bỏ dữ liệu riêng khỏi bài học trước khi gửi: email, link, đường dẫn, key, dãy số dài."""
+    text = str(text or "")
+    for rx, rep in PRIVATE_RE:
+        text = rx.sub(rep, text)
+    return re.sub(r"\s+", " ", text).strip()[:n]
+
+
+def learn_report(t):
+    """Báo cáo ẩn danh của 1 task: loại việc, bài học (đã lọc), AI nào làm/bao lâu/đạt không. Không có nội dung task."""
+    w = wdir(t)
+    les = rjson(w / "lessons.json", {}) or {}
+    les = les if isinstance(les, dict) else {"lessons": les if isinstance(les, list) else []}
+    cat = str(les.get("category") or "khác").strip().lower()[:40]
+    works = [m for m in t.get("messages", []) if m.get("role") == "work"]
+    subs = [{"worker": s_.get("worker", ""), "model": s_.get("model", ""), "status": s_.get("status", ""),
+             "seconds": s_.get("seconds"), "attempt": s_.get("attempt")} for s_ in subtasks(t)][:30]
+    return {"v": 1, "release": RELEASE, "os": "mac" if IS_MAC else "win" if IS_WIN else "other", "at": int(time.time()),
+            "kind": t.get("kind") or "task", "mode": t.get("mode", ""), "pm": t.get("pm", "claude"), "category": cat,
+            "lessons": [scrub(x) for x in (les.get("lessons") or []) if str(x).strip()][:5],
+            "turns": len(works), "seconds": round(sum((m.get("ended_ts") or m.get("started_ts", 0)) - m.get("started_ts", 0) for m in works)),
+            "status": t.get("status"), "subtasks": subs,
+            "plans": {k: CFG["ais"].get(k, {}).get("plan", "") for k in ("claude", "codex")},
+            "models": {"gemini": (CFG.get("gemini_list") or [])[:30], "gemini_api": (CFG.get("gemini_api_models") or [])[:30]}}
+
+
+def learn_queue(t):
+    try:
+        if t.get("learned"):
+            return
+        ends = [m.get("ended_ts") or 0 for m in t.get("messages", []) if m.get("role") == "work"]
+        if not (wdir(t) / "lessons.json").exists() and time.time() - max(ends or [0]) > 3600:
+            t["learned"] = True                # task cũ (trước khi có learning): không gửi lại
+            return
+        rep = learn_report(t)
+        with open(DATA / "learn_queue.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(rep, ensure_ascii=False) + "\n")
+        t["learned"] = True
+    except Exception as e:
+        dlog(f"learn_queue {t.get('id')}: {e}")
+
+
+def learn_form():
+    raw = learn_src("learn_form.json", LEARN_FORM)
+    try:
+        d = json.loads(raw) if raw else {}
+    except Exception:
+        d = {}
+    return (d.get("url") or "").strip(), (d.get("entry") or "").strip()
+
+
+def learn_send():
+    """Gửi hàng đợi bài học về Google Form của team (mỗi báo cáo 1 lần gửi). Chưa có Form -> giữ lại gửi sau."""
+    import urllib.parse
+    import urllib.request
+    url, entry = learn_form()
+    f = DATA / "learn_queue.jsonl"
+    if not url or not entry or not f.is_file():
+        return 0
+    lines = [x for x in f.read_text("utf-8", "replace").splitlines() if x.strip()][-500:]
+    left, sent = [], 0
+    for i, line in enumerate(lines):
+        try:
+            body = urllib.parse.urlencode({entry: line}).encode()
+            urllib.request.urlopen(urllib.request.Request(url, data=body, headers={"User-Agent": "maestro"}), timeout=20).read(200)
+            sent += 1
+        except Exception as e:
+            dlog(f"learn_send: {e}")
+            left = lines[i:]
+            break
+    f.write_text("".join(x + "\n" for x in left), encoding="utf-8")
+    if sent:
+        CFG["learn_sent"] = int(CFG.get("learn_sent") or 0) + sent
+        save_cfg()
+    return sent
+
+
+def learn_loop():
+    while True:
+        time.sleep(600)
+        try:
+            learn_send()
+        except Exception as e:
+            dlog(f"learn_loop: {e}")
+
+
+def learn_state():
+    f = DATA / "learn_queue.jsonl"
+    pending = sum(1 for x in f.read_text("utf-8", "replace").splitlines() if x.strip()) if f.is_file() else 0
+    return {"rules": learn_rules(), "pending": pending, "sent": int(CFG.get("learn_sent") or 0),
+            "on": bool(learn_form()[0])}
 
 
 # ---------------------------------------------------------------- Project Brain + Workflow Templates
@@ -1453,15 +1609,24 @@ def template_api(d):
     return {"error": "bad request"}
 
 
-def new_task(text, mode="balanced", project="", template=""):
+def new_task(text, mode="balanced", project="", template="", kind="", pdir=""):
     if not text.strip():
         return {"error": "Chưa nhập yêu cầu"}
+    if kind == "code":
+        if not pdir:
+            return {"error": "Chọn thư mục dự án cho Code mode"}
+        p = Path(pdir).expanduser()
+        bad = edit_refused(p.resolve()) if p.is_dir() else f"Không thấy thư mục dự án: {pdir}"
+        if bad:
+            return {"error": bad}
     tid = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
     while tid in TASKS:
         tid += "b"
     t = {"id": tid, "title": re.sub(r"\s+", " ", text.strip())[:50], "text": text.strip(),
          "status": "draft", "created": now(), "created_ts": time.time(), "messages": [],
          "mode": norm_mode(mode), "w2": True}
+    if kind == "code":
+        t.update(kind="code", pdir=str(Path(pdir).expanduser()))
     if project and any(p["id"] == project for p in projects()):
         t["project"] = project
     tp = next((x for x in templates() if x["id"] == template), None)
@@ -2020,7 +2185,8 @@ def pm_limit(t):
 
 
 def task_detail(t):
-    d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished", "mode")}
+    d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished", "mode", "kind", "pdir", "installing")}
+    d["can_restore"] = bool(t.get("checkpoints"))
     if t.get("need_login") and t["status"] == "queued":
         d["status"] = "login"
     if t["status"] == "queued" and (t.get("hold_until", 0) > time.time() or pm_limit(t)):
@@ -2167,7 +2333,8 @@ class H(BaseHTTPRequestHandler):
                                    "projects": [{"id": p["id"], "name": p["name"]} for p in projects()],
                                    "templates": [{"id": x["id"], "name": x["name"], "steps": len(x.get("steps", []))} for x in templates()], "instructions": CFG["instructions"],
                                    "tasks": ts, "version": VERSION, "release": RELEASE, "autostart": autostart_on(), "os": "mac" if IS_MAC else "win" if IS_WIN else "other", "updated": upd, "update_fail": fail,
-                                   "machine": {"cpu": CPU, "ram": RAM_GB, "max": MAX_RUNNING}, "setup": setup_state()})
+                                   "machine": {"cpu": CPU, "ram": RAM_GB, "max": MAX_RUNNING}, "setup": setup_state(),
+                                   "learn": learn_state()})
         if u.path == "/api/registry":
             return self.send(200, registry(force=q.get("force", [""])[0] == "1"))
         if u.path == "/api/task":
@@ -2229,6 +2396,10 @@ class H(BaseHTTPRequestHandler):
             return export_log()
         if path == "/api/ai/refresh":
             return refresh_status()
+        if path == "/api/memory":
+            CFG["instructions"] = str(d.get("instructions") or "")[:20000]
+            save_cfg()
+            return {"ok": True, "msg": "Đã lưu ghi nhớ"}
         if path == "/api/gemini-key":
             return set_gemini_key(str(d.get("key") or ""))
         if path == "/api/update":
@@ -2254,7 +2425,8 @@ class H(BaseHTTPRequestHandler):
                 open_path(CFG["output"])
             return {"ok": True}
         if path == "/api/task/new":
-            return new_task(d.get("text", ""), d.get("mode", "balanced"), d.get("project", ""), d.get("template", ""))
+            return new_task(d.get("text", ""), d.get("mode", "balanced"), d.get("project", ""), d.get("template", ""),
+                            d.get("kind", ""), d.get("pdir", ""))
         if path == "/api/ofile":
             return ofile_act(d)
         if path == "/api/project":
@@ -2735,6 +2907,7 @@ def serve(background=False):
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=check_startup, daemon=True).start()
     threading.Thread(target=ensure_libs, daemon=True).start()
+    threading.Thread(target=learn_loop, daemon=True).start()
     threading.Thread(target=check_update, daemon=True).start()
     if not background and not os.environ.get("AIO_NO_BROWSER"):
         webbrowser.open(url)
@@ -2937,6 +3110,200 @@ def changed_files(d, backup, since):
     except Exception:
         pass
     return sorted(out)
+
+
+# ---------------------------------------------------------------- Code mode: điểm khôi phục + cài phần mềm thiếu
+def _git(p, *a, timeout=60):
+    r = subprocess.run(["git", "-C", str(p), *a], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=timeout, creationflags=NO_WINDOW)
+    return r.returncode, (r.stdout or "").strip(), (r.stderr or "").strip()
+
+
+def code_checkpoint(t):
+    """Trước mỗi lượt Code mode: lưu trạng thái thư mục dự án. Dự án git: 'git stash create' (không đổi file nào);
+    không có git: chép file (bỏ .git, node_modules; tối đa 300 MB) vào lịch sử task. Giữ 5 điểm gần nhất."""
+    p, cps = Path(t.get("pdir", "")), t.setdefault("checkpoints", [])
+    if not p.is_dir():
+        return
+    n = (cps[-1]["n"] + 1) if cps else 1
+    cp = {"n": n, "ts": time.time(), "time": now()}
+    try:
+        if shutil.which("git") and (p / ".git").exists() and _git(p, "rev-parse", "HEAD")[0] == 0:
+            head = _git(p, "rev-parse", "HEAD")[1]
+            sha = _git(p, "stash", "create")[1] or head
+            _git(p, "update-ref", f"refs/maestro/{t['id']}-{n}", sha)       # giữ lại, không bị git dọn mất
+            cp.update(git=sha, head=head)
+        else:
+            dst = tdir(t) / "checkpoints" / str(n)
+            r = backup_dir(p, dst)
+            cp.update(dir=r if r == str(dst) else "", note="" if r == str(dst) else r)
+    except Exception as e:
+        cp["note"] = f"lỗi: {e}"[:200]
+    cps.append(cp)
+    for old in cps[:-5]:
+        if old.get("dir"):
+            shutil.rmtree(old["dir"], ignore_errors=True)
+        elif old.get("git"):
+            _git(p, "update-ref", "-d", f"refs/maestro/{t['id']}-{old['n']}")
+    t["checkpoints"] = cps[-5:]
+
+
+def code_restore(t):
+    """Đưa thư mục dự án về điểm khôi phục gần nhất (trước lượt làm cuối). File mới tạo sau đó vẫn giữ."""
+    cps, p = t.get("checkpoints") or [], Path(t.get("pdir", ""))
+    if not cps or not p.is_dir():
+        return {"error": "Chưa có điểm khôi phục"}
+    cp = cps[-1]
+    if cp.get("git"):
+        cur = _git(p, "stash", "create")[1]
+        if cur:
+            _git(p, "update-ref", f"refs/maestro/{t['id']}-undo", cur)     # bản trước khi khôi phục (phòng khi đổi ý)
+        rc, _, err = _git(p, "reset", "--hard", cp["head"])
+        if rc == 0 and cp["git"] != cp["head"]:
+            rc, _, err = _git(p, "stash", "apply", cp["git"])
+        if rc != 0:
+            return {"error": "Khôi phục chưa xong: " + err[-200:]}
+    elif cp.get("dir") and Path(cp["dir"]).is_dir():
+        src = Path(cp["dir"])
+        for f in src.rglob("*"):
+            if f.is_file():
+                o = p / f.relative_to(src)
+                o.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(f, o)
+    else:
+        return {"error": "Điểm khôi phục không dùng được: " + (cp.get("note") or "thư mục quá lớn để sao lưu")}
+    tmsg(t, "claude", f"Đã khôi phục thư mục dự án về lúc **{cp['time']}** (trước lượt làm cuối). File mới tạo sau đó vẫn giữ.")
+    return {"ok": True, "msg": "Đã khôi phục"}
+
+
+INSTALL_ID = {"winget": r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", "brew": r"[a-z0-9][a-z0-9@._+/-]{0,80}",
+              "pip": r"[A-Za-z0-9][A-Za-z0-9._,=\[\]-]{0,80}", "npm": r"(?:@[a-z0-9._-]+/)?[a-z0-9._-]+(?:@[A-Za-z0-9._-]+)?"}
+
+
+def read_install(t):
+    """Yêu cầu cài phần mềm do Claude ghi (install_request.json) -> danh sách đã kiểm tra (chỉ tên gói hợp lệ, không lệnh tự do)."""
+    d = rjson(wdir(t) / "install_request.json", None)
+    if not isinstance(d, dict):
+        return None
+    items = []
+    for it in (d.get("items") or [])[:10]:
+        if not isinstance(it, dict):
+            continue
+        ok = {k: str(it[k]).strip() for k in INSTALL_ID if it.get(k) and re.fullmatch(INSTALL_ID[k], str(it[k]).strip())}
+        if ok:
+            items.append({"name": str(it.get("name") or next(iter(ok.values())))[:60], **ok})
+    return {"why": str(d.get("why") or "")[:300], "items": items} if items else None
+
+
+def install_script(items, log, done):
+    """File cài đặt (.bat Windows / .command Mac) chạy lần lượt winget/brew, pip, npm cho các gói đã duyệt."""
+    py = py_console()
+    if IS_WIN:
+        L = ["@echo off", "chcp 65001 >nul", "title Maestro - cai dat phan mem", "echo Maestro dang cai phan mem. Khong tat cua so nay.", ""]
+        for it in items:
+            if it.get("winget"):
+                L += [f'echo === {it["winget"]}', f'winget install -e --id {it["winget"]} --silent --accept-source-agreements --accept-package-agreements',
+                      f'echo [%ERRORLEVEL%] winget {it["winget"]}>> "{log}"']
+        L.append('set "PATH=%PATH%;%ProgramFiles%\\nodejs;%APPDATA%\\npm"')
+        for it in items:
+            if it.get("pip"):
+                L += [f'echo === {it["pip"]}', f'"{py}" -m pip install --user --disable-pip-version-check {it["pip"]}', f'echo [%ERRORLEVEL%] pip {it["pip"]}>> "{log}"']
+            if it.get("npm"):
+                L += [f'echo === {it["npm"]}', f'call npm install -g {it["npm"]}', f'echo [%ERRORLEVEL%] npm {it["npm"]}>> "{log}"']
+        L += [f'echo done> "{done}"', "echo XONG. Cua so tu dong sau 5 giay.", "timeout /t 5 >nul"]
+        return "\r\n".join(L) + "\r\n"
+    L = ["#!/bin/bash", 'echo "Maestro đang cài phần mềm. Không tắt cửa sổ này."',
+         'export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"']
+    for it in items:
+        if it.get("brew"):
+            L += [f'echo "=== {it["brew"]}"', f'if command -v brew >/dev/null; then brew install {it["brew"]}; echo "[$?] brew {it["brew"]}" >> "{log}"; '
+                  f'else echo "[1] brew {it["brew"]}: chưa có Homebrew" >> "{log}"; fi']
+        if it.get("pip"):
+            L += [f'"{py}" -m pip install --user {it["pip"]} || "{py}" -m pip install --user --break-system-packages {it["pip"]}',
+                  f'echo "[$?] pip {it["pip"]}" >> "{log}"']
+        if it.get("npm"):
+            L += [f'npm install -g {it["npm"]}', f'echo "[$?] npm {it["npm"]}" >> "{log}"']
+    L += [f'echo done > "{done}"', 'echo "XONG. Có thể đóng cửa sổ này."', "sleep 3", "exit 0"]
+    return "\n".join(L) + "\n"
+
+
+def run_install(t):
+    """Người dùng bấm Cài: chạy file cài trong cửa sổ hiện tiến trình, xong thì task tự chạy tiếp và báo kết quả."""
+    req = t.get("install") or {}
+    items = req.get("items") or []
+    d = tdir(t) / "install"
+    d.mkdir(parents=True, exist_ok=True)
+    log, done = d / "install.log", d / "done.txt"
+    log.write_text("", encoding="utf-8")
+    done.unlink(missing_ok=True)
+    f = d / ("cai_dat.bat" if IS_WIN else "cai_dat.command")
+    f.write_text(install_script(items, log, done), encoding="utf-8")
+    try:
+        if IS_WIN:
+            subprocess.run(["cmd.exe", "/c", "start", "/wait", "Maestro - cài đặt", "cmd.exe", "/c", str(f)], creationflags=NO_WINDOW, timeout=3600)
+        else:
+            os.chmod(f, 0o755)
+            subprocess.Popen(["open", "-a", "Terminal", str(f)] if IS_MAC else ["bash", str(f)])
+            t0 = time.time()
+            while time.time() - t0 < 3600 and not done.exists():
+                time.sleep(3)
+    except Exception as e:
+        dlog(f"run_install: {e}")
+    refresh_path()                       # phần mềm vừa cài thấy được ngay
+    res = log.read_text("utf-8", "replace").strip() if log.exists() else ""
+    names = ", ".join(i["name"] for i in items)
+    with _tlock:
+        t.pop("installing", None)
+        t.pop("install", None)
+        tmsg(t, "user", f"Đã chạy cài đặt: {names}")
+        t["status"] = "queued"
+        t["next"] = {"kind": "answer", "text": f"[Maestro] Người dùng đã bấm Cài. Kết quả (mã [0] = thành công):\n{res or '(không có log)'}\n"
+                                               "Kiểm tra lại phần mềm vừa cài rồi làm tiếp."}
+        tsave(t)
+
+
+CODE_MD = """## Vai trò (Code mode)
+Bạn là kỹ sư phần mềm chính, làm như Claude Code: tự làm là chính, sửa code TRỰC TIẾP trong THƯ MỤC DỰ ÁN: {pdir}
+Đầu task: đọc README / CLAUDE.md / AGENTS.md / package.json / pyproject... của dự án để biết cách chạy, quy ước code.
+Task này là một cuộc trò chuyện nhiều lượt.
+
+## Quy trình code
+1. Hiểu: tìm đúng file liên quan (Grep/Glob), đọc phần cần đọc; không đọc tràn lan.
+2. Kế hoạch ngắn trong tasks/plan.json (việc nhỏ thì làm luôn).
+3. Sửa: thay đổi nhỏ nhất đúng yêu cầu, giữ phong cách code sẵn có, không "cải thiện" phần không được nhờ.
+4. CHẠY THỬ: chạy build/test/lint có sẵn của dự án; không có test thì chạy chương trình hoặc đoạn kiểm tra ngắn.
+   Giao diện web: chạy server local, chụp màn hình bằng trình duyệt có sẵn
+   (Edge/Chrome: --headless=new --screenshot=<file.png> --window-size=1280,800 <url>) rồi tự xem ảnh, sửa chỗ lệch.
+5. Lỗi -> sửa -> chạy lại tới khi qua (tối đa 3 vòng cho một lỗi; vẫn lỗi thì báo rõ lỗi gì, đã thử gì).
+6. Báo cáo bằng lời dễ hiểu: đã đổi gì (file + ý chính), đã chạy thử gì và kết quả, còn gì chưa xong. Không dán code dài.
+- Git: KHÔNG commit/push/đổi nhánh trừ khi người dùng yêu cầu. App tự lưu điểm khôi phục trước mỗi lượt (nút Khôi phục).
+- Không xoá file/thư mục của dự án ngoài yêu cầu. Không ghi mật khẩu/key vào code.
+- Lệnh chạy lâu (server): chạy nền, nhớ tắt khi xong.
+
+## GPT/Gemini hỗ trợ (chỉ khi có lợi rõ; việc chính bạn tự làm)
+- codex: ý kiến thứ hai — soát lỗi/thiết kế (giao danh sách file + điều cần soát, dặn không sửa), hoặc viết 1 phần độc lập
+  với --edit <thư mục con của dự án>.
+- gemini: tra tài liệu, thư viện, thông báo lỗi lạ trên web.
+
+## Thiếu phần mềm
+Cần cài thêm (Node.js, Git, thư viện Python/npm...) mà máy chưa có: KHÔNG tự cài. Ghi ./install_request.json rồi DỪNG lượt:
+  {{"why": "<1 câu: cần để làm gì>", "items": [{{"name": "Node.js", "winget": "OpenJS.NodeJS.LTS", "brew": "node"}},
+   {{"name": "requests", "pip": "requests"}}, {{"name": "typescript", "npm": "typescript"}}]}}
+(winget = gói Windows, brew = gói Mac, pip = thư viện Python, npm = gói Node; chỉ tên gói, không lệnh khác.)
+App hiện thông báo + nút Cài cho người dùng; cài xong app tự chạy tiếp lượt sau kèm kết quả cài.
+"""
+
+
+def code_md(txt, t):
+    """Hướng dẫn Code mode: thay mục Vai trò/Chia việc/Nghiệm thu/chế độ bằng quy trình code + chạy thử."""
+    code = CODE_MD.format(pdir=t.get("pdir", ""))
+    txt = re.sub(r"(?ms)^## Vai trò\n.*?(?=^## )", lambda m: code + "\n", txt, count=1)
+    for sec in ("Chia việc (Gemini nhanh, GPT chính xác hơn)", "Nghiệm thu", "Ảnh có đánh dấu", "Storyboard", "Tạo ảnh",
+                "Trả kết quả theo từng chặng"):
+        txt = re.sub(r"(?ms)^## " + re.escape(sec) + r"\n.*?(?=^## )", "", txt, count=1)
+    txt = re.sub(r"(?ms)^## Chế độ làm việc người dùng chọn.*?(?=^## )",
+                 "## Chế độ: Code (Opus, suy nghĩ medium)\n- Ưu tiên chạy được và đúng; chạy thử thật trước khi báo xong.\n\n", txt, count=1)
+    return txt
 
 
 def cmd_worker(argv):
@@ -3165,11 +3532,12 @@ EFFORTS = ["low", "medium", "high", "xhigh"]
 CODEX_MODELS = ["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"]
 # Gemini: Neon cho Pro (bước quá khó: high), Hydrogen cho các chế độ khác; chỉ dùng model mà `agy models` liệt kê
 MODEL_PLAN = {   # (model, mức suy nghĩ) theo chế độ
-    "claude": {"pro": ("opus", "high"), "balanced": ("opus", "medium"), "turbo": ("opus", "medium"), "eco": ("opus", "low")},
+    "claude": {"pro": ("opus", "high"), "balanced": ("opus", "medium"), "turbo": ("opus", "medium"), "eco": ("opus", "low"),
+               "code": ("opus", "medium")},       # Code mode: Opus mới nhất (bí danh "opus" tự theo bản mới), mức medium
     "codex": {"pro": (CODEX_MODELS, "high"), "balanced": (CODEX_MODELS, "medium"), "turbo": (CODEX_MODELS, "low"),
-              "eco": (CODEX_MODELS, "low")},
+              "eco": (CODEX_MODELS, "low"), "code": (CODEX_MODELS, "medium")},
     "gemini": {"pro": ("neon", "medium"), "balanced": ("hydrogen", "medium"), "turbo": ("hydrogen", "medium"),
-               "eco": ("hydrogen", "low")},
+               "eco": ("hydrogen", "low"), "code": ("hydrogen", "medium")},
 }
 GEM_FALLBACK = {"neon": ["hydrogen", "flash"], "hydrogen": ["flash", "neon"]}
 
@@ -3216,7 +3584,7 @@ def gem_pick(key, eff):
 
 
 def pick_model(ai, mode, hard=False):
-    mode = norm_mode(mode)
+    mode = mode if mode == "code" else norm_mode(mode)
     m, eff = MODEL_PLAN[ai][mode]
     if hard:
         eff = "high" if ai == "gemini" else "xhigh"

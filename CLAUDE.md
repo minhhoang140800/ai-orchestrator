@@ -13,6 +13,9 @@ Maestro = web app chạy trên máy người dùng (Windows chính, có bản Ma
 và Gemini (Antigravity CLI `agy`), dùng gói Claude Max / ChatGPT Plus / Google AI Pro sẵn có, không API key.
 Không có Claude trả phí: ChatGPT (Codex) làm PM (`pick_pm`, hướng dẫn ghi vào AGENTS.md). Không có gói trả phí nào: chế độ Free
 (`free_setup`, `FREE_RULES`) + Gemini API key tuỳ chọn (`api_worker`, key chỉ lưu trong `data/config.json`). Worker sửa file thẳng: `--edit`.
+Code mode (`kind=code`, `CODE_MD`, `code_checkpoint`/`code_restore`, cài phần mềm thiếu: `install_request.json` → `run_install`).
+Learning: task xong → `lessons.json` → `learn_queue` (lọc dữ liệu riêng: `scrub`) → Google Form (`src/learn_form.json`);
+tác vụ hẹn giờ Chủ nhật làm theo `learning/WEEKLY.md`, gộp vào `src/learnings.md` (mục "Đang áp dụng" nhúng vào app khi build).
 
 ## Mã nguồn (`src/`)
 - `app.py` — toàn bộ backend 1 file (Python stdlib; tuỳ chọn pillow/openpyxl/pywinpty). Gồm: HTTP server + API,

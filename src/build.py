@@ -32,6 +32,11 @@ ui = base64.b64encode((d / "ui.html").read_bytes()).decode()
 assert 'UI_B64 = ""' in app
 import os
 built = app.replace('UI_B64 = ""', f'UI_B64 = "{ui}"', 1)
+# bài học chung đã duyệt + nơi nhận bài học (Google Form) -> nhúng vào app (cập nhật hàng tuần qua bản mới)
+_lm = (d / "learnings.md").read_text(encoding="utf-8") if (d / "learnings.md").exists() else ""
+_lf = (d / "learn_form.json").read_text(encoding="utf-8") if (d / "learn_form.json").exists() else ""
+assert 'LEARN_MD = ""' in built and 'LEARN_FORM = ""' in built
+built = built.replace('LEARN_MD = ""', "LEARN_MD = " + json.dumps(_lm), 1).replace('LEARN_FORM = ""', "LEARN_FORM = " + json.dumps(_lf), 1)
 built = built.replace('ICO_B64 = ""', 'ICO_B64 = "' + base64.b64encode((d / "icon.ico").read_bytes()).decode() + '"', 1)
 import datetime
 ver = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d.%H%M") + "-" + hashlib.sha1(built.encode()).hexdigest()[:6]  # so sánh được theo thời gian
