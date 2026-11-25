@@ -137,7 +137,7 @@ aside{background:var(--side);border-right:1px solid var(--line);padding:4px 8px 
 .brand{font-size:17px;font-weight:600;color:var(--ink);padding:16px 8px 14px;gap:10px}.brand img{width:24px;height:24px;border-radius:6px}
 .bt{display:inline-flex;align-items:baseline;gap:6px;line-height:1}.ver{font-size:11px;font-weight:500;color:var(--mute);margin:0}
 .newtask{justify-content:flex-start;margin:1px 0;padding:8px 10px;border:0;background:transparent;font-weight:500;gap:10px;border-radius:6px}
-.newtask:hover{background:var(--hover)}#btnNew{background:var(--acc2);color:var(--ink);font-weight:600}#btnNew:hover{background:#DCDCDC}
+.newtask:hover{background:var(--hover)}#btnNew{color:var(--ink);font-weight:600}.newtask.on{background:var(--acc2)}.newtask.on:hover{background:#DCDCDC}
 .lbl{text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:600;color:var(--mute);padding:18px 10px 6px}
 .tlist{padding:0 0 8px}
 .titem{border-radius:6px;padding:6px 10px;gap:10px;font-size:13px;color:var(--ink)}.titem:hover{background:var(--hover)}
@@ -572,7 +572,12 @@ $("cMenu").onclick = async (e) => {
     } else { const r = await api("/api/ofile", { ...c, op }); if (r.error) toast(r.error); }
   } catch (err) { toast("Không copy được: " + err.message); }
 };
+function navOn() {          // chỉ tô đậm mục đang mở: Task mới (trang chủ) hoặc Lịch sử & file
+  $("btnNew").classList.toggle("on", !sel && view !== "lib");
+  $("btnLib").classList.toggle("on", view === "lib");
+}
 function renderSide() {
+  navOn();
   const ls = [...S.tasks.filter((t) => t.pinned), ...S.tasks.filter((t) => !t.pinned)];
   $("tlist").innerHTML = ls.length ? ls.map((t) => `<div class="titem ${t.id === sel ? "on" : ""} ${sMenuFor === t.id ? "menu" : ""}" data-sel="${t.id}" title="${esc(ST[t.status])}" role="button" tabindex="0"><span class="sd ${t.status}"></span><span class="t">${esc(t.title)}</span>${t.pinned ? `<span class="pin">${I.pin}</span>` : ""}<button class="tmore" data-more="${t.id}" aria-label="Tùy chọn">${I.more}</button></div>`).join("")
     : `<div class="hint" style="padding:6px 10px">Chưa có task</div>`;
