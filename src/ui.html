@@ -581,12 +581,13 @@ function composer(id, ph) {
       <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="pop mmenu" id="modeMenu" role="menu"></div></span>
       <button class="pri sq" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
-const MODE = { fast: ["Pro", "Suy nghĩ sâu nhất, chấm kỹ, tốn hạn mức hơn"], balanced: ["Balanced", "Cân bằng chất lượng và tốc độ"], turbo: ["Turbo", "Nhanh nhất, giảm thẩm định"], saver: ["Eco", "Ít hạn mức nhất, chậm hơn"] };
+const MODE = { pro: ["Pro", "Suy nghĩ sâu nhất, chấm kỹ, tốn hạn mức hơn"], balanced: ["Balanced", "Cân bằng chất lượng và tốc độ"], turbo: ["Turbo", "Nhanh nhất, giảm thẩm định"], eco: ["Eco", "Ít hạn mức nhất, chậm hơn"] };
+const normMode = m => ({ fast: "pro", saver: "eco" })[m] || (MODE[m] ? m : "balanced");
 const MICON = {
-  fast: '<svg class="i" viewBox="0 0 24 24"><path d="M9.5 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"/><path d="M12.5 9h2a2 2 0 0 0 2-2M12.5 14h3a2 2 0 0 1 2 2v1M16.5 11h3"/></svg>',
+  pro: '<svg class="i" viewBox="0 0 24 24"><path d="M9.5 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"/><path d="M12.5 9h2a2 2 0 0 0 2-2M12.5 14h3a2 2 0 0 1 2 2v1M16.5 11h3"/></svg>',
   balanced: '<svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 4v11.8M18 8.2a8 8 0 0 1-8 8H8.2"/></svg>',
   turbo: '<svg class="i" viewBox="0 0 24 24"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg>',
-  saver: '<svg class="i" viewBox="0 0 24 24"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14z"/><path d="M5 19l7-7"/></svg>' };
+  eco: '<svg class="i" viewBox="0 0 24 24"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14z"/><path d="M5 19l7-7"/></svg>' };
 let curMode = "balanced";
 function paintMode() {
   if (!$("modeBtn")) return;
@@ -617,7 +618,7 @@ function bindComposer(onSend) {
     });
     renderAtts();
   });
-  curMode = c.id === "homeComp" ? (localStorage.getItem("mode") || "balanced") : ((T && T.mode) || "balanced");
+  curMode = normMode(c.id === "homeComp" ? localStorage.getItem("mode") : (T && T.mode));
   paintMode();
   $("modeBtn").onclick = (e) => { e.stopPropagation(); $("modeMenu").classList.toggle("show"); };
   $("modeMenu").onclick = async (e) => {
@@ -848,7 +849,7 @@ function renderTask() {
       <h1 id="tTitle" title="${esc(t.title)}">${esc(t.title)}</h1><button class="ghost icon" id="bRename" title="Đổi tên" aria-label="Đổi tên">${I.edit}</button>
       <span class="grow"></span>${acts.join("")}`;
   $("decbar").innerHTML = decHtml(t);
-  sendIcon(); if (curMode !== (t.mode || "balanced") && !$("modeMenu").classList.contains("show")) { curMode = t.mode || "balanced"; paintMode(); }
+  sendIcon(); if (curMode !== normMode(t.mode) && !$("modeMenu").classList.contains("show")) { curMode = normMode(t.mode); paintMode(); }
   $("thread").innerHTML = body + queued;
   $("bRename").onclick = startRename; bindProj();
   $("bAct").onclick = () => { actOpen = !actOpen; localStorage.setItem("act", actOpen ? "1" : ""); renderTask(); };
@@ -951,10 +952,8 @@ function autoLogin() {      // tự mở lần lượt trang đăng nhập của
 function accState(k, a) {
   if (a.limit_until && !a.pending) return `<small class="bad">${esc(limTxt(a))}</small>`;
   if (!a.installed) return `<small class="bad">Chưa cài — bấm đúp lại file cài Maestro (.bat)</small>`;
-  if (a.window === "logout") return `<small>Trong cửa sổ Gemini: gõ <b>/logout</b>, đăng nhập tài khoản mới trên trình duyệt, rồi đóng cửa sổ.</small>`;
   if (a.code && k === "claude") return `<small>1. Trong cửa sổ đăng nhập bấm <b>Authorize</b> → copy mã hiện ra${a.url ? ` (<a href="${esc(a.url)}" target="aio_login">mở lại</a>)` : ""}. 2. Dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Dán mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`;
   if (a.code) return `<small>1. Đăng nhập Google trên tab vừa mở${a.url ? ` (<a href="${esc(a.url)}" target="_blank">mở lại</a>)` : ""} → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào đây:</small><span class="row" style="margin-top:6px"><input type="text" id="code_${k}" placeholder="Dán mã xác nhận"><button class="pri" data-code="${k}">Gửi</button></span>`;
-  if (a.window) return `<small>1. Đăng nhập Google trên trình duyệt → bấm <b>Copy to Clipboard</b>. 2. Dán mã vào <b>cửa sổ Gemini</b> (chuột phải hoặc Ctrl+V) rồi Enter. 3. Thấy email hiện lên thì đóng cửa sổ.${a.note ? `<br><span class="bad" style="color:var(--bad)">Không chạy ẩn được: ${esc(a.note)}</span>` : ""}</small>`;
   if (a.pending) return `<small>Đăng nhập trong cửa sổ vừa mở${a.url ? ` · <a href="${esc(a.url)}" target="aio_login">mở lại trang đăng nhập</a>` : "…"}</small>`;
   if (a.ok) return `<small>${a.email ? esc(a.email) : "Đã đăng nhập"}</small>`;
   return `<small class="bad">${esc(a.msg || "Chưa đăng nhập")}</small>`;
@@ -993,7 +992,6 @@ function renderSettings() {
 function closeSettings() { $("ov").classList.remove("show"); chain = false; kick(); }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("ov").classList.contains("show")) closeSettings(); });
 
-addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", ""));
 refresh();
 // Cập nhật thưa khi không có gì chạy hoặc tab đang ẩn (nhẹ máy); nhanh khi có task đang làm
 let timer = 0;

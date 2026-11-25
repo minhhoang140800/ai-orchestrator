@@ -34,8 +34,8 @@ fi
 if have codex; then line "ChatGPT (Codex)" "da co"; else line "ChatGPT (Codex)" "dang cai..."; npm install -g @openai/codex >/dev/null 2>&1 || line "ChatGPT (Codex)" "loi (bo qua)"; fi
 if have agy; then line "Gemini (Antigravity)" "da co"; else line "Gemini (Antigravity)" "dang cai..."; curl -fsSL https://antigravity.google/cli/install.sh | bash || line "Gemini (Antigravity)" "loi (bo qua)"; fi
 line "Thu vien kiem tra file" "dang cai..."
-"$PY" -m pip install --user --upgrade --quiet --disable-pip-version-check --break-system-packages pillow openpyxl >/dev/null 2>&1 \
-  || "$PY" -m pip install --user --upgrade --quiet pillow openpyxl >/dev/null 2>&1
+"$PY" -m pip install --user --upgrade --quiet --disable-pip-version-check --break-system-packages pillow openpyxl python-docx python-pptx >/dev/null 2>&1 \
+  || "$PY" -m pip install --user --upgrade --quiet pillow openpyxl python-docx python-pptx >/dev/null 2>&1
 
 # Dung ban dang chay, ghi app
 pkill -f "Application Support/Maestro" >/dev/null 2>&1

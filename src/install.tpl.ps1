@@ -176,7 +176,7 @@ $null = Step 'Gemini (Antigravity)' { Has agy } { & powershell.exe -NoProfile -E
 
 $py = FindPy
 Line $M.libs $M.installing 'Yellow'
-& $py -m pip install --user --upgrade --quiet --disable-pip-version-check pillow openpyxl pywinpty *>> $Log
+& $py -m pip install --user --upgrade --quiet --disable-pip-version-check pillow openpyxl python-docx python-pptx pywinpty *>> $Log
 
 [IO.File]::WriteAllBytes($AppPy, [Convert]::FromBase64String('__APP_B64__'))
 [IO.File]::WriteAllBytes((Join-Path $AppHome 'icon.ico'), [Convert]::FromBase64String('__ICO_B64__'))

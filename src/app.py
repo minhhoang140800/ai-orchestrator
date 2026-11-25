@@ -3,10 +3,9 @@ Một file duy nhất. Chạy trên máy, dữ liệu nằm trên máy.
 
   pythonw app.py [--background]       chạy nền + mở giao diện (http://127.0.0.1:8765)
   python app.py worker codex|gemini   (Claude dùng) giao 1 sub-task cho worker
-  python app.py check files|png|csv|xlsx ...   (Claude dùng) kiểm tra file kết quả
+  python app.py check files|png ...   (Claude dùng) kiểm tra file kết quả
 """
 import base64
-import csv
 import datetime
 import json
 import os
@@ -72,8 +71,14 @@ CPU, RAM_GB = machine()
 # mỗi task đang chạy cần khoảng 4 luồng + 4 GB (Claude Code + worker); tối thiểu 1, tối đa 4
 MAX_RUNNING = max(1, min(4, CPU // 4, int(RAM_GB // 4)))
 LOW_SPEC = MAX_RUNNING == 1
-MODES = {"fast": "Pro (mạnh nhất, chấm kỹ)", "balanced": "Balanced (cân bằng)", "turbo": "Turbo (nhanh nhất, giảm thẩm định)",
-         "saver": "Eco (tiết kiệm hạn mức)"}
+MODES = {"pro": "Pro (mạnh nhất, chấm kỹ)", "balanced": "Balanced (cân bằng)", "turbo": "Turbo (nhanh nhất, giảm thẩm định)",
+         "eco": "Eco (tiết kiệm hạn mức)"}
+MODE_ALIAS = {"fast": "pro", "saver": "eco"}          # tên cũ (task/template/trình duyệt của bản trước)
+
+
+def norm_mode(m):
+    m = MODE_ALIAS.get(m, m)
+    return m if m in MODES else "balanced"
 BELOW_NORMAL = 0x00004000 if IS_WIN else 0     # ưu tiên thấp: máy vẫn mượt khi AI đang chạy
 PING = "Reply with the single word PONG and nothing else."
 
@@ -153,7 +158,15 @@ def kill_tree(p):
 
 def kill_orphan(pid):
     """Tiến trình claude cũ còn sót khi app bị tắt đột ngột: dừng trước khi chạy tiếp."""
-    if not pid or not IS_WIN:
+    if not pid:
+        return
+    if not IS_WIN:
+        try:
+            r = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=10)
+            if "claude" in (r.stdout or "").lower():
+                os.kill(pid, 9)
+        except Exception:
+            pass
         return
     r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True,
                        text=True, creationflags=NO_WINDOW)
@@ -262,6 +275,38 @@ def refresh_path():
             return
 
 
+LIBS = {"PIL": "pillow", "openpyxl": "openpyxl", "docx": "python-docx", "pptx": "python-pptx",
+        **({"winpty": "pywinpty"} if IS_WIN else {})}     # đọc/sửa ảnh, Excel, Word, PowerPoint; terminal ảo (đăng nhập)
+LIBS_READY = threading.Event()
+
+
+def ensure_libs():
+    """Mở app: cài thư viện Python còn thiếu (bản cập nhật qua nút Cập nhật không chạy lại bộ cài). Tối đa 1 lần/ngày."""
+    import importlib.util
+    try:
+        miss = [pkg for mod, pkg in LIBS.items() if importlib.util.find_spec(mod) is None]
+        last = (CFG or {}).get("libs_at", 0)
+        if not miss or time.time() - last < 86400:
+            return
+        CFG["libs_at"] = int(time.time())
+        save_cfg()
+        base = [py_console(), "-m", "pip", "install", "--user", "--quiet", "--disable-pip-version-check"]
+        for extra in ([], ["--break-system-packages"]) if IS_MAC else ([],):
+            r = subprocess.run(base + extra + miss, capture_output=True, text=True, errors="replace", timeout=600,
+                               creationflags=NO_WINDOW)
+            dlog(f"pip install {miss} -> exit {r.returncode}\n{(r.stderr or '')[-1200:]}")
+            if r.returncode == 0:
+                break
+        import site
+        importlib.invalidate_caches()
+        if site.getusersitepackages() not in sys.path:
+            sys.path.append(site.getusersitepackages())
+    except Exception as e:
+        dlog(f"ensure_libs: {e}")
+    finally:
+        LIBS_READY.set()
+
+
 # ---------------------------------------------------------------- config
 _cfg_lock = threading.Lock()
 CFG = None
@@ -290,7 +335,6 @@ def set_store():
         wjson(STORE / "settings-backup.json", {k: CFG.get(k) for k in ("output", "instructions")})
     except Exception:
         pass
-DEFAULT_INSTRUCTIONS = ""
 OLD_DEFAULT_PREFIX = "Xưng hô: tôi - bạn. Trả lời tiếng Việt, ngắn gọn"
 
 
@@ -298,14 +342,13 @@ def load_cfg():
     c = rjson(CFG_FILE, {}) or {}
     c.setdefault("token", secrets.token_urlsafe(18))
     c.setdefault("output", "")
-    c.setdefault("instructions", DEFAULT_INSTRUCTIONS)
+    c.setdefault("instructions", "")
     if c["instructions"].startswith(OLD_DEFAULT_PREFIX):     # bỏ hướng dẫn mặc định của bản cũ
         c["instructions"] = ""
     c.setdefault("ais", {})
     for a in c["ais"].values():
         a.pop("pending", None)
         a.pop("code", None)
-        a.pop("window", None)
         a.pop("url", None)
         a.pop("note", None)
     return c
@@ -481,11 +524,15 @@ def load_tasks():
                     pass
         if not t.get("w2") and t.get("session_started"):
             t["legacy"] = True
+        t["mode"] = norm_mode(t.get("mode"))
         if t.get("status") == "running":      # app bị tắt khi đang chạy -> tự chạy tiếp
             kill_orphan(t.get("pid"))
             end_work(t, "interrupted")
             t["status"] = "queued"
             t["next"] = {"kind": "resume"}
+        if t.pop("auto_paused", None) and t.get("status") == "paused":    # bản cũ tự dừng task khi đóng tab -> chạy tiếp
+            t["status"] = "queued"
+            t.setdefault("next", {"kind": "resume"})
         TASKS[t["id"]] = t
         tsave(t)
 
@@ -522,7 +569,7 @@ def subtasks(t):
 
 
 MODE_RULES = {
-    "fast": """- Ưu tiên THỜI GIAN và chất lượng. Chạy song song tối đa {n} worker/sub-agent cho các phần độc lập.
+    "pro": """- Ưu tiên THỜI GIAN và chất lượng. Chạy song song tối đa {n} worker/sub-agent cho các phần độc lập.
 - Dùng model mạnh ngay từ đầu để ít phải sửa. Giám khảo được dùng model mạnh, tối đa 2 vòng sửa.""",
     "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song tối đa {n} worker/sub-agent cho phần độc lập; tuần tự khi phụ thuộc.
 - Model nhỏ/nhanh cho việc đơn giản; model mạnh cho việc khó. Nâng model khi kết quả không đạt, hạ khi việc lặp lại.""",
@@ -533,7 +580,7 @@ MODE_RULES = {
 - Tự xem ảnh/sản phẩm tối đa 1 lần; lỗi nhỏ về thẩm mỹ thì ghi chú cho người dùng, không làm lại.
 - Không làm thêm ngoài yêu cầu (không preview/ghép so sánh, không cập nhật ghi chú phụ).
 - Trả kết quả ngay khi đủ dùng; ghi rõ phần chưa được kiểm tra kỹ.""",
-    "saver": """- Ưu tiên TIẾT KIỆM HẠN MỨC. Làm tuần tự, 1 worker tại một thời điểm. Việc nào tự làm được bằng lệnh/script thì không gọi AI.
+    "eco": """- Ưu tiên TIẾT KIỆM HẠN MỨC. Làm tuần tự, 1 worker tại một thời điểm. Việc nào tự làm được bằng lệnh/script thì không gọi AI.
 - Dùng model nhỏ nhất đủ làm được việc cho worker và sub-agent (--model); chỉ nâng khi đã thất bại 1 lần.
 - Giám khảo: dùng model nhỏ, chỉ chấm sản phẩm cuối, tối đa 1 vòng sửa. Không làm thêm ngoài yêu cầu.""",
 }
@@ -541,12 +588,12 @@ MODE_RULES = {
 
 def write_claude_md(t):
     py, app = py_console(), str(APP)
-    mode = t.get("mode") if t.get("mode") in MODES else "balanced"
+    mode = norm_mode(t.get("mode"))
     mode_name = MODES[mode]
     mode_rules = MODE_RULES[mode].format(n="1 (máy cấu hình thấp)" if LOW_SPEC else str(min(3, MAX_RUNNING + 1)))
     on = [w for w in ("codex", "gemini") if find_bin(AIS[w]["bin"]) and CFG["ais"].get(w, {}).get("ok") is not False]
-    desc = {"codex": "codex — ChatGPT/Codex: code, CSV/Excel, script, tạo ảnh ($imagegen)",
-            "gemini": "gemini — Gemini/Antigravity: research web, tổng hợp, ý tưởng; tạo/sửa ảnh, tạo file khi thêm --write"}
+    desc = {"codex": "codex — ChatGPT/Codex: code, CSV/Excel/Word/PowerPoint, script, sửa file, tạo ảnh ($imagegen)",
+            "gemini": "gemini — Gemini/Antigravity: research web, tổng hợp, ý tưởng; tạo/sửa ảnh, tạo/sửa file (--write / --edit)"}
     pj = project_of(t)
     brain_md = (f"""## Dự án: {pj['name']} — bộ nhớ dự án (người dùng đã duyệt, áp dụng cho mọi task của dự án)
 {pj.get('brain', '').strip() or '(chưa có)'}
@@ -576,9 +623,10 @@ nghiệm thu trên file thật, sửa đúng phần lỗi, báo cáo. Task này 
 - Thư mục làm việc (nháp, brief, log): thư mục hiện tại. Bị XÓA TOÀN BỘ khi task xong -> không để sản phẩm ở đây.
 - File người dùng gửi: {tdir(t) / "input"}
 - Được ĐỌC mọi ổ đĩa của máy: {', '.join(drives())}. Người dùng nhắc tới file/thư mục nào thì tự tìm.
-  Không sửa, không xóa, không di chuyển file nào ngoài thư mục làm việc và OUTPUT.
 - OUTPUT (nơi lưu sản phẩm giao người dùng): {out_dir(t)}
   Người dùng chỉ định nơi lưu cụ thể -> lưu đúng nơi đó, ghi đường dẫn đầy đủ trong câu trả lời.
+- Sửa file có sẵn trên máy: CHỈ khi người dùng yêu cầu sửa chính file/thư mục đó. Không xóa/di chuyển file nào ngoài
+  thư mục làm việc và OUTPUT. Ghi rõ trong câu trả lời đã sửa file nào.
 - Sản phẩm của các task trước (để dùng lại, tránh làm lại): danh mục ở {STORE / "registry.json"}
 
 ## Worker sẵn có trên máy
@@ -588,40 +636,46 @@ Worker lỗi đăng nhập/không chạy: coi như không có, chuyển worker k
 
 Giao sub-task: viết yêu cầu đầy đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy
 cuộc trò chuyện), rồi chạy:
-  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--model <model>] [--timeout 900]
-  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--hard]
-     (--write: cho Gemini tạo file/ảnh trong work/S2/vN; --hard: việc khó -> Gemini mức high. Giao lại cùng --out tự nâng mức)
+  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--edit <thư mục>] [--model <model>] [--timeout 900]
+  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>] [--hard]
+  --write: Gemini được tạo file/ảnh trong work/S2/vN. --hard: việc khó -> Gemini mức high. Giao lại cùng --out tự nâng mức.
+  --edit <thư mục>: worker SỬA TRỰC TIẾP file trong thư mục đó (file người dùng yêu cầu sửa, OUTPUT, hoặc file Drive đã tải về).
+     Dùng khi việc sửa nhiều/lặp lại (nhiều file, bảng tính lớn, sửa hàng loạt) để khỏi tự chép/sửa lại. Chọn thư mục NHỎ NHẤT
+     chứa file cần sửa (không phải cả ổ/thư mục người dùng — app sẽ từ chối). App tự sao lưu trước khi sửa vào
+     work/<ID>/vN/_backup (hoàn tác bằng cách chép lại), status.json có "edited" = danh sách file đã đổi.
 Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worker tạo). Sửa lỗi: giao lại cùng --out.
 
-## Chia việc (Gemini nhanh, GPT chính xác hơn) — Balanced trở xuống: "Gemini trước, lỗi mới GPT"
-- Research web, đối thủ, xu hướng: Gemini.
-- Idea, kịch bản, storyboard chữ, brief: Turbo/Eco: Gemini. Balanced: chia đều — Gemini phần cần nhanh/rộng, GPT phần
-  cần sắc (vd idea chính, câu chữ hook); KHÔNG dồn hết cho GPT. Pro: GPT.
-- Code, script, phân tích số liệu: GPT (việc rất đơn giản ở Turbo/Eco: Gemini).
-- Tạo/sửa ảnh: Balanced/Turbo/Eco: Gemini trước (nhanh, đẹp). Check kỹ thuật + tự xem 1 lần: sai yêu cầu (sai size,
-  sai nội dung, chữ lỗi, thiếu chi tiết bắt buộc) -> chỉ phần lỗi giao GPT sửa/tạo lại. Pro: GPT ngay.
-- "Gemini trước" CHỈ áp dụng cho Balanced, Turbo, Eco. Pro: GPT làm trước mọi việc trừ research web (Gemini).
-- Phần nào Gemini làm chưa đạt -> chỉ giao lại PHẦN đó cho GPT, không làm lại cả bài.
+## Chia việc (Gemini nhanh, GPT chính xác hơn)
+- Research web, đối thủ, xu hướng: Gemini (mọi chế độ).
+- Pro: GPT làm trước mọi việc còn lại.
+- Balanced/Turbo/Eco — "Gemini trước, lỗi mới GPT": idea, kịch bản, brief, tạo/sửa ảnh giao Gemini; Balanced chia đều
+  idea/câu chữ: Gemini phần cần nhanh/rộng, GPT phần cần sắc (idea chính, hook) — không dồn hết cho GPT.
+- Code, script, phân tích số liệu, sửa Excel/Word/PowerPoint: GPT (việc rất đơn giản ở Turbo/Eco: Gemini).
+- Phần nào Gemini làm chưa đạt (sai size, sai nội dung, chữ lỗi, thiếu chi tiết bắt buộc) -> chỉ giao lại PHẦN đó cho GPT.
 - Việc phụ thuộc nhau (vd idea cần dựa trên research): giao research trước; còn lại chạy song song.
+- Nhiều sản phẩm độc lập cùng loại: chia 2–3 worker chạy song song (mỗi worker --out riêng), không dồn cả lô vào 1 worker.
+  Hai worker KHÔNG được --edit cùng một thư mục cùng lúc.
 
 ## Tốc độ (quan trọng)
 - Sản phẩm là VĂN BẢN do worker viết: dặn worker ghi TOÀN BỘ nội dung vào câu trả lời cuối (result.md), không chỉ liệt kê file.
-- Không chép lại/viết lại dài nội dung worker đã viết đạt. Chỉ ghép + sửa chỗ cần. Không viết bản nháp riêng rồi viết lại
-  lần nữa ở câu trả lời: viết nội dung cuối MỘT lần (câu trả lời cuối hoặc 1 file trong OUTPUT).
+- Không chép lại/viết lại dài nội dung worker đã viết đạt. Viết nội dung cuối MỘT lần (câu trả lời cuối hoặc 1 file trong OUTPUT).
 - Ít bước nhỏ lẻ: gộp nhiều lệnh đọc/kiểm tra vào một lần chạy.
 
-## Quy trình nghiệm thu
-1. TIÊU CHÍ: trước khi làm, viết tasks/criteria.md từ chính yêu cầu của người dùng (sản phẩm phải có gì, đúng gì, định dạng/
-   kích thước, style, lỗi cần tránh; đánh dấu BẮT BUỘC). Ngắn, kiểm chứng được. Người dùng đổi yêu cầu -> cập nhật. Không hỏi duyệt.
-2. CHẤM ĐÚNG CHỖ (ưu tiên tốc độ; chế độ Turbo: bỏ qua mục này, chỉ check kỹ thuật):
-   - Văn bản hoặc task nhẹ (phân tích, research, idea, kịch bản, báo cáo, tài liệu chữ): chấm 1 LẦN, nhanh — giám khảo
-     model nhỏ (judge --model haiku) hoặc giao gemini đọc soát theo criteria.md. Chỉ sửa lỗi nêu, không chấm lại.
-   - Sản phẩm hình/âm thanh/code/bảng tính: check kỹ thuật bằng lệnh check trước; rồi gọi giám khảo 1 LẦN cho CẢ LÔ ở cuối:
-     "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1 [--model <model>]
-     Kết quả work/J1/vN/review.json. Fail -> sửa đúng lỗi nêu, tối đa 1 vòng sửa, chỉ chấm lại file đã sửa; vẫn fail -> báo người dùng.
-   - Lô lớn (từ 5 sản phẩm cùng loại, tốn nhiều thời gian/hạn mức): làm 1 mẫu, tự xem (không cần giám khảo) rồi chạy cả lô.
-   - Giám khảo dùng model nhỏ (sonnet/haiku) trừ chế độ Pro.
-   Bỏ qua hết khi hỏi đáp/tra cứu hoặc người dùng bảo làm nhanh/nháp.
+## Nghiệm thu
+- status "completed" của worker chưa phải là xong: luôn kiểm tra file thật. Với --edit: mở lại file đã sửa để kiểm tra.
+- TIÊU CHÍ: trước khi làm, viết tasks/criteria.md ngắn, kiểm chứng được, từ chính yêu cầu (phải có gì, định dạng/kích thước,
+  style, lỗi cần tránh; đánh dấu BẮT BUỘC). Người dùng đổi yêu cầu -> cập nhật. Không hỏi duyệt. Turbo: vài dòng là đủ.
+- Đo được: "{py}" "{app}" check files|png ... (xem --help); bảng tính/dữ liệu: tự đọc lại bằng Python.
+- Chấm chất lượng (Turbo: bỏ qua, chỉ check kỹ thuật):
+  - Văn bản/task nhẹ (phân tích, research, idea, kịch bản, báo cáo): chấm 1 LẦN, nhanh — judge --model haiku hoặc giao
+    gemini đọc soát theo criteria.md. Chỉ sửa lỗi nêu, không chấm lại.
+  - Hình/âm thanh/code/bảng tính: check kỹ thuật trước; rồi gọi giám khảo 1 LẦN cho CẢ LÔ ở cuối:
+    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1 [--model <model>]
+    Kết quả work/J1/vN/review.json. Fail -> sửa đúng lỗi nêu, chỉ chấm lại file đã sửa.
+  - Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô.
+  - Giám khảo dùng model nhỏ (sonnet/haiku) trừ chế độ Pro.
+  Bỏ qua khi hỏi đáp/tra cứu hoặc người dùng bảo làm nhanh/nháp.
+- Lỗi: giao sửa đúng phần lỗi, tối đa 2 lần mỗi sub-task (số vòng theo chế độ bên dưới); quá thì ghi partial, báo người dùng.
 
 ## Ảnh có đánh dấu
 - Người dùng gửi ảnh "_danhdau.png": tin nhắn có dòng [Đánh dấu trên ...] với toạ độ pixel thật của ảnh gốc.
@@ -632,9 +686,11 @@ Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worke
   chú thích hoặc tách ảnh; không resize ảnh khi đánh dấu; xem lại ảnh đã vẽ trước khi giao; liệt kê từng chỗ (số, màu, toạ độ, ý nghĩa).
 
 ## Google Drive / Sheets / Docs / Slides
-Link Google: dùng công cụ Google Drive có sẵn (mcp__claude_ai_Google_Drive: tìm, đọc, tải file, tạo/cập nhật file).
-Sửa: tải về (xlsx/docx/pptx), sửa đúng yêu cầu (giữ định dạng), lưu vào OUTPUT; nếu công cụ Drive cho cập nhật file thì
-cập nhật bản trên Drive, nếu không thì nói rõ một câu và chỉ cách thay (File > Import > Upload > Replace).
+Chỉ BẠN có công cụ Google Drive (mcp__claude_ai_Google_Drive: tìm, đọc, tải file, tạo/cập nhật file); worker không vào Drive được.
+Để worker đọc/sửa file Drive: tải file về work/drive/<tên>/ (Sheets -> .xlsx, Docs -> .docx, Slides -> .pptx), giao worker
+--edit work/drive/<tên>, kiểm tra file đã sửa, rồi cập nhật lại bản trên Drive (giữ đúng file, không tạo bản trùng) và lưu 1 bản
+vào OUTPUT. Công cụ Drive không cho cập nhật file -> nói rõ một câu và chỉ cách thay (File > Import > Upload > Replace).
+Chỉ đọc/tóm tắt Drive: tự đọc, không cần worker. Không đổi quyền chia sẻ file Drive.
 
 ## Storyboard
 Storyboard viết dạng BẢNG CHỮ (cảnh, thời lượng, hình ảnh, chữ trên màn hình, âm thanh, CTA) trong câu trả lời hoặc tài liệu.
@@ -643,10 +699,6 @@ KHÔNG tự tạo ảnh/khung hình storyboard, trừ khi người dùng yêu c�
 ## Worker chạy tách rời
 Worker vẫn chạy tiếp khi phiên của bạn bị ngắt (app cập nhật/khởi động lại). Khi tiếp tục: đọc work/<ID>/vN/status.json —
 "running" thì CHỜ bằng lệnh: "{py}" "{app}" wait work/<ID>   (không chạy lại worker đó).
-
-## Song song
-Nhiều sản phẩm độc lập cùng loại (nhiều ảnh, nhiều file): chia thành 2–3 worker chạy song song (lệnh worker chạy nền, mỗi
-worker --out riêng), không dồn cả lô vào 1 worker. Giới hạn theo chế độ bên dưới.
 
 ## Trả kết quả theo từng chặng
 Task nhiều phần (vd phân tích → idea → sản phẩm): xong phần nào có ích cho người dùng thì ghi ngay nội dung phần đó (markdown
@@ -657,21 +709,16 @@ ngắn gọn) vào ./stages/<số thứ tự>.md — giao diện hiện ngay cho
 Bạn chạy Opus, mức suy nghĩ theo chế độ (Pro high, Balanced/Turbo medium, Eco low). App TỰ chọn model cho worker theo chế độ
 (ChatGPT: GPT-6.2 Sol + mức suy nghĩ; Gemini: Neon medium ở Pro, Hydrogen medium ở Balanced (khó/giao lại: high), medium ở Turbo, low ở Eco;
 gói Free/thiếu model thì tự lùi model có sẵn) và tự hạ khi sắp hết hạn mức —
-KHÔNG truyền --model cho worker trừ khi có lý do rõ. {"Bước QUÁ khó (đã thử mà không ra): ghi xhigh vào tasks/effort.txt -> lượt sau bạn và worker chạy mức cao nhất (Gemini Neon high)." if t.get('mode') == 'fast' else ""}
+KHÔNG truyền --model cho worker trừ khi có lý do rõ. {"Bước QUÁ khó (đã thử mà không ra): ghi xhigh vào tasks/effort.txt -> lượt sau bạn và worker chạy mức cao nhất (Gemini Neon high)." if t.get('mode') == 'pro' else ""}
 
 ## Tạo ảnh
-Tạo bằng gemini trước (theo mục Chia việc), lỗi thì codex ($imagegen), hoặc cách khác có sẵn. Chỉ khi không thể tạo được (lỗi, hết hạn mức): viết prompt vào
+Tạo theo mục Chia việc (Gemini trước, lỗi thì codex $imagegen). Chỉ khi không thể tạo được (lỗi, hết hạn mức): viết prompt vào
 OUTPUT/prompts/, rồi hỏi người dùng (question.md): "Dán prompt trong <đường dẫn> vào ChatGPT, lưu ảnh vào OUTPUT/images/
-rồi trả lời 'xong'". Khi được trả lời: check + chấm độc lập như trên.
+rồi trả lời 'xong'". Khi được trả lời: check + chấm như trên.
 
 {brain_md}{tpl_md}## Chế độ làm việc người dùng chọn cho task này: {mode_name}
 {mode_rules}
 - Worker status "limit": chuyển worker khác hoặc tự làm nếu đảm bảo chất lượng; nếu không, hỏi người dùng.
-
-## Nghiệm thu
-- status completed của worker chưa phải là xong. Luôn kiểm tra file thật.
-- Đo được: "{py}" "{app}" check files|png|csv|xlsx ... (xem --help). Nội dung/chất lượng: theo "Quy trình nghiệm thu".
-- Lỗi: giao sửa đúng phần lỗi, tối đa 2 lần mỗi sub-task; quá thì ghi partial.
 
 ## Feedback và quyết định của người dùng (bắt buộc ghi lại)
 Mỗi khi người dùng góp ý, yêu cầu sửa, hoặc duyệt/chốt điều gì: ghi vào tasks/decisions.json, GOM THEO TỪNG PHẦN VIỆC
@@ -777,7 +824,7 @@ def start_run(t):
             "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite,"
                               "mcp__claude_ai_Google_Drive"]
     ef = (wdir(t) / "tasks" / "effort.txt")
-    hard = t.get("mode") == "fast" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh"
+    hard = t.get("mode") == "pro" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh"
     cm, ce = pick_model("claude", t.get("mode", "balanced"), hard)   # Pro + bước quá khó: mức cao nhất
     args += ["--model", cm]
     t["_effort"], t["_hard"] = ce, hard
@@ -814,11 +861,12 @@ def summarize_tool(b):
     inp = b.get("input") or {}
     s = str(inp.get("description") or inp.get("command") or inp.get("file_path") or inp.get("pattern")
             or inp.get("url") or inp.get("query") or inp.get("prompt") or "").replace("\n", " ")
-    m = re.search(r" worker (codex|gemini) .*?--out\s+\"?([^\s\"]+)", s)
+    cmd_ = str(inp.get("command") or "").replace("\n", " ")
+    m = re.search(r" worker (codex|gemini) .*?--out\s+\"?([^\s\"]+)", cmd_)
     if m:
         sid = re.split(r"[\\/]", m.group(2).rstrip("/\\"))[-1]
-        return f"Giao {sid} cho {'ChatGPT' if m.group(1) == 'codex' else 'Gemini'}"
-    if " check " in s:
+        return f"Giao {sid} cho {'ChatGPT' if m.group(1) == 'codex' else 'Gemini'}" + (" (sửa file trực tiếp)" if " --edit" in cmd_ else "")
+    if " check " in cmd_:
         return "Kiểm tra kết quả"
     label = {"Read": "Đọc", "Write": "Ghi", "Edit": "Sửa", "MultiEdit": "Sửa", "Glob": "Tìm file", "Grep": "Tìm",
              "LS": "Xem thư mục", "WebSearch": "Tìm trên web", "WebFetch": "Đọc web", "Task": "Sub-agent",
@@ -837,17 +885,31 @@ def _scan(od, since):
     return [str(f.relative_to(od)).replace("\\", "/") for f in fs]
 
 
+def too_wide(p):
+    """Cả ổ đĩa, thư mục người dùng hoặc cha của nó (quá rộng để quét/cho AI sửa)."""
+    home = Path.home().resolve()
+    return len(p.parts) <= 1 or p.parent == Path("/Volumes") or p == home or p in home.parents
+
+
 def path_in_text(text):
     """Thư mục người dùng/Claude nêu trong câu trả lời (vd export vào chỗ khác thư mục mặc định)."""
-    cands = re.findall(r"`([A-Za-z]:[\\/][^`\n]+)`", text or "") + re.findall(r"([A-Za-z]:[\\/][^\n`*\"<>|]+)", text or "")
+    root = r"(?:[A-Za-z]:[\\/]|/Users/|/Volumes/|/home/|~/)"          # Windows (C:\...) và Mac (/Users/..., ~/...)
+    cands = re.findall(r"`(" + root + r"[^`\n]+)`", text or "") + re.findall(r"(" + root + r"[^\n`*\"<>|]+)", text or "")
     for c in cands:
         c = c.strip()
         for _ in range(200):                 # bớt dần ký tự cuối cho tới khi ra đường dẫn có thật
             if len(c) <= 3:
                 break
-            p = Path(c.rstrip(" .,;:"))
+            p = Path(os.path.expanduser(c.rstrip(" .,;:")))
             if p.exists():
-                return p if p.is_dir() else p.parent
+                p = p if p.is_dir() else p.parent
+                try:
+                    rp = p.resolve()
+                except OSError:
+                    break
+                if too_wide(rp):
+                    break                    # quá rộng (ổ đĩa, thư mục người dùng): quét sẽ rất chậm -> bỏ
+                return p
             c = c[:-1]
     return None
 
@@ -986,7 +1048,7 @@ def watch(t, p, nxt):
             threading.Thread(target=finish_clean, args=(t,), daemon=True).start()
         else:
             msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {p.returncode}"
-            if is_limit(msg + "\n" + err[-2000:]):          # Claude hết hạn mức: chờ tới giờ reset rồi tự chạy tiếp
+            if is_limit(msg[-1500:]) or is_limit(err):          # Claude hết hạn mức: chờ tới giờ reset rồi tự chạy tiếp
                 lm = note_limit("claude", msg + "\n" + err[-2000:])
                 end_work(t, "limit")
                 t["status"] = "queued"
@@ -1047,31 +1109,30 @@ def sched_tick():
             "".join(traceback.format_stack(f)) for f in sys._current_frames().values())[-6000:])
         return
     try:
-        if True:
-            running = sum(1 for t in TASKS.values() if t["status"] == "running")
-            queued = sorted((t for t in TASKS.values() if t["status"] == "queued"), key=lambda x: x["created"])
-            cl = limits().get("claude")
-            for t in queued:
-                if running >= MAX_RUNNING:
-                    break
-                if t.get("hold_until", 0) > time.time() or cl:
-                    continue          # Claude hết hạn mức: chờ tới giờ reset (mọi task xếp hàng cùng chờ)
-                if t.pop("hold_until", None):
-                    tsave(t)
-                if not claude_ready(t):
-                    continue          # chờ đăng nhập Claude (đã tự mở trang đăng nhập)
-                if t.get("titling") and time.time() - t.get("created_ts", 0) < 30:
-                    continue          # chờ đặt tên xong để thư mục kết quả có tên đẹp
-                try:
-                    start_run(t)
-                except Exception as e:
-                    import traceback
-                    dlog(f"start_run {t['id']}:\n" + traceback.format_exc())
-                    t["status"] = "failed"
-                    tmsg(t, "claude", f"Không khởi động được task: {e}", kind="error")
-                    tsave(t)
-                    continue
-                running += 1
+        running = sum(1 for t in TASKS.values() if t["status"] == "running")
+        queued = sorted((t for t in TASKS.values() if t["status"] == "queued"), key=lambda x: x["created"])
+        cl = limits().get("claude")
+        for t in queued:
+            if running >= MAX_RUNNING:
+                break
+            if t.get("hold_until", 0) > time.time() or cl:
+                continue          # Claude hết hạn mức: chờ tới giờ reset (mọi task xếp hàng cùng chờ)
+            if t.pop("hold_until", None):
+                tsave(t)
+            if not claude_ready(t):
+                continue          # chờ đăng nhập Claude (đã tự mở trang đăng nhập)
+            if t.get("titling") and time.time() - t.get("created_ts", 0) < 30:
+                continue          # chờ đặt tên xong để thư mục kết quả có tên đẹp
+            try:
+                start_run(t)
+            except Exception as e:
+                import traceback
+                dlog(f"start_run {t['id']}:\n" + traceback.format_exc())
+                t["status"] = "failed"
+                tmsg(t, "claude", f"Không khởi động được task: {e}", kind="error")
+                tsave(t)
+                continue
+            running += 1
     finally:
         _tlock.release()
 
@@ -1084,7 +1145,6 @@ def act(tid, action, text="", files=None, template=""):
     files = [f for f in (files or []) if (tdir(t) / "input" / f).exists()]
     text = (text or "").strip()
     with _tlock:
-        t.pop("auto_paused", None)
         if action == "pause" and s == "running":
             t["_pause"] = True
             kill_tree(PROCS.get(tid))
@@ -1119,8 +1179,8 @@ def act(tid, action, text="", files=None, template=""):
             else:
                 t["status"] = "queued"
                 t["next"] = {"kind": "answer" if s == "waiting" else "followup", "text": text, "files": files}
-        elif action == "mode" and text in MODES:
-            t["mode"] = text                           # áp dụng từ lượt chạy kế tiếp
+        elif action == "mode" and MODE_ALIAS.get(text, text) in MODES:
+            t["mode"] = norm_mode(text)                           # áp dụng từ lượt chạy kế tiếp
             write_claude_md(t)
         elif action == "pin":
             t["pinned"] = not t.get("pinned")
@@ -1287,7 +1347,7 @@ def new_task(text, mode="balanced", project="", template=""):
         tid += "b"
     t = {"id": tid, "title": re.sub(r"\s+", " ", text.strip())[:50], "text": text.strip(),
          "status": "draft", "created": now(), "created_ts": time.time(), "messages": [],
-         "mode": mode if mode in MODES else "balanced", "w2": True}
+         "mode": norm_mode(mode), "w2": True}
     if project and any(p["id"] == project for p in projects()):
         t["project"] = project
     tp = next((x for x in templates() if x["id"] == template), None)
@@ -1457,18 +1517,8 @@ class HiddenTerm:
         self.buf = ""
         self.pid = None
         if IS_WIN:
-            try:
-                from winpty import PtyProcess
-            except ImportError:      # cài thư viện terminal ảo (1 lần)
-                r = subprocess.run([py_console(), "-m", "pip", "install", "--user", "--disable-pip-version-check",
-                                    "pywinpty"], capture_output=True, text=True, errors="replace", timeout=300,
-                                   creationflags=NO_WINDOW)
-                dlog("pip install pywinpty -> exit %s\n%s\n%s" % (r.returncode, (r.stdout or "")[-1500:], (r.stderr or "")[-1500:]))
-                import importlib
-                import site
-                importlib.invalidate_caches()
-                sys.path.append(site.getusersitepackages())
-                from winpty import PtyProcess
+            LIBS_READY.wait(300)     # thư viện terminal ảo do bộ cài (hoặc ensure_libs lúc mở app) cài
+            from winpty import PtyProcess
             self.p = PtyProcess.spawn([str(x) for x in args], cwd=cwd, env=env, dimensions=(50, 500))
             self.pid = self.p.pid
             self._read = lambda: self.p.read(4096)
@@ -1662,12 +1712,13 @@ def ai_login(ai, switch=False):
                 if not ok:
                     if switch:
                         gemini_forget()
+                    fail = ""
                     try:
                         done = gemini_term_login(exe, d, cur)
-                    except Exception as e:           # không dựng được terminal ảo -> dùng cửa sổ như cũ
+                    except Exception:                # không dựng được terminal ảo (thiếu thư viện)
                         import traceback
-                        done = None
-                        cur["note"] = f"{type(e).__name__}: {e}"[:200]
+                        done = False
+                        fail = "Không mở được đăng nhập Gemini — chạy lại file cài Maestro, rồi bấm Đăng nhập lại"
                         dlog("gemini hidden login failed:\n" + traceback.format_exc())
                     else:
                         lg0 = LOGINS.get("gemini")
@@ -1677,19 +1728,13 @@ def ai_login(ai, switch=False):
                         lg.kill()
                     cur.pop("code", None)
                     cur.pop("url", None)
-                    if done is None and IS_WIN:
-                        cur["window"] = "login"
-                        subprocess.run(["cmd.exe", "/c", "start", "/wait", "Maestro - Gemini", exe],
-                                       cwd=str(d), creationflags=NO_WINDOW)
-                        cur.pop("window", None)
-                    ok = gemini_has_cred() and gemini_ping(exe, 120)[0]
-                cur.update(ok=ok, msg="" if ok else "Chưa đăng nhập được", email="")
+                    ok = bool(done) and gemini_has_cred() and gemini_ping(exe, 120)[0]
+                cur.update(ok=ok, msg="" if ok else (fail or "Chưa đăng nhập được"), email="")
         except Exception as e:
             cur.update(ok=False, msg=str(e)[:150])
         finally:
             LOGINS.pop(ai, None)
             cur.pop("pending", None)
-            cur.pop("window", None)
             cur.pop("code", None)
             cur.pop("url", None)
             cur["at"] = now()
@@ -1771,7 +1816,7 @@ def expected_secs(mode):
                     if 20 < d < 4 * 3600:
                         by.setdefault(x.get("mode", "balanced"), []).append(d)
         _exp.update(t=time.time(), v={k: sorted(v)[len(v) // 2] for k, v in by.items() if len(v) >= 2})
-    return max(60, _exp["v"].get(mode) or {"turbo": 240, "balanced": 420, "fast": 600, "saver": 600}.get(mode, 420))
+    return max(60, _exp["v"].get(mode) or {"turbo": 240, "balanced": 420, "pro": 600, "eco": 600}.get(mode, 420))
 
 
 def task_detail(t):
@@ -1794,22 +1839,15 @@ def task_detail(t):
     if t["status"] == "running" and works and works[-1].get("status") == "running":
         cur = works[-1]
         pl = rjson(wdir(t) / "tasks" / "plan.json", {}) or {}
+        pl = pl if isinstance(pl, dict) else {}
         if pl and wdir(t).joinpath("tasks", "plan.json").stat().st_mtime < cur.get("started_ts", 0) - 5:
             pl = {}                                          # kế hoạch của lượt trước -> bỏ qua
         st = [str(x.get("status", "")).lower().strip() for x in (pl.get("subtasks") or []) if isinstance(x, dict)]
-        pfin = sum(x not in ("", "todo", "pending", "running", "in_progress", "in progress", "queued", "wait", "waiting") for x in st)
-        ws = cur.get("subtasks") or []                       # worker đã giao trong lượt này (status.json)
-        wfin = sum(x.get("status") not in ("running",) for x in ws)
-        tot = max(len(st), len(ws) + (1 if ws else 0))       # +1: bước Claude tổng hợp sau cùng
-        now_ = time.time()
-        el = now_ - cur.get("started_ts", now_)
-        # worker đang chạy: tính phần đã chạy so với thời gian thường gặp (ảnh ~2 phút, chữ ~1,5 phút)
-        part = sum(min(0.9, (now_ - x.get("ts", now_)) / (150 if x.get("worker") == "codex" else 100))
-                   for x in ws if x.get("status") == "running")
-        done_ = max(pfin, wfin + part)
-        struct = done_ / tot if tot else 0
-        timep = min(0.95, el / expected_secs(t.get("mode", "balanced")))   # ước theo thời gian các lượt trước
-        est = max(struct, timep * (0.85 if tot else 1))
+        tot = len(st)
+        if tot:                                              # có kế hoạch: % = số bước xong / tổng bước
+            est = sum(x in ("done", "completed", "failed", "skipped", "partial") for x in st) / tot
+        else:                                                # chưa có kế hoạch: ước theo thời gian các lượt trước
+            est = min(0.95, (time.time() - cur.get("started_ts", time.time())) / expected_secs(t.get("mode", "balanced")))
         key = (t["id"], cur.get("started_ts"))
         est = max(est, _prog.get(key, 0))                     # không lùi
         _prog[key] = est
@@ -1902,7 +1940,6 @@ class H(BaseHTTPRequestHandler):
         if not self.authed():
             return self.send(403, {"error": "forbidden"})
         if u.path == "/api/state":
-            page_seen()
             if SCHED["beat"] and time.time() - SCHED["beat"] > 90:     # bộ xếp lịch bị dừng -> chạy lại
                 dlog("scheduler stalled, restarting")
                 SCHED["beat"] = time.time()
@@ -1939,9 +1976,6 @@ class H(BaseHTTPRequestHandler):
         self.send(404, {"error": "not found"})
 
     def do_POST(self):
-        if urlparse(self.path).path == "/api/bye" and self.ok_host():   # tab đóng (sendBeacon)
-            LAST_SEEN["bye"] = time.time()
-            return self.send(200, {"ok": True})
         if not self.authed():
             return self.send(403, {"error": "forbidden"})
         u = urlparse(self.path)
@@ -2031,58 +2065,10 @@ class H(BaseHTTPRequestHandler):
             return act(d.get("id", ""), d.get("action", ""), d.get("text", ""), d.get("files"), d.get("template", ""))
         if path == "/api/task/file":
             return open_task_file(d.get("id", ""), d.get("path", ""))
-        if path == "/api/quit":
-            threading.Thread(target=shutdown, daemon=True).start()
-            return {"ok": True}
         return {"error": "bad request"}
 
 
-LAST_SEEN = {"t": time.time(), "bye": 0.0}
-
-
-def page_watch():
-    """Không còn tab nào mở (đóng tab) -> tạm dừng task đang làm; mở lại trang -> tự chạy tiếp."""
-    while True:
-        time.sleep(5)
-        idle = time.time() - LAST_SEEN["t"]
-        closed = LAST_SEEN["bye"] > LAST_SEEN["t"] and time.time() - LAST_SEEN["bye"] > 15
-        if closed or idle > 180:
-            with _tlock:
-                for t in TASKS.values():
-                    if t["status"] in ("running", "queued") and not t.get("auto_paused"):
-                        t["auto_paused"] = True
-                        if t["status"] == "running":
-                            t["_pause"] = True
-                            kill_tree(PROCS.get(t["id"]))
-                        else:
-                            t["status"] = "paused"
-                            tsave(t)
-
-
-def page_seen():
-    LAST_SEEN["t"] = time.time()
-    with _tlock:
-        for t in TASKS.values():
-            if t.get("auto_paused") and t["status"] == "paused":
-                t.pop("auto_paused", None)
-                t["status"] = "queued"
-                t.setdefault("next", {"kind": "resume"})
-                tsave(t)
-            elif t.get("auto_paused") and t["status"] != "running":
-                t.pop("auto_paused", None)
-
-
-def shutdown():
-    time.sleep(0.3)
-    with _tlock:
-        for tid, p in list(PROCS.items()):
-            TASKS[tid]["_quit"] = True      # lần mở sau tự chạy tiếp
-            kill_tree(p)
-    time.sleep(0.8)
-    os._exit(0)
-
-
-UPDATED = {"pending": None, "done": ""}
+UPDATED = {"pending": None}
 VERS = HOME / "versions"
 
 
@@ -2135,10 +2121,10 @@ def _fhash(f):
     return h.hexdigest()
 
 
-def slim_task(t, deep=False):
+def slim_task(t):
     """Giảm dung lượng thư mục làm việc của 1 task (giữ lịch sử: tin nhắn, kế hoạch, tiêu chí, quyết định, log chữ).
     - Luôn: xóa file trong work/ trùng hệt file đã có ở thư mục kết quả (bản thật nằm ở đó).
-    - deep (nút Xóa cache): xóa thêm bản nháp/ảnh/video trung gian trong work/ và file đính kèm đã dùng xong."""
+    Task còn dở: giữ bản nháp để làm tiếp (task xong được dọn hết bằng finish_clean)."""
     if t.get("status") in ("running", "queued"):
         return 0
     w = wdir(t) / "work"
@@ -2150,22 +2136,15 @@ def slim_task(t, deep=False):
         for f in od.rglob("*"):
             if f.is_file() and STORE_NAME not in f.parts and ".work" not in f.parts:
                 idx.setdefault(f.stat().st_size, []).append(f)
-    deep = deep and t.get("status") in ("done", "cancelled")   # task còn dở: chỉ xóa file trùng, giữ bản nháp để làm tiếp
     freed = 0
     for f in list(w.rglob("*")):
         if not f.is_file() or f.name == "status.json":
             continue
         try:
             sz = f.stat().st_size
-            drop = False
             if f.suffix.lower() in KEEP_EXT and sz < 2_000_000:
                 continue
-            if sz in idx:
-                h = _fhash(f)
-                drop = any(_fhash(o) == h for o in idx[sz])
-            if not drop and deep:
-                drop = True
-            if drop:
+            if sz in idx and any(_fhash(o) == _fhash(f) for o in idx[sz]):
                 f.unlink()
                 freed += sz
         except Exception as e:
@@ -2306,8 +2285,8 @@ def export_log():
 
 
 def busy_tasks():
-    """Có task đang làm/chờ/tạm dừng tự động (đóng tab) -> không cập nhật."""
-    return any(t["status"] in ("running", "queued") or t.get("auto_paused") or t.get("_redirect") for t in TASKS.values())
+    """Có task đang làm/chờ -> chưa tự cập nhật."""
+    return any(t["status"] in ("running", "queued") or t.get("_redirect") for t in TASKS.values())
 
 
 def _http(url, timeout, accept=None):
@@ -2553,8 +2532,8 @@ def serve(background=False):
     load_tasks()
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=check_startup, daemon=True).start()
+    threading.Thread(target=ensure_libs, daemon=True).start()
     threading.Thread(target=check_update, daemon=True).start()
-    threading.Thread(target=page_watch, daemon=True).start()
     if not background and not os.environ.get("AIO_NO_BROWSER"):
         webbrowser.open(url)
     print("Maestro:", url, flush=True)
@@ -2578,6 +2557,72 @@ def run_limited(cmd, cwd, timeout):
         return -1, so, se, True
 
 
+def edit_refused(p):
+    """Thư mục quá rộng/nguy hiểm để cho worker sửa thẳng -> lý do từ chối ('' = được phép)."""
+    if not p.is_dir():
+        return f"Không thấy thư mục cần sửa: {p}"
+    sysd = [Path(os.environ.get(k, "")) for k in ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData") if os.environ.get(k)]
+    sysd += [Path(x) for x in ("/System", "/Library", "/Applications", "/usr", "/bin", "/etc", "/private")] if not IS_WIN else []
+    sysd += [HOME, Path.home() / "AppData", Path.home() / "Library"]
+    if too_wide(p):
+        return f"Thư mục {p} quá rộng (cả ổ đĩa/thư mục người dùng): chọn đúng thư mục con chứa file cần sửa"
+    for d in sysd:
+        try:
+            d = d.resolve()
+        except OSError:
+            continue
+        if p == d or d in p.parents:
+            return f"Không cho sửa thư mục hệ thống/ứng dụng: {p}"
+    return ""
+
+
+SKIP_PARTS = (".work", STORE_NAME, ".git", "node_modules", "__pycache__")
+
+
+def _files_in(d):
+    for f in d.rglob("*"):
+        if f.is_file() and not any(x in SKIP_PARTS for x in f.relative_to(d).parts):
+            yield f
+
+
+def backup_dir(src, dst, limit=300 * 2 ** 20):
+    """Chép lại thư mục trước khi worker sửa thẳng (để hoàn tác). Quá 300 MB / 3000 file thì bỏ qua."""
+    try:
+        fs, tot = [], 0
+        for f in _files_in(src):
+            fs.append(f)
+            tot += f.stat().st_size
+            if tot > limit or len(fs) > 3000:
+                return "bỏ qua (thư mục quá lớn để sao lưu)"
+        for f in fs:
+            o = dst / f.relative_to(src)
+            o.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, o)
+        return str(dst)
+    except Exception as e:
+        return f"lỗi sao lưu: {e}"[:200]
+
+
+def changed_files(d, backup, since):
+    """File worker đã tạo/sửa trong thư mục được sửa (so với bản sao lưu hoặc theo giờ sửa)."""
+    out, has_b = [], backup.is_dir()
+    try:
+        for f in _files_in(d):
+            rel = f.relative_to(d)
+            b = backup / rel
+            if has_b:
+                changed = not b.exists() or b.stat().st_size != f.stat().st_size or abs(b.stat().st_mtime - f.stat().st_mtime) > 1
+            else:
+                changed = f.stat().st_mtime >= since - 1
+            if changed:
+                out.append(rel.as_posix())
+                if len(out) >= 200:
+                    break
+    except Exception:
+        pass
+    return sorted(out)
+
+
 def cmd_worker(argv):
     import argparse
     ap = argparse.ArgumentParser(prog="worker")
@@ -2589,8 +2634,10 @@ def cmd_worker(argv):
     ap.add_argument("--vdir")
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--hard", action="store_true")
+    ap.add_argument("--edit", help="thư mục worker được SỬA TRỰC TIẾP (file của người dùng, thư mục OUTPUT, file Drive đã tải về)")
     a = ap.parse_args(argv)
     proj = Path.cwd()
+    edit = Path(a.edit).expanduser().resolve() if a.edit else None
     task = Path(a.task).resolve()
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -2607,6 +2654,7 @@ def cmd_worker(argv):
     if not os.environ.get("AIO_WCHILD"):
         # chạy worker tách khỏi phiên Claude (qua 1 tiến trình trung gian tự thoát): app cập nhật/khởi động lại
         # hay phiên Claude bị ngắt thì worker vẫn làm tiếp; tiến trình này chỉ chờ kết quả rồi in ra.
+        # GIỮ tiến trình trung gian: nếu worker là con trực tiếp, "taskkill /T" (Tạm dừng/tin gấp) sẽ giết luôn worker.
         flags = (0x00000008 | 0x00000200 | 0x08000000) if IS_WIN else 0   # DETACHED | NEW_GROUP | NO_WINDOW
         child = [sys.executable, str(APP), "worker", *argv, "--vdir", str(v)]
         spawn = [sys.executable, "-c", "import subprocess,sys,os;subprocess.Popen(sys.argv[2:],creationflags=int(sys.argv[1]),"
@@ -2615,44 +2663,60 @@ def cmd_worker(argv):
         subprocess.run(spawn, env=dict(os.environ, AIO_WCHILD="1"), creationflags=NO_WINDOW, cwd=str(proj))
         return wait_status(v, a.timeout + 180)
     exe = find_bin("codex" if a.worker == "codex" else "agy")
-    if not task.exists():
+    bad_edit = edit_refused(edit) if edit else ""
+    if edit and not bad_edit:
+        st["edit_dir"] = str(edit)
+        st["backup"] = backup_dir(edit, v / "_backup")
+    if bad_edit:
+        st.update(status="failed", error=bad_edit)
+    elif not task.exists():
         st.update(status="failed", error=f"Không thấy {task}")
     elif not exe:
         st.update(status="failed", error="Worker chưa cài")
     else:
         text = task.read_text(encoding="utf-8")
         (v / "TASK.md").write_text(text, encoding="utf-8")
+        inp_ = os.environ.get("AIO_INPUT") or str(proj / "input")
+        edit_note = (f"Được SỬA TRỰC TIẾP file trong thư mục {edit} (giữ nguyên định dạng, công thức, bố cục; chỉ sửa đúng phần "
+                     "yêu cầu; file mới cũng lưu trong thư mục này). KHÔNG sửa/xóa file ở nơi khác. "
+                     "Excel/Word/PowerPoint: dùng Python (openpyxl, python-docx, python-pptx); không chuyển đổi định dạng file. "
+                     "Câu trả lời cuối: liệt kê từng file đã sửa và đã sửa gì. ") if edit else ""
         if a.worker == "codex":
-            prompt = ("Thực hiện đúng yêu cầu trong TASK.md ở thư mục hiện tại. "
-                      f"File đầu vào (chỉ đọc): {os.environ.get('AIO_INPUT') or proj / 'input'}. Ghi mọi file kết quả vào thư mục hiện tại. "
+            prompt = (f"Thực hiện đúng yêu cầu trong {v / 'TASK.md'}. "
+                      f"File đầu vào (chỉ đọc): {inp_}. " + (edit_note or "Ghi mọi file kết quả vào thư mục hiện tại. ") +
                       "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung sản phẩm (không chỉ tóm tắt); "
                       "nếu tạo file thì liệt kê file đã tạo và cách đã kiểm tra.")
-            cmd = [exe, "exec", "--skip-git-repo-check", *CODEX_SANDBOX, "-C", str(v),
+            cmd = [exe, "exec", "--skip-git-repo-check", *CODEX_SANDBOX, "-C", str(edit or v),
                    "--output-last-message", str(v / "result.md")]
             mods, eff = pick_model("codex", os.environ.get("AIO_MODE", "balanced"), os.environ.get("AIO_HARD") == "1")
             mods = [a.model] if a.model else list(mods)
             base_cmd = cmd + ["-c", f'model_reasoning_effort="{eff}"']
             cands = [base_cmd + ["-m", m_, prompt] for m_ in mods] + [base_cmd + [prompt]]   # model không dùng được -> thử model kế, cuối cùng mặc định
             cmd = cands[0]
-            cwd = v
+            cwd = edit or v                 # Codex chỉ được ghi trong thư mục làm việc của nó (sandbox)
         else:
             md_ = os.environ.get("AIO_MODE", "balanced")
             retry_ = v.name != "v1"                     # giao lại (sửa lỗi / thử lại) -> nâng mức
             hard_ = os.environ.get("AIO_HARD") == "1" or (md_ == "balanced" and (a.hard or retry_))
             gm, _ = pick_model("gemini", md_, hard_)
-            inp = os.environ.get("AIO_INPUT") or str(proj / "input")
-            gtext = (f"{text}\n\n---\nFile đầu vào (chỉ đọc): {inp}. Lưu mọi file kết quả (ảnh, tài liệu) vào thư mục hiện tại: {v}. "
+            inp = inp_
+            gtext = (f"{text}\n\n---\nFile đầu vào (chỉ đọc): {inp}. " + (edit_note or
+                     f"Lưu mọi file kết quả (ảnh, tài liệu) vào thư mục hiện tại: {v}. ") +
                      "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung; nếu tạo file thì liệt kê tên file.")
             cmd = [exe, "-p", gtext, "--output-format", "json", "--add-dir", str(proj)]
             if os.path.isdir(inp):
                 cmd += ["--add-dir", inp]
-            if a.write:                     # cho Gemini tự ghi file/ảnh không cần hỏi (chỉ dùng khi task cần tạo file)
+            if edit:
+                cmd += ["--add-dir", str(edit)]
+            write_ = a.write or bool(edit)  # cho Gemini tự ghi file không cần hỏi (chỉ khi task cần tạo/sửa file)
+            if write_:
                 cmd += ["--dangerously-skip-permissions"]
-            plain = [exe, "-p", gtext, "--output-format", "json"] + (["--dangerously-skip-permissions"] if a.write else [])
+            plain = [exe, "-p", gtext, "--output-format", "json"] + (["--dangerously-skip-permissions"] if write_ else [])
             cands = ([cmd + ["--model", a.model or gm]] if (a.model or gm) else []) + [cmd, plain]   # cờ không hỗ trợ -> bản đơn giản
             cmd = cands[0]
             cwd = v
         t0 = time.time()
+        st["t0"] = t0
         for i_, cmd in enumerate(cands):
             code, so, se, to = run_limited(cmd, cwd, a.timeout)
             low_ = (so + se).lower()
@@ -2679,10 +2743,9 @@ def cmd_worker(argv):
                 resp = so
             (v / "result.md").write_text(resp, encoding="utf-8")
         res = v / "result.md"
-        low = (so + se).lower()
         if to:
             st.update(status="timeout", error=f"Quá {a.timeout}s")
-        elif any(k in low for k in ("usage limit", "rate limit", "quota", "resource_exhausted", "429")) and code != 0:
+        elif code != 0 and is_limit(se[-1500:] + "\n" + so[-1500:]):
             lm = note_limit(a.worker, se + "\n" + so)
             st.update(status="limit", reset=lm["until"], error="Worker hết hạn mức, dùng lại lúc " +
                       datetime.datetime.fromtimestamp(lm["until"]).strftime("%H:%M") + ("" if lm["known"] else " (ước tính)")
@@ -2694,19 +2757,25 @@ def cmd_worker(argv):
         else:
             st["status"] = "completed"
     st["files"] = sorted(str(f.relative_to(v)).replace("\\", "/") for f in v.rglob("*")
-                         if f.is_file() and f.name not in ("TASK.md", "worker.log", "status.json"))
+                         if f.is_file() and f.name not in ("TASK.md", "worker.log", "status.json", "result.md")
+                         and "_backup" not in f.relative_to(v).parts)
+    if edit and st.get("edit_dir"):
+        st["edited"] = changed_files(edit, v / "_backup", st.get("t0", 0))
+    st.pop("t0", None)
     wjson(v / "status.json", st)
     print(json.dumps(st, ensure_ascii=False))
     sys.exit(0 if st["status"] == "completed" else 1)
 
 
-LIMIT_WORDS = ("usage limit", "limit reached", "hit your limit", "rate limit", "quota", "resource_exhausted",
-               "too many requests", "429", "limit will reset", "resets")
+# Chỉ cụm từ mà Claude/Codex/Gemini thật sự in ra khi hết hạn mức (chữ lẻ như "quota", "429" dễ trùng nội dung bài làm)
+LIMIT_RE = re.compile(r"usage limit|limit reached|reached your (?:usage |rate )?limit|hit your (?:usage )?limit|rate limit(?:ed| exceeded)?"
+                      r"|quota (?:exceeded|exhausted)|exceeded (?:your |the )?(?:current )?quota|resource_exhausted|resource exhausted"
+                      r"|too many requests|\b429\b[^\n]{0,40}(?:limit|quota|too many)|limit will reset|out of (?:usage|credits)")
 
 
 def is_limit(text):
-    low = (text or "").lower()
-    return any(k in low for k in LIMIT_WORDS) and ("limit" in low or "quota" in low or "429" in low or "exhausted" in low)
+    """Thông báo lỗi có phải do hết hạn mức không. Chỉ xét ~2000 ký tự cuối (phần lỗi), không xét nội dung bài làm."""
+    return bool(LIMIT_RE.search((text or "")[-2000:].lower()))
 
 
 def parse_reset(text, now_ts=None):
@@ -2758,16 +2827,15 @@ def limits():
 
 # ---------------------------------------------------------------- model theo chế độ (người dùng chốt; app tự hạ khi sắp/đã hết hạn mức)
 EFFORTS = ["low", "medium", "high", "xhigh"]
-MODEL_PLAN = {
-    "claude": {"fast": ("opus", "high"), "balanced": ("opus", "medium"), "turbo": ("opus", "medium"), "saver": ("opus", "low")},
-    # ChatGPT: thử lần lượt (gói Plus có GPT-6.2; gói Free chỉ có dòng Luna) -> cuối cùng là model mặc định của tài khoản
-    "codex": {"fast": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "high"),
-              "balanced": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "medium"),
-              "turbo": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "low"),
-              "saver": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "low")},
-    # Gemini: Neon cho Pro (bước quá khó: high), Hydrogen cho các chế độ khác; chỉ dùng model mà `agy models` liệt kê
-    "gemini": {"fast": ("neon", "medium"), "balanced": ("hydrogen", "medium"), "turbo": ("hydrogen", "medium"),
-               "saver": ("hydrogen", "low")},
+# ChatGPT: thử lần lượt (gói Plus có GPT-6.2; gói Free chỉ có dòng Luna) -> cuối cùng là model mặc định của tài khoản
+CODEX_MODELS = ["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"]
+# Gemini: Neon cho Pro (bước quá khó: high), Hydrogen cho các chế độ khác; chỉ dùng model mà `agy models` liệt kê
+MODEL_PLAN = {   # (model, mức suy nghĩ) theo chế độ
+    "claude": {"pro": ("opus", "high"), "balanced": ("opus", "medium"), "turbo": ("opus", "medium"), "eco": ("opus", "low")},
+    "codex": {"pro": (CODEX_MODELS, "high"), "balanced": (CODEX_MODELS, "medium"), "turbo": (CODEX_MODELS, "low"),
+              "eco": (CODEX_MODELS, "low")},
+    "gemini": {"pro": ("neon", "medium"), "balanced": ("hydrogen", "medium"), "turbo": ("hydrogen", "medium"),
+               "eco": ("hydrogen", "low")},
 }
 GEM_FALLBACK = {"neon": ["hydrogen", "flash"], "hydrogen": ["flash", "neon"]}
 
@@ -2779,14 +2847,23 @@ def pressure(ai):
                         or time.time() - d.get("until", 0) < 6 * 3600)
 
 
+BAD_MODEL_TTL = 24 * 3600      # model báo lỗi chỉ bị bỏ qua 24 giờ (lỗi có thể chỉ là tạm thời)
+
+
 def bad_models(ai):
-    return set((rjson(DATA / "models_bad.json", {}) or {}).get(ai) or [])
+    v = (rjson(DATA / "models_bad.json", {}) or {}).get(ai) or {}
+    if not isinstance(v, dict):                     # bản cũ lưu danh sách vĩnh viễn -> bỏ
+        return set()
+    return {m for m, ts in v.items() if time.time() - float(ts or 0) < BAD_MODEL_TTL}
 
 
 def mark_bad_model(ai, m):
     f = DATA / "models_bad.json"
     d = rjson(f, {}) or {}
-    d[ai] = sorted(set(d.get(ai) or []) | {m})
+    cur = d.get(ai) if isinstance(d.get(ai), dict) else {}
+    cur = {k: ts for k, ts in cur.items() if time.time() - float(ts or 0) < BAD_MODEL_TTL}
+    cur[m] = int(time.time())
+    d[ai] = cur
     try:
         wjson(f, d)
     except Exception:
@@ -2805,9 +2882,10 @@ def gem_pick(key, eff):
 
 
 def pick_model(ai, mode, hard=False):
-    m, eff = MODEL_PLAN[ai].get(mode) or MODEL_PLAN[ai]["balanced"]
+    mode = norm_mode(mode)
+    m, eff = MODEL_PLAN[ai][mode]
     if hard:
-        eff = {"claude": "xhigh", "codex": "xhigh", "gemini": "high"}[ai] if mode == "fast" or ai != "gemini" else "high"
+        eff = "high" if ai == "gemini" else "xhigh"
     elif pressure(ai) and eff != "low":
         eff = EFFORTS[max(0, EFFORTS.index(eff) - 1)]
     if ai == "gemini":
@@ -2889,8 +2967,6 @@ def cmd_check(argv):
     sp = ap.add_subparsers(dest="cmd", required=True)
     p = sp.add_parser("files"); p.add_argument("--dir", required=True); p.add_argument("--glob", default="*"); p.add_argument("--count", type=int)
     p = sp.add_parser("png"); p.add_argument("--dir", required=True); p.add_argument("--count", type=int); p.add_argument("--alpha", action="store_true"); p.add_argument("--size")
-    p = sp.add_parser("csv"); p.add_argument("--file", required=True); p.add_argument("--cols"); p.add_argument("--min-rows", type=int, default=1); p.add_argument("--sum", action="append")
-    p = sp.add_parser("xlsx"); p.add_argument("--file", required=True); p.add_argument("--sheets"); p.add_argument("--min-rows", type=int, default=1)
     a = ap.parse_args(argv)
     try:
         if a.cmd == "files":
@@ -2917,33 +2993,6 @@ def cmd_check(argv):
                             add(f"{f.name} nền trong suốt", lo == 0 and hi > 0, f"alpha {lo}..{hi}")
                 except Exception as e:
                     add(f"{f.name} đọc được", False, e)
-        elif a.cmd == "csv":
-            with open(a.file, newline="", encoding="utf-8-sig") as fh:
-                rows = list(csv.DictReader(fh))
-            cols = list(rows[0].keys()) if rows else []
-            add("đọc CSV", True, f"{len(rows)} dòng, cột: {cols}")
-            if a.cols:
-                miss = [c for c in a.cols.split(",") if c not in cols]
-                add("đủ cột", not miss, f"thiếu {miss}" if miss else "đủ")
-            add("số dòng", len(rows) >= a.min_rows, f"{len(rows)} >= {a.min_rows}")
-            for s in a.sum or []:
-                col, val = s.split("=")
-                got = 0.0
-                for r in rows:
-                    try:
-                        got += float(str(r.get(col, "")).replace(",", ""))
-                    except ValueError:
-                        pass
-                add(f"tổng {col}", abs(got - float(val)) <= max(0.01, abs(float(val)) * 1e-6), f"{got} (cần {val})")
-        elif a.cmd == "xlsx":
-            import openpyxl
-            wb = openpyxl.load_workbook(a.file, data_only=True)
-            add("mở XLSX", True, f"sheets {wb.sheetnames}")
-            if a.sheets:
-                miss = [s for s in a.sheets.split(",") if s not in wb.sheetnames]
-                add("đủ sheet", not miss, f"thiếu {miss}" if miss else "đủ")
-            for ws in wb.worksheets:
-                add(f"sheet {ws.title} có dữ liệu", ws.max_row - 1 >= a.min_rows, f"{ws.max_row - 1} dòng")
     except ImportError as e:
         add("thư viện", False, f"{e} — chạy lại file cài đặt")
     except Exception as e:
