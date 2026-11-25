@@ -130,7 +130,7 @@ svg.i{stroke-width:1.75}
 .app{grid-template-columns:236px 1fr}
 aside{background:var(--side);border-right:1px solid var(--line);padding:4px 8px 0}
 .brand{font-size:17px;font-weight:600;color:var(--ink);padding:16px 8px 14px;gap:10px}.brand img{width:24px;height:24px;border-radius:6px}
-.ver{font-size:11px;font-weight:500;color:var(--mute);margin-left:4px}
+.bt{display:inline-flex;align-items:baseline;gap:6px;line-height:1}.ver{font-size:11px;font-weight:500;color:var(--mute);margin:0}
 .newtask{justify-content:flex-start;margin:1px 0;padding:8px 10px;border:0;background:transparent;font-weight:500;gap:10px;border-radius:6px}
 .newtask:hover{background:var(--hover)}#btnNew{background:var(--acc2);color:var(--ink);font-weight:600}#btnNew:hover{background:#DCDCDC}
 .lbl{text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:600;color:var(--mute);padding:18px 10px 6px}
@@ -222,7 +222,7 @@ main{background:var(--bg)}
 <body>
 <div class="app">
   <aside>
-    <div class="brand"><img src="/icon.svg" alt="">Maestro<span class="ver" id="ver"></span></div>
+    <div class="brand"><img src="/icon.svg" alt=""><span class="bt">Maestro<span class="ver" id="ver"></span></span></div>
     <button class="newtask" id="btnNew"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Task mới</button>
     <button class="newtask ghost" id="btnLib" style="justify-content:flex-start;border-color:transparent"><svg class="i" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Lịch sử &amp; file</button>
     <div class="lbl">Gần đây</div>
