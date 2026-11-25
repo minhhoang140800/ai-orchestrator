@@ -501,6 +501,8 @@ MODE_RULES = {
 - Song song tối đa {n} worker/sub-agent cho mọi phần độc lập; chọn model nhanh (sonnet/haiku, model nhỏ cho worker).
 - GIẢM THẨM ĐỊNH: KHÔNG gọi giám khảo, không làm mẫu thử trước lô, không vòng sửa. Chỉ chạy check kỹ thuật (kích thước,
   định dạng, số file) bằng lệnh check; sai thì sửa đúng chỗ sai. Không viết criteria.md dài — vài dòng là đủ.
+- Tự xem ảnh/sản phẩm tối đa 1 lần; lỗi nhỏ về thẩm mỹ thì ghi chú cho người dùng, không làm lại.
+- Không làm thêm ngoài yêu cầu (không preview/ghép so sánh, không cập nhật ghi chú phụ).
 - Trả kết quả ngay khi đủ dùng; ghi rõ phần chưa được kiểm tra kỹ.""",
     "saver": """- Ưu tiên TIẾT KIỆM HẠN MỨC. Làm tuần tự, 1 worker tại một thời điểm. Việc nào tự làm được bằng lệnh/script thì không gọi AI.
 - Dùng model nhỏ nhất đủ làm được việc cho worker và sub-agent (--model); chỉ nâng khi đã thất bại 1 lần.
@@ -547,6 +549,7 @@ nghiệm thu trên file thật, sửa đúng phần lỗi, báo cáo. Task này 
 - Được ĐỌC mọi ổ đĩa của máy: {', '.join(drives())}. Người dùng nhắc tới file/thư mục nào thì tự tìm.
   Không sửa, không xóa, không di chuyển file nào ngoài thư mục làm việc và OUTPUT.
 - OUTPUT (nơi lưu sản phẩm giao người dùng): {out_dir(t)}
+  Người dùng chỉ định nơi lưu cụ thể -> lưu đúng nơi đó, ghi đường dẫn đầy đủ trong câu trả lời.
 - Sản phẩm của các task trước (để dùng lại, tránh làm lại): danh mục ở {STORE / "registry.json"}
 
 ## Worker sẵn có trên máy
@@ -576,6 +579,10 @@ Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worke
 ## Storyboard
 Storyboard viết dạng BẢNG CHỮ (cảnh, thời lượng, hình ảnh, chữ trên màn hình, âm thanh, CTA) trong câu trả lời hoặc tài liệu.
 KHÔNG tự tạo ảnh/khung hình storyboard, trừ khi người dùng yêu cầu rõ (vẽ/minh hoạ/render storyboard).
+
+## Worker chạy tách rời
+Worker vẫn chạy tiếp khi phiên của bạn bị ngắt (app cập nhật/khởi động lại). Khi tiếp tục: đọc work/<ID>/vN/status.json —
+"running" thì CHỜ bằng lệnh: "{py}" "{app}" wait work/<ID>   (không chạy lại worker đó).
 
 ## Song song
 Nhiều sản phẩm độc lập cùng loại (nhiều ảnh, nhiều file): chia thành 2–3 worker chạy song song (lệnh worker chạy nền, mỗi
@@ -686,8 +693,11 @@ def start_run(t):
         t["status"] = "failed"
         tmsg(t, "claude", "Chưa cài Claude Code" if not exe else "Chưa chọn thư mục kết quả (Cài đặt → Set up)", kind="error")
         return tsave(t)
-    if not t.get("folder"):
-        base = safe_name(t["title"], 80)          # thư mục kết quả = tên task, nằm ngay trong thư mục export
+    if not t.get("folder"):                   # <dự án>/<ngày>/<HH_MM> <tên task> — dễ theo dõi theo dự án và thời gian
+        pj = project_of(t)
+        nw = datetime.datetime.now()
+        base = str(Path(safe_name(pj["name"] if pj else "Chung", 60)) / nw.strftime("%Y-%m-%d") /
+                   safe_name(nw.strftime("%H_%M ") + t["title"], 80))
         used = {x.get("folder") for x in TASKS.values() if x is not t}
         name, n = base, 2
         while name in used or (Path(CFG["output"]) / name).exists():
@@ -716,6 +726,7 @@ def start_run(t):
     try:
         proc = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                                env=dict(os.environ, AIO_INPUT=str(tdir(t) / "input")),
                                 creationflags=NO_WINDOW | BELOW_NORMAL)
     except Exception as e:
         end_work(t, "failed")
@@ -2381,18 +2392,32 @@ def cmd_worker(argv):
     ap.add_argument("--out", required=True)
     ap.add_argument("--model")
     ap.add_argument("--timeout", type=int, default=900)
+    ap.add_argument("--vdir")
     a = ap.parse_args(argv)
     proj = Path.cwd()
     task = Path(a.task).resolve()
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    n = 1
-    while (out / f"v{n}").exists():
-        n += 1
-    v = out / f"v{n}"
-    v.mkdir()
+    if a.vdir:
+        v = Path(a.vdir)
+    else:
+        n = 1
+        while (out / f"v{n}").exists():
+            n += 1
+        v = out / f"v{n}"
+        v.mkdir()
     st = {"worker": a.worker, "model": a.model, "out_dir": str(v)}
     wjson(v / "status.json", {**st, "status": "running"})
+    if not os.environ.get("AIO_WCHILD"):
+        # chạy worker tách khỏi phiên Claude (qua 1 tiến trình trung gian tự thoát): app cập nhật/khởi động lại
+        # hay phiên Claude bị ngắt thì worker vẫn làm tiếp; tiến trình này chỉ chờ kết quả rồi in ra.
+        flags = (0x00000008 | 0x00000200 | 0x08000000) if IS_WIN else 0   # DETACHED | NEW_GROUP | NO_WINDOW
+        child = [sys.executable, str(APP), "worker", *argv, "--vdir", str(v)]
+        spawn = [sys.executable, "-c", "import subprocess,sys,os;subprocess.Popen(sys.argv[2:],creationflags=int(sys.argv[1]),"
+                 "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=os.name!='nt')",
+                 str(flags), *child]
+        subprocess.run(spawn, env=dict(os.environ, AIO_WCHILD="1"), creationflags=NO_WINDOW, cwd=str(proj))
+        return wait_status(v, a.timeout + 180)
     exe = find_bin("codex" if a.worker == "codex" else "agy")
     if not task.exists():
         st.update(status="failed", error=f"Không thấy {task}")
@@ -2403,7 +2428,7 @@ def cmd_worker(argv):
         (v / "TASK.md").write_text(text, encoding="utf-8")
         if a.worker == "codex":
             prompt = ("Thực hiện đúng yêu cầu trong TASK.md ở thư mục hiện tại. "
-                      f"File đầu vào (chỉ đọc): {proj / 'input'}. Ghi mọi file kết quả vào thư mục hiện tại. "
+                      f"File đầu vào (chỉ đọc): {os.environ.get('AIO_INPUT') or proj / 'input'}. Ghi mọi file kết quả vào thư mục hiện tại. "
                       "Cuối cùng liệt kê file đã tạo và cách đã kiểm tra.")
             cmd = [exe, "exec", "--skip-git-repo-check", *CODEX_SANDBOX, "-C", str(v),
                    "--output-last-message", str(v / "result.md")]
@@ -2441,6 +2466,31 @@ def cmd_worker(argv):
     wjson(v / "status.json", st)
     print(json.dumps(st, ensure_ascii=False))
     sys.exit(0 if st["status"] == "completed" else 1)
+
+
+def wait_status(v, limit=1200):
+    """Chờ worker (đang chạy tách rời) xong, in status và trả mã thoát như khi chạy trực tiếp."""
+    v = Path(v)
+    t0 = time.time()
+    st = {}
+    while time.time() - t0 < limit:
+        st = rjson(v / "status.json", {}) or {}
+        if st.get("status") not in (None, "running"):
+            break
+        time.sleep(2)
+    else:
+        st = {**st, "status": "timeout", "error": "Chờ worker quá lâu"}
+    print(json.dumps(st, ensure_ascii=False))
+    sys.exit(0 if st.get("status") == "completed" else 1)
+
+
+def cmd_wait(argv):
+    """wait <thư mục vN hoặc thư mục --out>: chờ worker đang chạy (vd sau khi phiên bị ngắt) thay vì chạy lại."""
+    p = Path(argv[0]).resolve()
+    if not (p / "status.json").exists():
+        vs = sorted((x for x in p.glob("v*") if x.is_dir() and x.name[1:].isdigit()), key=lambda x: int(x.name[1:]))
+        p = vs[-1] if vs else p
+    wait_status(p, int(argv[1]) if len(argv) > 1 else 1200)
 
 
 # ---------------------------------------------------------------- check (Claude gọi)
@@ -2612,6 +2662,8 @@ def cmd_judge(argv):
     sys.exit(0 if st["status"] == "completed" else 1)
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "wait":
+        cmd_wait(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "worker":
         cmd_worker(sys.argv[2:])
     elif len(sys.argv) > 1 and sys.argv[1] == "check":
