@@ -149,11 +149,12 @@ Line $M.libs $M.installing 'Yellow'
 $pyw = PyW
 
 # Start Menu (mở) + Startup (chạy nền khi bật máy để task tự chạy tiếp). Không tạo icon Desktop.
-$oldLnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'AI Orchestrator.lnk'
-if (Test-Path $oldLnk) { Remove-Item $oldLnk -Force }
+foreach ($old in @((Join-Path ([Environment]::GetFolderPath('Desktop')) 'AI Orchestrator.lnk'), (Join-Path ([Environment]::GetFolderPath('Programs')) 'AI Orchestrator.lnk'), (Join-Path ([Environment]::GetFolderPath('Startup')) 'AI Orchestrator.lnk'))) {
+  if (Test-Path $old) { Remove-Item $old -Force }
+}
 $ws = New-Object -ComObject WScript.Shell
-$lnkMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'AI Orchestrator.lnk'
-$lnkStart = Join-Path ([Environment]::GetFolderPath('Startup')) 'AI Orchestrator.lnk'
+$lnkMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'Maestro.lnk'
+$lnkStart = Join-Path ([Environment]::GetFolderPath('Startup')) 'Maestro.lnk'
 foreach ($pair in @(@($lnkMenu, ('"' + $AppPy + '"')), @($lnkStart, ('"' + $AppPy + '" --background')))) {
   $s = $ws.CreateShortcut($pair[0])
   $s.TargetPath = $pyw

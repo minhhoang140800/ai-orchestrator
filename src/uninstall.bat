@@ -1,9 +1,9 @@
 @echo off
 setlocal EnableExtensions
-title AI Orchestrator - Go cai dat
+title Maestro - Go cai dat
 set "APPDIR=%LOCALAPPDATA%\AIOrchestrator"
 echo.
-echo   AI Orchestrator - GO CAI DAT
+echo   Maestro - GO CAI DAT
 echo   Thu muc ket qua va lich su task (_AI-Orchestrator) luon duoc giu nguyen.
 echo.
 echo   [1] Go app + dang xuat 3 AI          (de test lai tu buoc cai dat va dang nhap)
@@ -35,6 +35,8 @@ echo [1] Go app va shortcut...
 del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\AI Orchestrator.lnk" >nul 2>&1
 del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\AI Orchestrator.lnk" >nul 2>&1
 del /q "%USERPROFILE%\Desktop\AI Orchestrator.lnk" >nul 2>&1
+del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Maestro.lnk" >nul 2>&1
+del /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Maestro.lnk" >nul 2>&1
 del /q "%APPDIR%\app.py" "%APPDIR%\app.py.new" "%APPDIR%\app.py.old" "%APPDIR%\version.txt" "%APPDIR%\icon.ico" "%APPDIR%\install.log" >nul 2>&1
 if exist "%APPDIR%\__pycache__" rd /s /q "%APPDIR%\__pycache__"
 if exist "%APPDIR%\versions" rd /s /q "%APPDIR%\versions"
@@ -66,6 +68,6 @@ winget uninstall -e --id OpenJS.NodeJS.LTS --silent
 
 :done
 echo.
-echo   XONG. De cai lai: bam dup file AI-Orchestrator_v... .bat
+echo   XONG. De cai lai: bam dup file Maestro_v... .bat
 echo.
 pause

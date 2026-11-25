@@ -81,7 +81,7 @@ AIS = {
     "codex": {"bin": "codex", "login": ["login"], "test": ["exec", "--skip-git-repo-check", *CODEX_SANDBOX, PING]},
     "gemini": {"bin": "agy", "login": [], "test": ["-p", PING]},
 }
-ICON_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><image width="96" height="96" href="data:image/png;base64,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"/></svg>'
+ICON_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="23" fill="#202020"/><path d="M23 23V42L50 68L77 42V23M50 23V68" stroke="#FFFFFF" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>'
 
 
 # ---------------------------------------------------------------- helpers
@@ -321,6 +321,10 @@ def finish_clean(t):
         dec = rjson(wdir(t) / "tasks" / "decisions.json", None)
         if isinstance(dec, list):
             t["decisions"] = dec
+        cf = wdir(t) / "tasks" / "criteria.md"
+        if cf.exists():
+            t["recipe"] = {"criteria": cf.read_text("utf-8", "replace")[:8000]}
+        t["brain_suggest"] = brain_suggest(t)
         tsave(t)
         w = wdir(t)
         if w != tdir(t):
@@ -474,6 +478,22 @@ def write_claude_md(t):
     on = [w for w in ("codex", "gemini") if find_bin(AIS[w]["bin"]) and CFG["ais"].get(w, {}).get("ok") is not False]
     desc = {"codex": "codex — ChatGPT/Codex: code, CSV/Excel, script, tạo ảnh ($imagegen)",
             "gemini": "gemini — Gemini/Antigravity: research, tổng hợp, phân tích, ý tưởng (chỉ trả văn bản)"}
+    pj = project_of(t)
+    brain_md = (f"""## Dự án: {pj['name']} — bộ nhớ dự án (người dùng đã duyệt, áp dụng cho mọi task của dự án)
+{pj.get('brain', '').strip() or '(chưa có)'}
+- Tuân theo bộ nhớ này; giám khảo cũng chấm theo nó (đưa các mục liên quan vào tiêu chí).
+- Thấy quy tắc/quyết định nên áp dụng cho CẢ dự án (style, màu, size chuẩn, đặt tên file, KPI, cách đọc file data...) mà
+  bộ nhớ chưa có: ghi đề xuất vào ./brain_suggest.json dạng ["<1 câu ngắn>", ...]. KHÔNG tự sửa bộ nhớ; người dùng duyệt.
+
+""") if pj else ""
+    tp = t.get("template")
+    tpl_md = (f"""## Quy trình mẫu "{tp['name']}" (đã làm đạt trước đây) — làm theo, thay tham số bằng yêu cầu mới
+Yêu cầu khi đó: {' / '.join(x[:300] for x in tp.get('asks', [])[:5])}
+Các bước: {'; '.join(f"{x['title']} ({x['worker']} {x['model']})".strip() for x in tp.get('steps', []))}
+Tiêu chí đã dùng:
+{tp.get('criteria', '').strip() or '(không lưu)'}
+
+""") if tp else ""
     txt = f"""# Task {t['id']}
 
 ## Hướng dẫn của người dùng (ưu tiên áp dụng)
@@ -521,7 +541,7 @@ Tạo bằng codex ($imagegen) hoặc cách khác có sẵn. Chỉ khi không th
 OUTPUT/prompts/, rồi hỏi người dùng (question.md): "Dán prompt trong <đường dẫn> vào ChatGPT, lưu ảnh vào OUTPUT/images/
 rồi trả lời 'xong'". Khi được trả lời: check + chấm độc lập như trên.
 
-## Chế độ làm việc người dùng chọn cho task này: {mode_name}
+{brain_md}{tpl_md}## Chế độ làm việc người dùng chọn cho task này: {mode_name}
 {mode_rules}
 - Worker status "limit": chuyển worker khác hoặc tự làm nếu đảm bảo chất lượng; nếu không, hỏi người dùng.
 
@@ -892,7 +912,130 @@ def open_task_file(tid, rel):
     return {"ok": True}
 
 
-def new_task(text, mode="balanced"):
+# ---------------------------------------------------------------- Project Brain + Workflow Templates
+_plock = threading.Lock()
+
+
+def projects():
+    return rjson(STORE / "projects.json", []) or []
+
+
+def save_projects(ps):
+    wjson(STORE / "projects.json", ps)
+
+
+def project_of(t):
+    return next((p for p in projects() if p["id"] == t.get("project")), None)
+
+
+def project_api(d):
+    a = d.get("action", "")
+    with _plock:
+        ps = projects()
+        p = next((x for x in ps if x["id"] == d.get("id")), None)
+        if a == "get":
+            return p or {"error": "Không tìm thấy dự án"}
+        if a == "create":
+            name = (d.get("name") or "").strip()[:60]
+            if not name:
+                return {"error": "Nhập tên dự án"}
+            p = next((x for x in ps if x["name"].lower() == name.lower()), None)
+            if not p:
+                p = {"id": "p" + secrets.token_hex(4), "name": name, "brain": "", "created": now()}
+                ps.append(p)
+                save_projects(ps)
+            if d.get("task") in TASKS:
+                TASKS[d["task"]]["project"] = p["id"]
+                tsave(TASKS[d["task"]])
+            return {"ok": True, "id": p["id"]}
+        if not p and a != "assign":
+            return {"error": "Không tìm thấy dự án"}
+        if a == "save":
+            p["brain"] = (d.get("brain") or "")[:20000]
+            if (d.get("name") or "").strip():
+                p["name"] = d["name"].strip()[:60]
+            save_projects(ps)
+            for t in TASKS.values():
+                if t.get("project") == p["id"] and t["status"] not in ("running",) and wdir(t).exists():
+                    write_claude_md(t)
+            return {"ok": True}
+        if a == "delete":
+            save_projects([x for x in ps if x is not p])
+            for t in TASKS.values():
+                if t.get("project") == p["id"]:
+                    t.pop("project", None)
+                    tsave(t)
+            return {"ok": True}
+        if a == "assign":
+            t = TASKS.get(d.get("task", ""))
+            if not t:
+                return {"error": "Không tìm thấy task"}
+            t["project"] = p["id"] if p else ""
+            tsave(t)
+            if wdir(t).exists() and t["status"] != "running":
+                write_claude_md(t)
+            return {"ok": True}
+        if a in ("accept", "reject"):              # đề xuất của Claude cho bộ nhớ dự án: người dùng duyệt
+            t = TASKS.get(d.get("task", ""))
+            if not t:
+                return {"error": "Không tìm thấy task"}
+            sug = brain_suggest(t)
+            i = int(d.get("idx", -1))
+            if not 0 <= i < len(sug):
+                return {"error": "Đề xuất không còn"}
+            item = sug.pop(i)
+            if a == "accept":
+                p["brain"] = (p.get("brain", "").rstrip() + "\n- " + item).strip()
+                save_projects(ps)
+            t["brain_suggest"] = sug
+            f = wdir(t) / "brain_suggest.json"
+            if f.exists():
+                wjson(f, sug)
+            tsave(t)
+            return {"ok": True}
+    return {"error": "bad request"}
+
+
+def brain_suggest(t):
+    f = wdir(t) / "brain_suggest.json"
+    v = rjson(f, None) if f.exists() else None
+    if isinstance(v, list):
+        return [str(x.get("text") if isinstance(x, dict) else x)[:400] for x in v if x][:20]
+    return list(t.get("brain_suggest") or [])
+
+
+def templates():
+    return rjson(STORE / "templates.json", []) or []
+
+
+def template_api(d):
+    a = d.get("action", "")
+    with _plock:
+        ts = templates()
+        if a == "save":
+            t = TASKS.get(d.get("task", ""))
+            if not t:
+                return {"error": "Không tìm thấy task"}
+            subs = [s for m in task_detail(t)["messages"] if m["role"] == "work" for s in m.get("subtasks", [])]
+            asks = [m["text"] for m in t.get("messages", []) if m["role"] == "user" and m.get("text")]
+            r = t.get("recipe") or {}
+            tp = {"id": "w" + datetime.datetime.now().strftime("%y%m%d%H%M%S"),
+                  "name": (d.get("name") or t["title"]).strip()[:80], "created": now(), "from": t["id"],
+                  "mode": t.get("mode", "balanced"), "project": t.get("project", ""),
+                  "asks": asks[:20], "criteria": r.get("criteria", "")[:8000],
+                  "steps": [{"title": s.get("title", ""), "worker": s.get("worker", ""), "model": s.get("model", "")} for s in subs][:40]}
+            ts.append(tp)
+            wjson(STORE / "templates.json", ts)
+            t["tpl_saved"] = tp["id"]
+            tsave(t)
+            return {"ok": True, "id": tp["id"]}
+        if a == "delete":
+            wjson(STORE / "templates.json", [x for x in ts if x["id"] != d.get("id")])
+            return {"ok": True}
+    return {"error": "bad request"}
+
+
+def new_task(text, mode="balanced", project="", template=""):
     if not text.strip():
         return {"error": "Chưa nhập yêu cầu"}
     tid = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
@@ -901,6 +1044,11 @@ def new_task(text, mode="balanced"):
     t = {"id": tid, "title": re.sub(r"\s+", " ", text.strip())[:50], "text": text.strip(),
          "status": "draft", "created": now(), "created_ts": time.time(), "messages": [],
          "mode": mode if mode in MODES else "balanced", "w2": True}
+    if project and any(p["id"] == project for p in projects()):
+        t["project"] = project
+    tp = next((x for x in templates() if x["id"] == template), None)
+    if tp:
+        t["template"] = tp
     (tdir(t) / "input").mkdir(parents=True, exist_ok=True)
     with _tlock:
         TASKS[tid] = t
@@ -1186,7 +1334,7 @@ def ai_login(ai, switch=False):
     """Đăng nhập trên trình duyệt, không mở cửa sổ dòng lệnh (trừ khi Gemini bắt buộc)."""
     exe = find_bin(AIS[ai]["bin"])
     if not exe:
-        return {"error": "Chưa cài. Chạy lại file cài AI-Orchestrator (.bat)."}
+        return {"error": "Chưa cài. Chạy lại file cài Maestro (.bat)."}
     cur = CFG["ais"].setdefault(ai, {})
     if cur.get("pending"):
         return {"ok": True}
@@ -1268,7 +1416,7 @@ def ai_login(ai, switch=False):
                     cur.pop("url", None)
                     if done is None and IS_WIN:
                         cur["window"] = "login"
-                        subprocess.run(["cmd.exe", "/c", "start", "/wait", "AI Orchestrator - Gemini", exe],
+                        subprocess.run(["cmd.exe", "/c", "start", "/wait", "Maestro - Gemini", exe],
                                        cwd=str(d), creationflags=NO_WINDOW)
                         cur.pop("window", None)
                     ok = gemini_has_cred() and gemini_ping(exe, 120)[0]
@@ -1370,6 +1518,9 @@ def task_detail(t):
     dec = rjson(wdir(t) / "tasks" / "decisions.json", None)
     if not isinstance(dec, list):
         dec = t.get("decisions") or []
+    d["project"] = t.get("project", "")
+    d["tpl_saved"] = t.get("tpl_saved", "")
+    d["brain_suggest"] = brain_suggest(t) if t.get("project") else []
     d["decisions"] = [{"group": str(g.get("group", ""))[:120],
                        "items": [{"type": i.get("type", "feedback"), "text": str(i.get("text", ""))[:400], "status": i.get("status", "")}
                                  for i in g.get("items", []) if isinstance(i, dict)]}
@@ -1446,7 +1597,9 @@ class H(BaseHTTPRequestHandler):
                 fail = b.pop("update_fail", "")
                 if upd or fail:
                     wjson(bj, b)
-            return self.send(200, {"ais": ai_state(), "output": CFG["output"], "instructions": CFG["instructions"],
+            return self.send(200, {"ais": ai_state(), "output": CFG["output"],
+                                   "projects": [{"id": p["id"], "name": p["name"]} for p in projects()],
+                                   "templates": [{"id": x["id"], "name": x["name"], "steps": len(x.get("steps", []))} for x in templates()], "instructions": CFG["instructions"],
                                    "tasks": ts, "version": VERSION, "release": RELEASE, "updated": upd, "update_fail": fail,
                                    "machine": {"cpu": CPU, "ram": RAM_GB, "max": MAX_RUNNING}})
         if u.path == "/api/registry":
@@ -1531,7 +1684,11 @@ class H(BaseHTTPRequestHandler):
                 open_path(CFG["output"])
             return {"ok": True}
         if path == "/api/task/new":
-            return new_task(d.get("text", ""), d.get("mode", "balanced"))
+            return new_task(d.get("text", ""), d.get("mode", "balanced"), d.get("project", ""), d.get("template", ""))
+        if path == "/api/project":
+            return project_api(d)
+        if path == "/api/template":
+            return template_api(d)
         if path == "/api/task/submit":
             return submit_task(d.get("id", ""), d.get("files", []))
         if path == "/api/task/act":
@@ -1721,7 +1878,7 @@ def export_log():
     import zipfile
     if not CFG.get("output") or not Path(CFG["output"]).is_dir():
         return {"error": "Chưa chọn thư mục nhận kết quả"}
-    name = "AI-Orchestrator-log-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + ".zip"
+    name = "Maestro-log-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + ".zip"
     dst = Path(CFG["output"]) / name
     fmt = lambda s: f"{int(s) // 60}m{int(s) % 60:02d}s"
     lines = [f"# AI Orchestrator log — v{RELEASE} ({VERSION}) — {now()}", "",
@@ -1952,6 +2109,14 @@ def serve(background=False):
         set_store()
     except Exception as e:
         dlog(f"set_store: {e}")
+    if IS_WIN:                                   # đổi tên shortcut cũ sang Maestro (bản cập nhật qua nút Cập nhật)
+        for base in (Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs",
+                     Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Startup"):
+            try:
+                if (base / "AI Orchestrator.lnk").exists() and not (base / "Maestro.lnk").exists():
+                    os.replace(base / "AI Orchestrator.lnk", base / "Maestro.lnk")
+            except Exception:
+                pass
     load_tasks()
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=check_startup, daemon=True).start()
@@ -1959,7 +2124,7 @@ def serve(background=False):
     threading.Thread(target=page_watch, daemon=True).start()
     if not background and not os.environ.get("AIO_NO_BROWSER"):
         webbrowser.open(url)
-    print("AI Orchestrator:", url, flush=True)
+    print("Maestro:", url, flush=True)
     srv.serve_forever()
 
 

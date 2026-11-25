@@ -5,11 +5,11 @@ from pathlib import Path
 
 d = Path(__file__).parent
 MSG = {
-    "title": "AI Orchestrator — cài đặt",
+    "title": "Maestro — cài đặt",
     "mode_fresh": "Cài mới, khoảng 5–15 phút. Không tắt cửa sổ này.",
     "mode_update": "Đã cài trước đó → đang cập nhật. Dữ liệu và task giữ nguyên.",
     "uac": "Nếu Windows hỏi quyền cài đặt: bấm Yes.",
-    "opening": "Đang mở AI Orchestrator…",
+    "opening": "Đang mở Maestro…",
     "have": "đã có",
     "installing": "đang cài…",
     "done": "xong",
@@ -21,7 +21,7 @@ MSG = {
     "no_claude": "Cài Claude Code chưa xong. Kiểm tra mạng rồi chạy lại file này.",
     "no_start": "Ứng dụng không khởi động được.",
     "log": "Chi tiết:",
-    "ok": "Xong. Trang AI Orchestrator đã mở trong trình duyệt. Lưu bookmark link dưới đây — app tự chạy nền khi bật máy nên link luôn mở được:",
+    "ok": "Xong. Trang Maestro đã mở trong trình duyệt. Lưu bookmark link dưới đây — app tự chạy nền khi bật máy nên link luôn mở được:",
 }
 import unicodedata as _u
 # Cửa sổ cmd hay lỗi font tiếng Việt có dấu -> dùng tiếng Việt không dấu
@@ -76,7 +76,7 @@ ps.encode("ascii")
 
 bat = r"""@echo off
 chcp 65001 >nul
-title AI Orchestrator v""" + rel + r"""
+title Maestro v""" + rel + r"""
 set "AIO_SELF=%~f0"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$s=[IO.File]::ReadAllText($env:AIO_SELF); $m='#'+'##PS-BEGIN###'; $i=$s.IndexOf($m); if ($i -lt 0) { Write-Host 'File loi'; exit 1 }; Invoke-Expression $s.Substring($i); exit $LASTEXITCODE"
 if errorlevel 1 (
@@ -87,8 +87,8 @@ if errorlevel 1 (
 exit /b
 ###PS-BEGIN###
 """ + ps + "\n"
-for old in (d / "dist").glob("AI-Orchestrator*.bat"):
+for old in (d / "dist").glob("*.bat"):
     old.unlink()
-out = d / "dist" / f"AI-Orchestrator_v{rel}.bat"
+out = d / "dist" / f"Maestro_v{rel}.bat"
 out.write_bytes(bat.replace("\r\n", "\n").replace("\n", "\r\n").encode("ascii"))
 print(out, out.stat().st_size, ver)
