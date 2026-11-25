@@ -144,7 +144,9 @@ function MoveToDrive($src, $dst) {
   New-Item -ItemType Directory -Force -Path $dst | Out-Null
   if ($it) { & robocopy $src $dst /E /MOVE /NFL /NDL /NJH /NJS /R:1 /W:1 *>> $Log; if (Test-Path $src) { Remove-Item $src -Recurse -Force -ErrorAction SilentlyContinue } }
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $src) | Out-Null
-  & cmd.exe /c mklink /J "$src" "$dst" *>> $Log
+  & cmd.exe /c mklink /J "$src" "$dst" 2>&1 | Out-Null
+  $ok2 = (Get-Item $src -Force -ErrorAction SilentlyContinue).Attributes -band [IO.FileAttributes]::ReparsePoint
+  Add-Content -Path $Log -Value ('junction ' + $src + ' -> ' + $dst + ' : ' + $(if ($ok2) { 'ok' } else { 'FAIL' })) -Encoding UTF8
 }
 $sys = $env:SystemDrive
 $cFree = FreeGB $sys
@@ -157,6 +159,8 @@ if ($cFree -lt 2) {
     MoveToDrive (Join-Path $env:USERPROFILE '.cache\claude') (Join-Path $base 'claude-cache')
     MoveToDrive (Join-Path $env:APPDATA 'npm') (Join-Path $base 'npm')
     MoveToDrive (Join-Path $env:LOCALAPPDATA 'npm-cache') (Join-Path $base 'npm-cache')
+    MoveToDrive (Join-Path $env:LOCALAPPDATA 'agy') (Join-Path $base 'agy')
+    MoveToDrive (Join-Path $env:USERPROFILE '.local\bin') (Join-Path $base 'local-bin')
     Line ('O ' + $sys + ' con ' + $cFree + ' GB') ('-> cai sang ' + $base) 'Yellow'
   } else {
     Line ('O ' + $sys + ' con ' + $cFree + ' GB') 'khong co o khac du cho' 'Red'
