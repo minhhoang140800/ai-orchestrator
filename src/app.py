@@ -234,6 +234,15 @@ def refresh_path():
             os.environ["PATH"] = ";".join(parts + [os.environ.get("PATH", "")])
     except Exception:
         pass
+    # Bỏ trùng: mỗi lần tự cập nhật app khởi động lại với PATH cũ + PATH registry -> PATH phình to qua nhiều bản,
+    # vượt giới hạn của cmd.exe (~8 KB) nên các .cmd (codex) không thấy node. Giữ thứ tự, bỏ mục trùng/rỗng.
+    seen, keep = set(), []
+    for x in os.environ.get("PATH", "").split(";"):
+        k = x.strip().strip('"').rstrip("\\").lower()
+        if k and k not in seen:
+            seen.add(k)
+            keep.append(x.strip())
+    os.environ["PATH"] = ";".join(keep)
     if shutil.which("node"):
         return
     E = os.environ.get
