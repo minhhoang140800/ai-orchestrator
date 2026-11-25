@@ -298,6 +298,42 @@ def tdir(t):
     return TASKS_DIR / t["id"]
 
 
+def wdir(t):
+    """Thư mục nháp của task. Task mới: <thư mục kết quả của task>/.work (cùng ổ với sản phẩm, xóa khi task xong).
+    Task tạo từ bản cũ (đã có phiên Claude gắn với thư mục lịch sử): giữ thư mục lịch sử để Claude nối tiếp được."""
+    if t.get("legacy") or not t.get("folder") or not CFG.get("output"):
+        return tdir(t)
+    return out_dir(t) / ".work"
+
+
+def finish_clean(t):
+    """Task xong: lưu lại bảng sub-task + feedback/quyết định vào lịch sử, rồi xóa toàn bộ nháp/hướng dẫn/bản trùng."""
+    try:
+        subs = subtasks(t)
+        works = [m for m in t.get("messages", []) if m["role"] == "work"]
+        for s_ in subs:
+            for m in reversed(works):
+                if s_["ts"] >= m.get("started_ts", 0) - 1:
+                    m.setdefault("subs", [])
+                    if not any(x.get("id") == s_["id"] for x in m["subs"]):
+                        m["subs"].append({**s_, "status": s_["status"] if s_["status"] != "running" else "stopped"})
+                    break
+        dec = rjson(wdir(t) / "tasks" / "decisions.json", None)
+        if isinstance(dec, list):
+            t["decisions"] = dec
+        tsave(t)
+        w = wdir(t)
+        if w != tdir(t):
+            shutil.rmtree(w, ignore_errors=True)
+        else:                        # task cũ: chỉ giữ task.json, file đính kèm, CLAUDE.md
+            for x in ("work", "tasks"):
+                shutil.rmtree(w / x, ignore_errors=True)
+            for x in ("run.log", "timeline.log", "question.md"):
+                (w / x).unlink(missing_ok=True)
+    except Exception as e:
+        dlog(f"finish_clean {t.get('id')}: {e}")
+
+
 def tsave(t):
     with _tlock:
         wjson(tdir(t) / "task.json", {k: v for k, v in t.items() if not k.startswith("_")})
@@ -320,7 +356,7 @@ def step(t, line):
     line = line.strip()
     if line:
         try:      # nhật ký có giờ cho từng bước (dùng khi xuất log)
-            with open(tdir(t) / "timeline.log", "a", encoding="utf-8") as f:
+            with open(wdir(t) / "timeline.log", "a", encoding="utf-8") as f:
                 f.write(f"{now()}\t{line[:500]}\n")
         except Exception:
             pass
@@ -366,6 +402,8 @@ def load_tasks():
         t = rjson(f)
         if not t:
             continue
+        if not t.get("w2") and t.get("session_started"):
+            t["legacy"] = True
         if t.get("status") == "running":      # app bị tắt khi đang chạy -> tự chạy tiếp
             kill_orphan(t.get("pid"))
             end_work(t, "interrupted")
@@ -382,7 +420,7 @@ def out_dir(t):
 def subtasks(t):
     """Sub-task Claude đã giao cho worker: đọc từ work/<ID>/vN/status.json."""
     out = []
-    w = tdir(t) / "work"
+    w = wdir(t) / "work"
     if not w.exists():
         return out
     for d in sorted(x for x in w.iterdir() if x.is_dir()):
@@ -435,8 +473,8 @@ Bạn là PM. Phân tích yêu cầu, tự quyết cách làm, chia sub-task, ch
 nghiệm thu trên file thật, sửa đúng phần lỗi, báo cáo. Task này là một cuộc trò chuyện nhiều lượt.
 
 ## Đường dẫn
-- Thư mục làm việc (nháp, log): thư mục hiện tại
-- File người dùng gửi: ./input/
+- Thư mục làm việc (nháp, brief, log): thư mục hiện tại. Bị XÓA TOÀN BỘ khi task xong -> không để sản phẩm ở đây.
+- File người dùng gửi: {tdir(t) / "input"}
 - Được ĐỌC mọi ổ đĩa của máy: {', '.join(drives())}. Người dùng nhắc tới file/thư mục nào thì tự tìm.
   Không sửa, không xóa, không di chuyển file nào ngoài thư mục làm việc và OUTPUT.
 - OUTPUT (nơi lưu sản phẩm giao người dùng): {out_dir(t)}
@@ -508,7 +546,10 @@ kết quả đạt/chưa đạt, điểm cần người dùng biết, việc ng�
 ## Cấm
 Không dùng API key. Không ghi mật khẩu/token vào file.
 """
-    (tdir(t) / "CLAUDE.md").write_text(txt, encoding="utf-8")
+    wdir(t).mkdir(parents=True, exist_ok=True)
+    if IS_WIN and wdir(t).name == ".work":
+        subprocess.run(["attrib", "+h", str(wdir(t))], creationflags=NO_WINDOW, capture_output=True)
+    (wdir(t) / "CLAUDE.md").write_text(txt, encoding="utf-8")
 
 
 def build_prompt(t, nxt):
@@ -567,6 +608,7 @@ def start_run(t):
         t["folder"] = name
     out_dir(t).mkdir(parents=True, exist_ok=True)
     write_claude_md(t)
+    d = wdir(t)
     q = d / "question.md"
     if q.exists():
         q.unlink()
@@ -623,13 +665,13 @@ def new_files(t, since):
     od = out_dir(t)
     if not od.exists():
         return []
-    fs = [f for f in od.rglob("*") if f.is_file() and f.stat().st_mtime >= since - 1]
+    fs = [f for f in od.rglob("*") if f.is_file() and ".work" not in f.parts and f.stat().st_mtime >= since - 1]
     fs.sort(key=str)
     return [str(f.relative_to(od)).replace("\\", "/") for f in fs][:30]
 
 
 def watch(t, p, nxt):
-    raw = open(tdir(t) / "run.log", "a", encoding="utf-8")
+    raw = open(wdir(t) / "run.log", "a", encoding="utf-8")
     raw.write(f"\n===== {now()} {nxt.get('kind')} =====\n")
     result = None
     w = work(t)
@@ -661,7 +703,7 @@ def watch(t, p, nxt):
     p.wait()
     PROCS.pop(t["id"], None)
     with _tlock:
-        q = tdir(t) / "question.md"
+        q = wdir(t) / "question.md"
         t.pop("pid", None)
         if t.get("_quit"):
             t["status"] = "running"        # app đóng: giữ running để lần mở sau tự chạy tiếp
@@ -684,7 +726,7 @@ def watch(t, p, nxt):
             t["status"] = "done"
             t["finished"] = now()
             tmsg(t, "claude", (result.get("result") or "Xong.").strip(), files=new_files(t, since))
-            threading.Thread(target=slim_task, args=(t,), daemon=True).start()
+            threading.Thread(target=finish_clean, args=(t,), daemon=True).start()
         else:
             end_work(t, "failed")
             msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {p.returncode}"
@@ -811,7 +853,7 @@ def new_task(text, mode="balanced"):
         tid += "b"
     t = {"id": tid, "title": re.sub(r"\s+", " ", text.strip())[:50], "text": text.strip(),
          "status": "draft", "created": now(), "created_ts": time.time(), "messages": [],
-         "mode": mode if mode in MODES else "balanced"}
+         "mode": mode if mode in MODES else "balanced", "w2": True}
     (tdir(t) / "input").mkdir(parents=True, exist_ok=True)
     with _tlock:
         TASKS[tid] = t
@@ -1263,8 +1305,8 @@ def task_detail(t):
     subs = subtasks(t)
     works = [m for m in msgs if m["role"] == "work"]
     for m in works:
-        m["subtasks"] = []
-    for s in subs:   # gắn sub-task vào lượt làm việc chứa thời điểm của nó
+        m["subtasks"] = list(m.pop("subs", None) or [])
+    for s in [x for x in subs if not any(x["id"] == y["id"] for m in works for y in m["subtasks"])]:   # gắn sub-task vào lượt làm việc chứa thời điểm của nó
         for m in reversed(works):
             if s["ts"] >= m.get("started_ts", 0) - 1:
                 m["subtasks"].append(s)
@@ -1278,7 +1320,9 @@ def task_detail(t):
         works[-1]["now_ts"] = time.time()
     d["messages"] = msgs
     d["output"] = str(out_dir(t)) if CFG.get("output") else ""
-    dec = rjson(tdir(t) / "tasks" / "decisions.json", [])
+    dec = rjson(wdir(t) / "tasks" / "decisions.json", None)
+    if not isinstance(dec, list):
+        dec = t.get("decisions") or []
     d["decisions"] = [{"group": str(g.get("group", ""))[:120],
                        "items": [{"type": i.get("type", "feedback"), "text": str(i.get("text", ""))[:400], "status": i.get("status", "")}
                                  for i in g.get("items", []) if isinstance(i, dict)]}
@@ -1508,7 +1552,7 @@ def registry(force=False):
         od = out_dir(t) if CFG.get("output") and t.get("folder") else None
         if od and od.is_dir():
             for f in od.rglob("*"):
-                if f.is_file():
+                if f.is_file() and ".work" not in f.parts:
                     n += 1
                     if len(arts) < 3000:
                         st = f.stat()
@@ -1546,14 +1590,14 @@ def slim_task(t, deep=False):
     - deep (nút Xóa cache): xóa thêm bản nháp/ảnh/video trung gian trong work/ và file đính kèm đã dùng xong."""
     if t.get("status") in ("running", "queued"):
         return 0
-    w = tdir(t) / "work"
+    w = wdir(t) / "work"
     if not w.exists():
         return 0
     od = out_dir(t) if CFG.get("output") else None
     idx = {}
     if od and od.exists():
         for f in od.rglob("*"):
-            if f.is_file() and STORE_NAME not in f.parts:
+            if f.is_file() and STORE_NAME not in f.parts and ".work" not in f.parts:
                 idx.setdefault(f.stat().st_size, []).append(f)
     deep = deep and t.get("status") in ("done", "cancelled")   # task còn dở: chỉ xóa file trùng, giữ bản nháp để làm tiếp
     freed = 0
@@ -1586,7 +1630,13 @@ def slim_task(t, deep=False):
 def clear_cache():
     freed = 0
     for t in list(TASKS.values()):
-        freed += slim_task(t, deep=True)
+        if t.get("status") in ("done", "cancelled"):     # task xong: chỉ giữ lịch sử tin nhắn
+            w = wdir(t)
+            before = sum(f.stat().st_size for f in w.rglob("*") if f.is_file()) if w.exists() else 0
+            finish_clean(t)
+            freed += before - (sum(f.stat().st_size for f in w.rglob("*") if f.is_file()) if w.exists() else 0)
+        else:
+            freed += slim_task(t)
     for p in [DATA / ".login", APP.parent / "__pycache__"]:
         if p.exists():
             freed += sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
@@ -1620,7 +1670,7 @@ def export_log():
              "AI: " + ", ".join(f"{k}={'ok' if v.get('ok') else 'chưa'}" for k, v in CFG["ais"].items()), ""]
     with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
         for t in sorted(TASKS.values(), key=lambda x: x["created"], reverse=True):
-            d = tdir(t)
+            d = wdir(t)
             lines += [f"## {t['title']}  [{t['id']}]  — {t['status']}", f"Tạo: {t['created']}  Thư mục: {t.get('folder', '')}", ""]
             det = task_detail(t)
             for m in det["messages"]:
@@ -1635,7 +1685,7 @@ def export_log():
                 else:
                     lines.append(f"- {m.get('time', '')}  CLAUDE ({m.get('kind') or 'trả lời'}): {m['text'][:200].replace(chr(10), ' ')}")
             lines.append("")
-            for f in [d / "task.json", d / "timeline.log", d / "run.log", d / "tasks" / "plan.json", d / "CLAUDE.md"]:
+            for f in [tdir(t) / "task.json", d / "timeline.log", d / "run.log", d / "tasks" / "plan.json", d / "CLAUDE.md"]:
                 if f.is_file():
                     z.write(f, f"{t['id']}/{f.name}")
             for f in list((d / "tasks").glob("*.md")) + [x for x in (d / "work").glob("*/v*/*")
