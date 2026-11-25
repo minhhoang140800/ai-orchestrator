@@ -34,7 +34,7 @@ import os
 built = app.replace('UI_B64 = ""', f'UI_B64 = "{ui}"', 1)
 import datetime
 ver = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d.%H%M") + "-" + hashlib.sha1(built.encode()).hexdigest()[:6]  # so sánh được theo thời gian
-repo = os.environ.get("AIO_REPO", "")          # owner/repo trên GitHub
+repo = os.environ.get("AIO_REPO", "minhhoang140800/ai-orchestrator")          # owner/repo trên GitHub
 base = f"https://raw.githubusercontent.com/{repo}/main/" if repo else ""
 rel = (d / "RELEASE").read_text().strip()          # số phiên bản hiển thị, tăng mỗi lần phát hành
 built = built.replace('RELEASE = "dev"', f'RELEASE = "{rel}"', 1)
