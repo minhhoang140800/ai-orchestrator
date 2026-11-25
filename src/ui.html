@@ -423,11 +423,12 @@ function composer(id, ph) {
       <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="pop mmenu" id="modeMenu" role="menu"></div></span>
       <button class="pri sq" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
-const MODE = { fast: ["Pro", "Opus, chấm kỹ, tốn hạn mức hơn"], balanced: ["Balanced", "Sonnet, Opus cho bước khó"], saver: ["Eco", "Ít hạn mức nhất, chậm hơn"] };
+const MODE = { fast: ["Pro", "Opus, chấm kỹ, tốn hạn mức hơn"], balanced: ["Balanced", "Sonnet, Opus cho bước khó"], turbo: ["Turbo", "Nhanh nhất, giảm thẩm định"], saver: ["Eco", "Ít hạn mức nhất, chậm hơn"] };
 const MICON = {
   fast: '<svg class="i" viewBox="0 0 24 24"><path d="M9.5 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"/><path d="M12.5 9h2a2 2 0 0 0 2-2M12.5 14h3a2 2 0 0 1 2 2v1M16.5 11h3"/></svg>',
   balanced: '<svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 4v11.8M18 8.2a8 8 0 0 1-8 8H8.2"/></svg>',
-  saver: '<svg class="i" viewBox="0 0 24 24"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg>' };
+  turbo: '<svg class="i" viewBox="0 0 24 24"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg>',
+  saver: '<svg class="i" viewBox="0 0 24 24"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14z"/><path d="M5 19l7-7"/></svg>' };
 let curMode = "balanced";
 function paintMode() {
   if (!$("modeBtn")) return;

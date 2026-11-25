@@ -71,7 +71,8 @@ CPU, RAM_GB = machine()
 # mỗi task đang chạy cần khoảng 4 luồng + 4 GB (Claude Code + worker); tối thiểu 1, tối đa 4
 MAX_RUNNING = max(1, min(4, CPU // 4, int(RAM_GB // 4)))
 LOW_SPEC = MAX_RUNNING == 1
-MODES = {"fast": "Pro (nhanh, mạnh nhất)", "balanced": "Balanced (cân bằng)", "saver": "Eco (tiết kiệm hạn mức)"}
+MODES = {"fast": "Pro (mạnh nhất, chấm kỹ)", "balanced": "Balanced (cân bằng)", "turbo": "Turbo (nhanh nhất, giảm thẩm định)",
+         "saver": "Eco (tiết kiệm hạn mức)"}
 BELOW_NORMAL = 0x00004000 if IS_WIN else 0     # ưu tiên thấp: máy vẫn mượt khi AI đang chạy
 PING = "Reply with the single word PONG and nothing else."
 
@@ -496,6 +497,11 @@ MODE_RULES = {
 - Dùng model mạnh ngay từ đầu để ít phải sửa. Giám khảo được dùng model mạnh, tối đa 2 vòng sửa.""",
     "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song tối đa {n} worker/sub-agent cho phần độc lập; tuần tự khi phụ thuộc.
 - Model nhỏ/nhanh cho việc đơn giản; model mạnh cho việc khó. Nâng model khi kết quả không đạt, hạ khi việc lặp lại.""",
+    "turbo": """- Ưu tiên TỐC ĐỘ TỐI ĐA. Bắt tay làm ngay, kế hoạch tối giản (vài dòng), không hỏi lại trừ khi thiếu dữ kiện bắt buộc.
+- Song song tối đa {n} worker/sub-agent cho mọi phần độc lập; chọn model nhanh (sonnet/haiku, model nhỏ cho worker).
+- GIẢM THẨM ĐỊNH: KHÔNG gọi giám khảo, không làm mẫu thử trước lô, không vòng sửa. Chỉ chạy check kỹ thuật (kích thước,
+  định dạng, số file) bằng lệnh check; sai thì sửa đúng chỗ sai. Không viết criteria.md dài — vài dòng là đủ.
+- Trả kết quả ngay khi đủ dùng; ghi rõ phần chưa được kiểm tra kỹ.""",
     "saver": """- Ưu tiên TIẾT KIỆM HẠN MỨC. Làm tuần tự, 1 worker tại một thời điểm. Việc nào tự làm được bằng lệnh/script thì không gọi AI.
 - Dùng model nhỏ nhất đủ làm được việc cho worker và sub-agent (--model); chỉ nâng khi đã thất bại 1 lần.
 - Giám khảo: dùng model nhỏ, chỉ chấm sản phẩm cuối, tối đa 1 vòng sửa. Không làm thêm ngoài yêu cầu.""",
@@ -557,7 +563,7 @@ Kết quả ở work/<ID>/vN/ (result.md, status.json, worker.log, file do worke
 ## Quy trình nghiệm thu
 1. TIÊU CHÍ: trước khi làm, viết tasks/criteria.md từ chính yêu cầu của người dùng (sản phẩm phải có gì, đúng gì, định dạng/
    kích thước, style, lỗi cần tránh; đánh dấu BẮT BUỘC). Ngắn, kiểm chứng được. Người dùng đổi yêu cầu -> cập nhật. Không hỏi duyệt.
-2. CHẤM ĐÚNG CHỖ (ưu tiên tốc độ):
+2. CHẤM ĐÚNG CHỖ (ưu tiên tốc độ; chế độ Turbo: bỏ qua mục này, chỉ check kỹ thuật):
    - Văn bản hoặc task nhẹ (phân tích, research, idea, kịch bản, báo cáo, tài liệu chữ): chấm 1 LẦN, nhanh — giám khảo
      model nhỏ (judge --model haiku) hoặc giao gemini đọc soát theo criteria.md. Chỉ sửa lỗi nêu, không chấm lại.
    - Sản phẩm hình/âm thanh/code/bảng tính: check kỹ thuật bằng lệnh check trước; rồi gọi giám khảo 1 LẦN cho CẢ LÔ ở cuối:
@@ -581,7 +587,7 @@ ngắn gọn) vào ./stages/<số thứ tự>.md — giao diện hiện ngay cho
 đủ ý (gộp kết quả các chặng); các chặng sẽ được ẩn khi task xong.
 
 ## Model
-Bạn đang chạy {'Opus' if t.get('mode') == 'fast' else 'Sonnet'}. {'' if t.get('mode') == 'fast' else 'Bước khó cần suy luận sâu (phân tích chiến lược, lập kế hoạch phức tạp, gỡ lỗi khó): giao cho sub-agent (Task/Agent) với model opus, chỉ cho đúng bước đó.'}
+Bạn đang chạy {'Opus' if t.get('mode') == 'fast' else 'Sonnet'}. {'' if t.get('mode') in ('fast', 'turbo') else 'Bước khó cần suy luận sâu (phân tích chiến lược, lập kế hoạch phức tạp, gỡ lỗi khó): giao cho sub-agent (Task/Agent) với model opus, chỉ cho đúng bước đó.'}
 
 ## Tạo ảnh
 Tạo bằng codex ($imagegen) hoặc cách khác có sẵn. Chỉ khi không thể tạo được (lỗi, hết hạn mức): viết prompt vào
