@@ -756,9 +756,10 @@ Tiêu chí đã dùng:
 {CFG.get('instructions', '').strip() or '(không)'}
 
 ## Vai trò
-Bạn là PM: lên kế hoạch, giao việc, kiểm tra, tổng hợp. Bạn VẪN tự viết/biên tập văn bản (ý tưởng, kịch bản, báo cáo, câu chữ).
-Việc làm thật khác — vẽ/xử lý ảnh, xử lý file/bảng tính/tài liệu, code/script, research web dài, đọc nhiều tài liệu lớn — giao
-GPT/Gemini; chỉ tự làm khi rất nhỏ (1–2 lệnh). Nghiệm thu trên file thật, sửa đúng phần lỗi. Task là cuộc trò chuyện nhiều lượt.
+Bạn là PM: lên kế hoạch, giao việc, kiểm tra, tổng hợp; tự viết/biên tập văn bản (ý tưởng, kịch bản, báo cáo, câu chữ).
+Phần quan trọng hoặc cần tư duy (phân tích, quyết định hướng làm, chốt nội dung chính, đánh giá chất lượng): TỰ xử lý để
+đảm bảo kết quả. Việc làm thuần thao tác/khối lượng — vẽ/xử lý ảnh, xử lý file/bảng tính hàng loạt, code/script, research web
+dài — ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật, sửa đúng phần lỗi. Task là cuộc trò chuyện nhiều lượt.
 
 ## Đường dẫn
 - Thư mục hiện tại: nháp/brief/log, bị XÓA khi task xong -> không để sản phẩm ở đây. File người dùng gửi: {tdir(t) / "input"}
@@ -877,35 +878,11 @@ def md_name(t):
     return "AGENTS.md" if t.get("pm") == "codex" else "CLAUDE.md"
 
 
-SESS_TURNS = 6                 # sau 6 lượt trong cùng phiên: tóm tắt rồi mở phiên mới
-
-
-def hist_summary(t):
-    """Tóm tắt task cho phiên mới (không gọi AI): yêu cầu gốc, các lượt gần đây, quyết định đã chốt, file đã tạo."""
-    msgs = [m for m in t.get("messages", []) if m.get("role") in ("user", "claude")]
-    lines = [f"Yêu cầu ban đầu: {t.get('text', '')[:1500]}", "", "Các lượt gần đây:"]
-    for m in msgs[-12:]:
-        txt = re.sub(r"\s+", " ", m.get("text", ""))
-        lines.append(("- Người dùng: " + txt[:500]) if m["role"] == "user" else ("- Kết quả: " + txt[:900]))
-    dec = rjson(wdir(t) / "tasks" / "decisions.json", None) or t.get("decisions") or []
-    ch = [i.get("text", "") for g in dec if isinstance(g, dict) for i in g.get("items", []) if isinstance(i, dict) and i.get("type") == "decision"]
-    if ch:
-        lines += ["", "Quyết định đã chốt:"] + [f"- {x[:200]}" for x in ch[:20]]
-    fs = [f for m in msgs[-6:] for f in (m.get("files") or [])][-25:]
-    if fs:
-        lines += ["", f"File đã tạo (trong {out_dir(t)}): " + ", ".join(fs)]
-    lines += ["", "Thư mục làm việc (work/, tasks/) vẫn còn nguyên từ các lượt trước."]
-    return "\n".join(lines)
-
-
 def build_prompt(t, nxt):
     kind = nxt.get("kind")
     files = nxt.get("files") or []
     fl = f"\nFile mới trong {tdir(t) / 'input'}: {', '.join(files)}." if files else ""
     text = nxt.get("text", "")
-    if t.get("hist") and not t.get("session_started") and kind != "start":
-        return (f"Task đang làm dở — mở phiên mới cho nhanh (đã tóm tắt các lượt trước):\n\n{t['hist']}\n\n"
-                f"Tin nhắn mới của người dùng:\n{text}\n{fl}\nLàm theo {md_name(t)}.")
     if kind == "start" or not t.get("session_started"):
         base = f"Task mới. Yêu cầu của người dùng:\n\n{t['text']}\n"
         if kind != "start" and text:
@@ -945,17 +922,8 @@ def gen_title(t):
 
 
 def start_run(t):
-    nxt0 = t.get("next") or {}
-    if (t.get("session_started") and t.get("sess_turns", 0) >= SESS_TURNS and nxt0.get("kind") in ("followup", "answer")
-            and t.get("kind") != "code"):
-        t["hist"] = hist_summary(t)              # task dài: tóm tắt rồi mở phiên mới (đỡ đọc lại cả lịch sử mỗi lượt)
-        t["session_started"] = False
     if not t.get("session_started"):
-        t["pm"] = pick_pm(t.get("mode")) or "claude"   # chọn khi bắt đầu phiên; phiên đã mở thì giữ AI quản lý cũ
-        t["sess_turns"] = 0
-        if t["pm"] == "codex" and claude_usable():
-            t["_bal_note"] = f"Claude còn {round(week_left('claude') or 0)}% tuần — ChatGPT điều phối để giữ hạn mức Claude"
-    t["sess_turns"] = t.get("sess_turns", 0) + 1
+        t["pm"] = pick_pm() or "claude"         # chọn khi bắt đầu; phiên đã mở thì giữ AI quản lý cũ để nối tiếp được
     t.setdefault("pm", "claude")                # task của bản cũ: phiên Claude
     pm = t["pm"]
     exe = find_bin(pm)
@@ -1014,12 +982,11 @@ def start_run(t):
         for f in dict.fromkeys([str(out_dir(t))] + ([t["pdir"]] if code else []) + drives()):
             args += ["--add-dir", f]
     t.pop("md_changed", None)                   # đã nhắc trong prompt của lượt này
-    t.pop("hist", None)
     t.update(status="running", started=now(), _pause=False, _cancel=False, _quit=False, _redirect=None)
     t["wi"] = tmsg(t, "work", "", status="running", started=now(), started_ts=time.time(), steps=[])
-    if t.get("_bal_note"):
-        step(t, t.pop("_bal_note"))
-    threading.Thread(target=usage_mark, args=(t, work(t), "u0"), daemon=True).start()   # đo mức dùng trước lượt
+    if t.get("u0") is None:                     # đo mức dùng 1 lần khi task bắt đầu (không đo từng lượt cho đỡ tốn)
+        t["u0"] = {}
+        threading.Thread(target=usage_task_start, args=(t,), daemon=True).start()
     tsave(t)
     try:
         proc = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -1295,11 +1262,12 @@ def watch(t, p, nxt):
         registry(force=True)
     except Exception:
         pass
-    try:
-        usage_mark(t, w, "u1")              # đo mức dùng sau lượt -> mức lượt này tốn (≈, task khác chạy cùng lúc cũng tính vào)
-        tsave(t)
-    except Exception as e:
-        dlog(f"usage_mark: {e}")
+    if t.get("status") == "done" and "u0" in t:
+        try:
+            usage_task_done(t)              # task hoàn thành: đo lại -> mức task tốn (≈, task khác chạy cùng lúc cũng tính vào)
+            tsave(t)
+        except Exception as e:
+            dlog(f"usage_task_done: {e}")
 
 
 _ready = {"t": 0.0}
@@ -1880,28 +1848,9 @@ def codex_usable():
     return bool(find_bin("codex")) and bool(c.get("ok"))
 
 
-BALANCE_LEFT = 50          # Claude còn dưới 50% tuần -> task Turbo/Eco do ChatGPT điều phối (nếu ChatGPT còn nhiều hơn)
-
-
-def week_left(ai):
-    w = ((rjson(USAGE_F, {}) or {}).get(ai) or {}).get("week") or {}
-    return w.get("left")
-
-
-def balance_to_codex(mode):
-    """Cân tải: Turbo/Eco + Claude còn < 50% tuần + ChatGPT còn nhiều hơn và dùng được -> ChatGPT làm quản lý."""
-    if norm_mode(mode) not in ("turbo", "eco") or not codex_usable() or usage_block("codex"):
-        return False
-    cl, cx = week_left("claude"), week_left("codex")
-    return cl is not None and cx is not None and cl < BALANCE_LEFT and cx > cl
-
-
 def pick_pm(mode=None):
-    """Ai làm quản lý (PM): Claude gói trả phí như cũ (Turbo/Eco: nhường ChatGPT khi Claude còn < 50% tuần);
-    không có Claude thì ChatGPT (Codex, kể cả gói Free); không có ai -> ''."""
-    if claude_usable():
-        return "codex" if mode and balance_to_codex(mode) else "claude"
-    return "codex" if codex_usable() else ""
+    """Ai làm quản lý (PM): Claude gói trả phí như cũ; không có thì ChatGPT (Codex, kể cả gói Free); không có ai -> ''."""
+    return "claude" if claude_usable() else "codex" if codex_usable() else ""
 
 
 def free_setup():
@@ -2366,6 +2315,7 @@ def task_detail(t):
     d = {k: t.get(k) for k in ("id", "title", "status", "created", "finished", "mode", "kind", "pdir", "installing")}
     d["can_restore"] = bool(t.get("checkpoints"))
     d["judge"] = judge_on(t)
+    d["cost"] = t.get("cost") or {}
     if t.get("need_login") and t["status"] == "queued":
         d["status"] = "login"
     if t["status"] == "queued" and (t.get("hold_until", 0) > time.time() or pm_limit(t)):
@@ -2854,8 +2804,6 @@ def export_log():
                 elif m["role"] == "work":
                     dur = (m.get("ended_ts") or time.time()) - m.get("started_ts", time.time())
                     lines.append(f"- {m.get('started', '')}  LƯỢT LÀM: {fmt(dur)} — {m.get('status')} — {len(m.get('steps', []))} bước")
-                    if m.get("cost"):
-                        lines.append("    mức dùng ≈ " + "; ".join(f"{k} +{v.get('five_hour', 0)}% phiên +{v.get('week', 0)}% tuần" for k, v in m["cost"].items()))
                     for s in m.get("subtasks", []):
                         lines.append(f"    - sub-task {s['id']}: {s['worker'] or '?'} {s['model']}  lần {s['attempt']}  "
                                      f"{fmt(s['seconds']) if s.get('seconds') is not None else '?'}  {s['status']}  {s['error']}")
@@ -2866,6 +2814,9 @@ def export_log():
             for f in tls:
                 z.write(f, f"{t['id']}/{'timeline.log' if f.parent == tdir(t) else 'timeline_dang_lam.log'}")
             lines += timing_summary([x for f in tls for x in f.read_text("utf-8", "replace").splitlines()])
+            if t.get("cost"):
+                lines += ["  Mức dùng cả task ≈ " + "; ".join(f"{k} +{v.get('five_hour', 0)}% phiên +{v.get('week', 0)}% tuần"
+                                                          for k, v in t["cost"].items()), ""]
             for f in [tdir(t) / "task.json", d / "run.log", d / "CLAUDE.md", d / "AGENTS.md"]:
                 if f.is_file():
                     z.write(f, f"{t['id']}/{f.name}")
@@ -4014,25 +3965,24 @@ def usage_snap():
     return out
 
 
-def usage_mark(t, w, key):
-    """Ghi mức dùng trước (u0) / sau (u1) một lượt làm; đủ cả hai thì tính cost = phần tăng (% phiên 5 giờ, % tuần)."""
-    if w is None:
-        return
+def usage_task_start(t):
     try:
-        w[key] = usage_snap()
+        t["u0"] = usage_snap()
     except Exception as e:
         dlog(f"usage_snap: {e}")
-        return
-    if key == "u1" and w.get("u0") is not None:
-        cost = {}
-        for ai, v1 in (w.get("u1") or {}).items():
-            v0 = (w.get("u0") or {}).get(ai) or {}
-            dd = {k: round(v1[k] - v0[k], 1) for k in v1 if k in v0 and v1[k] - v0[k] >= 0}
-            if dd and any(x > 0 for x in dd.values()):
-                cost[ai] = dd
-        w["cost"] = cost
-        w.pop("u0", None)
-        w.pop("u1", None)
+
+
+def usage_task_done(t):
+    """Phần % tăng từ lúc task bắt đầu tới khi hoàn thành; task được giao tiếp sau đó thì đo lại và cộng dồn."""
+    u0, u1 = t.get("u0") or {}, usage_snap()
+    cost = t.get("cost") or {}
+    for ai, v1 in u1.items():
+        v0 = u0.get(ai) or {}
+        for k in v1:
+            if k in v0 and v1[k] - v0[k] > 0:
+                cost.setdefault(ai, {})[k] = round(cost.get(ai, {}).get(k, 0) + v1[k] - v0[k], 1)
+    t["cost"] = cost
+    t["u0"] = u1                                # mốc cho lần giao tiếp theo (không phải đo lại lúc bắt đầu)
 
 
 def usage_counts():
