@@ -595,7 +595,7 @@ ngắn gọn) vào ./stages/<số thứ tự>.md — giao diện hiện ngay cho
 
 ## Model
 Bạn chạy Opus, mức suy nghĩ theo chế độ (Pro high, Balanced/Turbo medium, Eco low). App TỰ chọn model cho worker theo chế độ
-(ChatGPT: GPT-6.2 Astra/Sol + mức suy nghĩ; Gemini: Neon medium ở Pro, Hydrogen high/medium/low ở Balanced/Turbo/Eco;
+(ChatGPT: GPT-6.2 Sol + mức suy nghĩ; Gemini: Neon medium ở Pro, Hydrogen high/medium/low ở Balanced/Turbo/Eco;
 gói Free/thiếu model thì tự lùi model có sẵn) và tự hạ khi sắp hết hạn mức —
 KHÔNG truyền --model cho worker trừ khi có lý do rõ. {"Bước QUÁ khó (đã thử mà không ra): ghi xhigh vào tasks/effort.txt -> lượt sau bạn và worker chạy mức cao nhất (Gemini Neon high)." if t.get('mode') == 'fast' else ""}
 
@@ -2590,8 +2590,8 @@ EFFORTS = ["low", "medium", "high", "xhigh"]
 MODEL_PLAN = {
     "claude": {"fast": ("opus", "high"), "balanced": ("opus", "medium"), "turbo": ("opus", "medium"), "saver": ("opus", "low")},
     # ChatGPT: thử lần lượt (gói Plus có GPT-6.2; gói Free chỉ có dòng Luna) -> cuối cùng là model mặc định của tài khoản
-    "codex": {"fast": (["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"], "high"),
-              "balanced": (["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"], "medium"),
+    "codex": {"fast": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "high"),
+              "balanced": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "medium"),
               "turbo": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "low"),
               "saver": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "low")},
     # Gemini: Neon cho Pro (bước quá khó: high), Hydrogen cho các chế độ khác; chỉ dùng model mà `agy models` liệt kê
@@ -2639,8 +2639,6 @@ def pick_model(ai, mode, hard=False):
         eff = {"claude": "xhigh", "codex": "xhigh", "gemini": "high"}[ai]
     elif pressure(ai) and eff != "low":
         eff = EFFORTS[max(0, EFFORTS.index(eff) - 1)]
-        if ai == "codex" and mode in ("fast", "balanced"):
-            m = m[1:] + m[:1]
     if ai == "gemini":
         return gem_pick(m, eff), eff
     if ai == "codex":
