@@ -966,16 +966,16 @@ function workBlock(m, i) {
     cancelled: ["circle-x", "Đã hủy"], failed: ["circle-x", "Lỗi"], limit: ["circle-pause", "Hết hạn mức"] }[m.status] || ["circle-check", "Xong"];
   const head = live ? `<span class="spin"></span><b>Đang làm</b>` : `<span class="wic ${m.status}">${lu(ST2[0])}</span><b>${ST2[1]}</b>`;
   const right = live ? `${m.progress != null ? `<span class="wpct">${m.progress}%</span>` : ""}<span class="wtime" data-timer="${m.started_ts}">${clock(el)}</span>` : `<span class="wtime">${dur(el)}</span>`;
-  const subs = m.subtasks || [], who = (w) => WN[w] || w || "";
+  const subs = m.subtasks || [], who = (w, mdl) => String(mdl || "").startsWith("gpt:") ? "ChatGPT" : WN[w] || w || "";
   let rows = [];
   if (live) {
     const narr = (m.steps || []).filter((s) => !TOOL_STEP.test(s));
     const cur = narr[narr.length - 1];
     if (cur) rows.push([`<span class="spin sm"></span>`, cur, "Claude"]);
-    subs.filter((s) => s.status === "running").forEach((s) => rows.push([`<span class="spin sm"></span>`, s.title || s.id, who(s.worker)]));
+    subs.filter((s) => s.status === "running").forEach((s) => rows.push([`<span class="spin sm"></span>`, s.title || s.id, who(s.worker, s.model)]));
     if (!rows.length) rows.push([`<span class="spin sm"></span>`, (m.steps || []).length ? m.steps[m.steps.length - 1] : "Đang khởi động…", ""]);
   } else {
-    subs.forEach((s) => rows.push([`<span class="wic ${s.status === "completed" ? "done" : s.status}">${lu(s.status === "completed" ? "check" : ["failed", "rejected", "timeout"].includes(s.status) ? "x" : "check")}</span>`, s.title || s.id, who(s.worker)]));
+    subs.forEach((s) => rows.push([`<span class="wic ${s.status === "completed" ? "done" : s.status}">${lu(s.status === "completed" ? "check" : ["failed", "rejected", "timeout"].includes(s.status) ? "x" : "check")}</span>`, s.title || s.id, who(s.worker, s.model)]));
     if (!rows.length) (m.steps || []).filter((s) => !TOOL_STEP.test(s)).slice(-4).forEach((s) => rows.push([`<span class="wic done">${lu("check")}</span>`, s, "Claude"]));
   }
   const body = open ? `<div class="wrows">${rows.map(([ic, txt, ag]) => `<div class="wrow">${ic}<span class="wl" title="${esc(txt)}">${esc(txt)}</span><span class="wa">${esc(ag)}</span></div>`).join("")}

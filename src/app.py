@@ -773,7 +773,11 @@ tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy cuộc trò chuy
   "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>] [--hard]
   --write: Gemini được tạo file/ảnh. --hard: việc khó (Balanced: Gemini lên mức high; giao lại vì lỗi cũng tự lên high).
   --edit / --drive: xem mục sửa file / Google Drive.
-Kết quả: work/<ID>/vN/ (result.md, status.json, file worker tạo). Sửa lỗi: giao lại cùng --out. App tự chọn model — không truyền --model.
+NHIỀU VIỆC: giao hết cả lô liền một lượt bằng --bg (trả về ngay, worker chạy nền), rồi chờ MỘT lần cho cả lô:
+  "{py}" "{app}" wait work/S1 work/S2 work/S3      (in kết quả từng việc; không chờ/kiểm tra từng cái một)
+Gemini lỗi / hết lượt / báo xong mà không ra ảnh: app TỰ giao GPT làm lại ngay trong cùng lệnh (status via=gpt-fallback) —
+KHÔNG cần tự kiểm tra rồi giao lại. Kết quả: work/<ID>/vN/ (result.md, status.json, file worker tạo; GPT làm thay thì ở vN/gpt/).
+Sửa lỗi: giao lại cùng --out. App tự chọn model — không truyền --model.
 
 ## Chia việc (Gemini nhanh, GPT chính xác hơn)
 - Research web, đối thủ, xu hướng: Gemini. Code, script, số liệu, Excel/Word/PowerPoint: GPT.
@@ -1005,6 +1009,7 @@ def summarize_tool(b):
     m = re.search(r" worker (codex|gemini) .*?--out\s+\"?([^\s\"]+)", cmd_)
     if m:
         sid = re.split(r"[\\/]", m.group(2).rstrip("/\\"))[-1]
+        sid = "nhiều việc" if "$" in sid or "%" in sid else sid
         return f"Giao {sid} cho {'ChatGPT' if m.group(1) == 'codex' else 'Gemini'}" + (" (sửa file trực tiếp)" if " --edit" in cmd_ else "") + (" (sửa file Google)" if " --drive" in cmd_ else "")
     if " check " in cmd_:
         return "Kiểm tra kết quả"
@@ -2749,8 +2754,7 @@ def timing_summary(lines):
             rows.append((datetime.datetime.strptime(p[0], "%Y-%m-%d %H:%M:%S").timestamp(), p[1] if len(p) > 1 else ""))
         except Exception:
             pass
-    rows.sort()
-    by = {}
+    by = {}                                   # giữ đúng thứ tự trong nhật ký (sắp xếp lại làm lệch khi trùng giây)
     for (t0, a), (t1, _) in zip(rows, rows[1:]):
         if 0 <= t1 - t0 <= 1800 and a != "(xong lượt)":
             k = ("Giao worker + chờ" if a.startswith("Giao ") else "Chạy lệnh" if a.startswith("Chạy") else
@@ -3202,6 +3206,41 @@ DRIVE_APPROVE = ["-c", 'apps._default.default_tools_approval_mode="approve"']
 GOOGLE_LINK = re.compile(r"https?://(?:docs|drive|sheets)\.google\.com/", re.I)
 
 
+IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+
+def gemini_fallback(st, v, a, edit, want_img):
+    """Gemini lỗi / hết lượt / báo xong mà không ra ảnh -> app tự giao GPT làm lại NGAY trong cùng lệnh
+    (không phải quay về Claude, đỡ một vòng suy nghĩ). Gemini không vẽ được ảnh -> nhớ 3 giờ, lần sau giao thẳng GPT."""
+    no_img = want_img and st.get("status") == "completed" and not any(
+        f.suffix.lower() in IMG_EXT for f in v.rglob("*") if "_backup" not in f.parts) and not any(
+        str(x).lower().endswith(IMG_EXT) for x in st.get("edited") or [])
+    if no_img:
+        wjson(DATA / "gem_img_fail.json", {"at": int(time.time())})
+    if st.get("status") not in ("limit", "failed", "timeout") and not no_img:
+        return
+    cfgd = rjson(CFG_FILE, {}) or {}
+    if not find_bin("codex") or ((cfgd.get("ais") or {}).get("codex") or {}).get("ok") is False or usage_block("codex", fresh=True):
+        return                                   # không có GPT dùng được -> để Claude quyết
+    gv = v / "gpt"
+    gv.mkdir(parents=True, exist_ok=True)
+    cmd = [sys.executable, str(APP), "worker", "codex", "--task", str(v / "TASK.md"), "--out", str(v / "gpt_out"),
+           "--vdir", str(gv), "--timeout", str(a.timeout)] + (["--edit", str(edit)] if edit else [])
+    try:
+        subprocess.run(cmd, cwd=str(Path.cwd()), env=dict(os.environ, AIO_WCHILD="1", AIO_NOFALLBACK="1"),
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=a.timeout + 180, creationflags=NO_WINDOW)
+    except Exception as e:
+        dlog(f"gemini_fallback: {e}")
+    gs = rjson(gv / "status.json", {}) or {}
+    if (gv / "result.md").is_file():
+        shutil.copy2(gv / "result.md", v / "result.md")
+    st["gemini_error"] = ("Gemini không tạo ra ảnh" if no_img else st.get("error", ""))[:300]
+    st.update(status=gs.get("status") or "failed", model="gpt:" + str(gs.get("model") or "?"), via="gpt-fallback",
+              error=gs.get("error", ""), seconds=(st.get("seconds") or 0) + (gs.get("seconds") or 0))
+    if gs.get("edited"):
+        st["edited"] = gs["edited"]
+
+
 def edit_refused(p):
     """Thư mục quá rộng/nguy hiểm để cho worker sửa thẳng -> lý do từ chối ('' = được phép)."""
     if not p.is_dir():
@@ -3481,6 +3520,7 @@ def cmd_worker(argv):
     ap.add_argument("--vdir")
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--hard", action="store_true")
+    ap.add_argument("--bg", action="store_true", help="giao xong trả về ngay (worker chạy nền); chờ cả lô bằng lệnh wait")
     ap.add_argument("--drive", action="store_true", help="ChatGPT được tự duyệt lệnh ghi của kết nối Google Drive (sửa thẳng Sheets/Docs/Slides)")
     ap.add_argument("--edit", help="thư mục worker được SỬA TRỰC TIẾP (file của người dùng, thư mục OUTPUT, file Drive đã tải về)")
     a = ap.parse_args(argv)
@@ -3509,8 +3549,14 @@ def cmd_worker(argv):
                  "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=os.name!='nt')",
                  str(flags), *child]
         subprocess.run(spawn, env=dict(os.environ, AIO_WCHILD="1"), creationflags=NO_WINDOW, cwd=str(proj))
+        if a.bg:                            # giao nhanh cả lô, chờ 1 lần: wait work/S1 work/S2 ...
+            print(json.dumps({**st, "status": "running", "wait": str(out)}, ensure_ascii=False))
+            sys.exit(0)
         return wait_status(v, a.timeout + 180)
     exe = find_bin("codex" if a.worker == "codex" else "agy")
+    task_txt = task.read_text(encoding="utf-8") if task.exists() else ""
+    want_img = a.worker == "gemini" and (a.write or bool(edit)) and bool(IMG_RE.search(task_txt))
+    skip_gem = want_img and time.time() - float((rjson(DATA / "gem_img_fail.json", {}) or {}).get("at", 0)) < 3 * 3600
     bad_edit = edit_refused(edit) if edit else ""
     cfgd = rjson(CFG_FILE, {}) or {}
     key = cfgd.get("gemini_key", "") if a.worker == "gemini" else ""
@@ -3530,6 +3576,9 @@ def cmd_worker(argv):
                                                    "dùng lại lúc " + datetime.datetime.fromtimestamp(ub).strftime("%H:%M %d/%m")))
     elif not task.exists():
         st.update(status="failed", error=f"Không thấy {task}")
+    elif skip_gem and not os.environ.get("AIO_NOFALLBACK"):
+        (v / "TASK.md").write_text(task_txt, encoding="utf-8")
+        st.update(status="failed", error="Gemini vừa không tạo được ảnh (trong 3 giờ qua) — giao thẳng GPT")
     elif not exe and not use_api:
         st.update(status="failed", error="Worker chưa cài")
     elif use_api:
@@ -3625,6 +3674,8 @@ def cmd_worker(argv):
     if key and not use_api and not edit and "exit_code" in st and st.get("status") in ("limit", "failed"):   # Antigravity hết lượt/lỗi -> thử API
         st["agy_error"] = st.pop("error", "")[:300]
         api_worker(st, v, key, (v / "TASK.md").read_text(encoding="utf-8") if (v / "TASK.md").exists() else "", a)
+    if a.worker == "gemini" and not os.environ.get("AIO_NOFALLBACK"):
+        gemini_fallback(st, v, a, edit, want_img)
     st["files"] = sorted(str(f.relative_to(v)).replace("\\", "/") for f in v.rglob("*")
                          if f.is_file() and f.name not in ("TASK.md", "worker.log", "status.json", "result.md")
                          and "_backup" not in f.relative_to(v).parts)
@@ -4021,12 +4072,29 @@ def wait_status(v, limit=1200):
 
 
 def cmd_wait(argv):
-    """wait <thư mục vN hoặc thư mục --out>: chờ worker đang chạy (vd sau khi phiên bị ngắt) thay vì chạy lại."""
-    p = Path(argv[0]).resolve()
-    if not (p / "status.json").exists():
-        vs = sorted((x for x in p.glob("v*") if x.is_dir() and x.name[1:].isdigit()), key=lambda x: int(x.name[1:]))
-        p = vs[-1] if vs else p
-    wait_status(p, int(argv[1]) if len(argv) > 1 else 1200)
+    """wait <thư mục> [thư mục ...] [giây]: chờ (cả lô) worker đang chạy xong rồi in kết quả từng cái."""
+    limit = next((int(x) for x in argv if x.isdigit()), 1500)
+    dirs = []
+    for x in argv:
+        if x.isdigit():
+            continue
+        p = Path(x).resolve()
+        if not (p / "status.json").exists():
+            vs = sorted((y for y in p.glob("v*") if y.is_dir() and y.name[1:].isdigit()), key=lambda y: int(y.name[1:]))
+            p = vs[-1] if vs else p
+        dirs.append(p)
+    if len(dirs) == 1:
+        wait_status(dirs[0], limit)
+    t0, out = time.time(), {}
+    while time.time() - t0 < limit:
+        out = {str(p): rjson(p / "status.json", {}) or {} for p in dirs}
+        if all(x.get("status") not in (None, "running") for x in out.values()):
+            break
+        time.sleep(3)
+    res = [{"dir": k, **{kk: vv for kk, vv in x.items() if kk in ("status", "worker", "model", "error", "files", "edited", "via", "seconds")}}
+           for k, x in out.items()]
+    print(json.dumps(res, ensure_ascii=False))
+    sys.exit(0 if all(x.get("status") == "completed" for x in res) else 1)
 
 
 # ---------------------------------------------------------------- check (Claude gọi)
