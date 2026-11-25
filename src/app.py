@@ -595,8 +595,9 @@ ngắn gọn) vào ./stages/<số thứ tự>.md — giao diện hiện ngay cho
 
 ## Model
 Bạn chạy Opus, mức suy nghĩ theo chế độ (Pro high, Balanced/Turbo medium, Eco low). App TỰ chọn model cho worker theo chế độ
-(ChatGPT: GPT-6.2 Astra/Sol + mức suy nghĩ; Gemini: Neon ở Pro, Hydrogen ở chế độ khác) và tự hạ khi sắp hết hạn mức —
-KHÔNG truyền --model cho worker trừ khi có lý do rõ. {"Bước QUÁ khó (đã thử mà không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if t.get('mode') == 'fast' else ""}
+(ChatGPT: GPT-6.2 Astra/Sol + mức suy nghĩ; Gemini: Neon medium ở Pro, Hydrogen high/medium/low ở Balanced/Turbo/Eco;
+gói Free/thiếu model thì tự lùi model có sẵn) và tự hạ khi sắp hết hạn mức —
+KHÔNG truyền --model cho worker trừ khi có lý do rõ. {"Bước QUÁ khó (đã thử mà không ra): ghi xhigh vào tasks/effort.txt -> lượt sau bạn và worker chạy mức cao nhất (Gemini Neon high)." if t.get('mode') == 'fast' else ""}
 
 ## Tạo ảnh
 Tạo bằng codex ($imagegen) hoặc cách khác có sẵn. Chỉ khi không thể tạo được (lỗi, hết hạn mức): viết prompt vào
@@ -714,12 +715,11 @@ def start_run(t):
     args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
             "--permission-mode", "acceptEdits",
             "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite"]
-    cm, ce = pick_model("claude", t.get("mode", "balanced"))
     ef = (wdir(t) / "tasks" / "effort.txt")
-    if t.get("mode") == "fast" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh":
-        ce = "xhigh"                                  # Claude tự xin mức cao nhất cho bước quá khó (chỉ ở Pro)
+    hard = t.get("mode") == "fast" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh"
+    cm, ce = pick_model("claude", t.get("mode", "balanced"), hard)   # Pro + bước quá khó: mức cao nhất
     args += ["--model", cm]
-    t["_effort"] = ce
+    t["_effort"], t["_hard"] = ce, hard
     if t.get("session_started"):
         args += ["--resume", t["session"]]
     else:
@@ -734,6 +734,7 @@ def start_run(t):
         proc = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                                 env=dict(os.environ, AIO_INPUT=str(tdir(t) / "input"), AIO_MODE=t.get("mode", "balanced"),
+                                         AIO_HARD="1" if t.pop("_hard", False) else "",
                                          CLAUDE_CODE_EFFORT_LEVEL=t.pop("_effort", "medium") or "medium"),
                                 creationflags=NO_WINDOW | BELOW_NORMAL)
     except Exception as e:
@@ -2470,14 +2471,14 @@ def cmd_worker(argv):
                       "Cuối cùng liệt kê file đã tạo và cách đã kiểm tra.")
             cmd = [exe, "exec", "--skip-git-repo-check", *CODEX_SANDBOX, "-C", str(v),
                    "--output-last-message", str(v / "result.md")]
-            mods, eff = pick_model("codex", os.environ.get("AIO_MODE", "balanced"))
+            mods, eff = pick_model("codex", os.environ.get("AIO_MODE", "balanced"), os.environ.get("AIO_HARD") == "1")
             mods = [a.model] if a.model else list(mods)
             base_cmd = cmd + ["-c", f'model_reasoning_effort="{eff}"']
             cands = [base_cmd + ["-m", m_, prompt] for m_ in mods] + [base_cmd + [prompt]]   # model không dùng được -> thử model kế, cuối cùng mặc định
             cmd = cands[0]
             cwd = v
         else:
-            gm, _ = pick_model("gemini", os.environ.get("AIO_MODE", "balanced"))
+            gm, _ = pick_model("gemini", os.environ.get("AIO_MODE", "balanced"), os.environ.get("AIO_HARD") == "1")
             cmd = [exe, "-p", text, "--output-format", "json"]
             cands = ([cmd + ["--model", a.model or gm]] if (a.model or gm) else []) + [cmd]
             cmd = cands[0]
@@ -2489,6 +2490,10 @@ def cmd_worker(argv):
             bad_model = code != 0 and "model" in low_ and any(k in low_ for k in (
                 "not found", "not supported", "does not exist", "invalid", "unknown", "not available", "no access",
                 "flag provided but not defined"))
+            if bad_model:                       # nhớ model không dùng được để lần sau không thử lại (đỡ chậm)
+                um = next((cmd[j + 1] for j in range(len(cmd) - 1) if cmd[j] in ("-m", "--model")), None)
+                if um:
+                    mark_bad_model(a.worker, um)
             if not bad_model or i_ == len(cands) - 1:
                 break
         st["model"] = next((cmd[j + 1] for j in range(len(cmd) - 1) if cmd[j] in ("-m", "--model")), "mặc định")
@@ -2584,10 +2589,16 @@ def limits():
 EFFORTS = ["low", "medium", "high", "xhigh"]
 MODEL_PLAN = {
     "claude": {"fast": ("opus", "high"), "balanced": ("opus", "medium"), "turbo": ("opus", "medium"), "saver": ("opus", "low")},
-    "codex": {"fast": (["gpt-6.2-astra", "gpt-6.2-sol"], "high"), "balanced": (["gpt-6.2-astra", "gpt-6.2-sol"], "medium"),
-              "turbo": (["gpt-6.2-sol", "gpt-6-astra"], "low"), "saver": (["gpt-6.2-sol", "gpt-6-astra"], "low")},
-    "gemini": {"fast": "neon", "balanced": "hydrogen", "turbo": "hydrogen", "saver": "hydrogen"},
+    # ChatGPT: thử lần lượt (gói Plus có GPT-6.2; gói Free chỉ có dòng Luna) -> cuối cùng là model mặc định của tài khoản
+    "codex": {"fast": (["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"], "high"),
+              "balanced": (["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"], "medium"),
+              "turbo": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "low"),
+              "saver": (["gpt-6.2-sol", "gpt-6-sol", "gpt-6-luna"], "low")},
+    # Gemini: Neon cho Pro (bước quá khó: high), Hydrogen cho các chế độ khác; chỉ dùng model mà `agy models` liệt kê
+    "gemini": {"fast": ("neon", "medium"), "balanced": ("hydrogen", "high"), "turbo": ("hydrogen", "medium"),
+               "saver": ("hydrogen", "low")},
 }
+GEM_FALLBACK = {"neon": ["hydrogen", "flash"], "hydrogen": ["flash", "neon"]}
 
 
 def pressure(ai):
@@ -2597,16 +2608,43 @@ def pressure(ai):
                         or time.time() - d.get("until", 0) < 6 * 3600)
 
 
-def pick_model(ai, mode):
+def bad_models(ai):
+    return set((rjson(DATA / "models_bad.json", {}) or {}).get(ai) or [])
+
+
+def mark_bad_model(ai, m):
+    f = DATA / "models_bad.json"
+    d = rjson(f, {}) or {}
+    d[ai] = sorted(set(d.get(ai) or []) | {m})
+    try:
+        wjson(f, d)
+    except Exception:
+        pass
+
+
+def gem_pick(key, eff):
+    """Chọn đúng tên model Gemini có trong `agy models` (theo dòng + mức suy nghĩ); không có thì lùi dòng khác."""
+    ls = [x for x in ((rjson(DATA / "config.json", {}) or {}).get("gemini_list") or []) if x not in bad_models("gemini")]
+    for k in [key] + GEM_FALLBACK.get(key, []):
+        hit = [x for x in ls if k in x.lower()]
+        if hit:
+            same = [x for x in hit if eff and eff in x.lower()]
+            return (same or hit)[0]
+    return None                                     # không có danh sách -> để agy tự chọn model mặc định
+
+
+def pick_model(ai, mode, hard=False):
     m, eff = MODEL_PLAN[ai].get(mode) or MODEL_PLAN[ai]["balanced"]
-    if ai == "gemini":
-        if pressure(ai):
-            m = "hydrogen"
-        return (rjson(DATA / "config.json", {}) or {}).get("gemini_models", {}).get(m), None
-    if pressure(ai) and eff != "low":
+    if hard:
+        eff = {"claude": "xhigh", "codex": "xhigh", "gemini": "high"}[ai]
+    elif pressure(ai) and eff != "low":
         eff = EFFORTS[max(0, EFFORTS.index(eff) - 1)]
-        if ai == "codex":
-            m = m[1:] + m[:1] if mode in ("fast", "balanced") else m
+        if ai == "codex" and mode in ("fast", "balanced"):
+            m = m[1:] + m[:1]
+    if ai == "gemini":
+        return gem_pick(m, eff), eff
+    if ai == "codex":
+        m = [x for x in m if x not in bad_models("codex")]
     return m, eff
 
 
@@ -2631,16 +2669,16 @@ def gemini_models():
         out = _run_hidden([exe, "models"], 40).stdout or ""
     except Exception:
         return
-    found = {}
+    found = []
     for line in out.splitlines():
-        low = line.lower()
-        for key in ("neon", "hydrogen", "carbon"):
-            if key in low and key not in found:
-                ids = re.findall(r"[a-z0-9][a-z0-9.\-]*" + key + r"[a-z0-9.\-]*", low)
-                q = re.findall(r'"([^"]+)"', line)
-                found[key] = ids[0] if ids else (q[0] if q else line.strip().split("  ")[0].strip(" -*•"))
+        l2 = line.strip().strip("-*•> ").strip()
+        if not l2 or not re.search(r"[a-z]", l2, re.I) or l2.lower().startswith(("available", "usage", "model", "name ")):
+            continue
+        q = re.findall(r'"([^"]+)"', l2)
+        ids = re.findall(r"\b[a-z0-9]+(?:[.\-][a-z0-9]+)+\b", l2.lower())
+        found.append(q[0] if q else (ids[0] if ids and any(c.isalpha() for c in ids[0]) else re.split(r"\s{2,}|\t", l2)[0]))
     if found:
-        CFG["gemini_models"] = found
+        CFG["gemini_list"] = found
         save_cfg()
     dlog(f"agy models -> {found}; raw: {out[:400]}")
 
