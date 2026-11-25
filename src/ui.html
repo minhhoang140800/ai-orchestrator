@@ -110,8 +110,6 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .accrow{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
 .accrow .n{flex:1;min-width:0}.accrow small{display:block;color:var(--mute);font-size:12px;overflow-wrap:anywhere}
 .accrow small.bad{color:var(--bad)}
-.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-right:4px}
-.seg button{border:0;border-radius:0;background:transparent;padding:4px 8px;color:var(--mute)}.seg button.on{background:#ececea;color:var(--ink,#222)}
 .kchip{display:inline-block;padding:1px 7px;border:1px solid var(--line);border-radius:6px;font-size:12px;color:var(--mute);margin-right:6px}
 .inst{margin-top:8px;font-size:13px}.inst li{margin:2px 0}
 .plan{display:inline-block;margin-left:6px;padding:0 6px;border:1px solid var(--line);border-radius:6px;font-size:11px;color:var(--mute);font-weight:500}
@@ -204,7 +202,7 @@ main{background:var(--bg)}
 .pv button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;padding:0;border-radius:50%;border:0;background:var(--ink);color:#fff;font-size:13px;line-height:20px}
 .msel{position:relative}.mbtn{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;border-radius:6px;padding:6px 8px;font:inherit;font-size:13px;font-weight:500;color:var(--mute);cursor:pointer}.mbtn:hover{background:var(--hover);color:var(--ink)}.mbtn .i{width:16px;height:16px}
 .pop{display:none;position:absolute;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.08);padding:6px;z-index:20}.pop.show{display:block}
-.mmenu{right:0;bottom:calc(100% + 6px);min-width:300px}
+.mmenu{right:0;bottom:calc(100% + 6px);min-width:300px}.mmenu.down{bottom:auto;top:calc(100% + 6px)}
 .pop button{display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;border:0;background:transparent;border-radius:6px;padding:8px 10px;font:inherit;color:var(--ink);cursor:pointer}.pop button:hover{background:var(--hover)}.pop button.on{background:var(--acc2)}
 .mmenu .ck{width:18px;flex:none;margin-top:1px}.mmenu .ck .i{width:18px;height:18px}.pop b{display:block;font-weight:500}.pop small{display:block;color:var(--mute);font-size:12px;margin-top:1px}
 .pmenu{right:0;top:calc(100% + 6px);width:340px}.pmenu .sep{border-top:1px solid var(--line);margin:6px 0}
@@ -316,8 +314,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const ST = { login: "Chờ đăng nhập", queued: "Chờ", running: "Đang làm", waiting: "Cần bạn", paused: "Tạm dừng", done: "Xong", failed: "Lỗi", cancelled: "Đã hủy", completed: "Đạt", rejected: "Chưa đạt", limit: "Hết hạn mức", timeout: "Quá giờ", stopped: "Đã dừng" };
 const AIN = { claude: "Claude", codex: "ChatGPT / Codex", gemini: "Gemini" };
 const WN = { codex: "ChatGPT", gemini: "Gemini", judge: "Chấm độc lập" };
-const PH_NEW = "Giao việc đi, Claude chịu được";
-const PH_MORE = "Giao thêm việc đi, Claude chịu được";
+const PH_NEW = "Giao việc đi, Maestro chịu được";
+const PH_MORE = "Giao thêm việc đi, Maestro chịu được";
 const I = {
   chat: '<svg class="i" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></svg>',
   code: '<svg class="i" viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg>',
@@ -585,30 +583,26 @@ function renderSide() {
 function composer(id, ph) {
   return `<div class="comp" id="${id}"><div class="atts" id="atts"></div>
     <textarea id="txt" placeholder="${ph}" aria-label="Tin nhắn"></textarea>
-    <div class="bar">${id === "homeComp" ? `<span class="seg" role="group" aria-label="Loại việc"><button id="kChat" type="button" title="Chat: giao việc bình thường">${I.chat}</button><button id="kCode" type="button" title="Code: sửa code, chạy thử như Claude Code">${I.code}</button></span><button class="ghost" id="bDir" type="button" hidden></button>` : ""}<span class="msel"><button class="ghost" id="bFile" title="Đính kèm (hoặc dán / kéo thả)" aria-label="Đính kèm file">${I.attach}Đính kèm</button><div class="pop tmenu" id="tplMenu" role="menu"></div></span>
+    <div class="bar"><span class="msel"><button class="ghost" id="bFile" title="Đính kèm (hoặc dán / kéo thả)" aria-label="Đính kèm file">${I.attach}Đính kèm</button><div class="pop tmenu" id="tplMenu" role="menu"></div></span>
       <span style="flex:1"></span><span class="hint" id="cHint"></span>
       <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="pop mmenu" id="modeMenu" role="menu"></div></span>
       <button class="pri sq" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
-const MODE = { pro: ["Pro", "Suy nghĩ sâu nhất, chấm kỹ, tốn hạn mức hơn"], balanced: ["Balanced", "Cân bằng chất lượng và tốc độ"], turbo: ["Turbo", "Nhanh nhất, giảm thẩm định"], eco: ["Eco", "Ít hạn mức nhất, chậm hơn"] };
+const MODE = { pro: ["Pro", "Suy nghĩ sâu nhất, chấm kỹ, tốn hạn mức hơn"], balanced: ["Balanced", "Cân bằng chất lượng và tốc độ"], turbo: ["Turbo", "Nhanh nhất, giảm thẩm định"], eco: ["Eco", "Ít hạn mức nhất, chậm hơn"], code: ["Code", "Sửa code trong thư mục dự án, tự chạy thử (Opus)"] };
 const normMode = m => ({ fast: "pro", saver: "eco" })[m] || (MODE[m] ? m : "balanced");
 const MICON = {
   pro: '<svg class="i" viewBox="0 0 24 24"><path d="M9.5 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"/><path d="M12.5 9h2a2 2 0 0 0 2-2M12.5 14h3a2 2 0 0 1 2 2v1M16.5 11h3"/></svg>',
   balanced: '<svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M6 4v11.8M18 8.2a8 8 0 0 1-8 8H8.2"/></svg>',
   turbo: '<svg class="i" viewBox="0 0 24 24"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/></svg>',
-  eco: '<svg class="i" viewBox="0 0 24 24"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14z"/><path d="M5 19l7-7"/></svg>' };
-let curMode = "balanced", curKind = lsGet("kind") === "code" ? "code" : "";
+  eco: '<svg class="i" viewBox="0 0 24 24"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14z"/><path d="M5 19l7-7"/></svg>',
+  code: '<svg class="i" viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg>' };
+let curMode = "balanced";
 function lsGet(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-function paintKind() {       // Chat / Code: Code mode cần thư mục dự án, dùng Opus (không chọn chế độ)
-  if (!$("kChat")) return;
-  $("kChat").classList.toggle("on", curKind !== "code"); $("kCode").classList.toggle("on", curKind === "code");
-  const p = lsGet("pdir"), name = p ? p.split(/[\\/]/).filter(Boolean).pop() : "";
-  $("bDir").hidden = curKind !== "code"; $("bDir").innerHTML = `${I.folder}${esc(name || "Chọn thư mục dự án")}`; $("bDir").title = p || "Thư mục chứa code cần sửa";
-  $("modeBtn").parentElement.style.display = curKind === "code" ? "none" : "";
-  if ($("txt")) $("txt").placeholder = curKind === "code" ? "Mô tả việc cần làm với code: sửa lỗi, thêm tính năng, chạy thử…" : PH_NEW;
+let picking = false;          // hộp chọn thư mục của máy: không mở 2 hộp cùng lúc
+function paintKind() {       // chế độ Code: Maestro tự tạo thư mục dự án mới (ghi đường dẫn nếu muốn sửa dự án có sẵn)
+  if ($("homeComp") && $("txt")) $("txt").placeholder = curMode === "code" ? "Mô tả việc cần làm với code — Maestro tự tạo thư mục dự án mới (sửa dự án có sẵn: ghi đường dẫn)" : PH_NEW;
 }
-async function pickDir() { const r = await api("/api/pick", {}); if (r.path) { lsSet("pdir", r.path); paintKind(); } }
 function paintMode() {
   if (!$("modeBtn")) return;
   $("modeBtn").innerHTML = `${MICON[curMode]}${MODE[curMode][0]}<svg class="i" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>`;
@@ -640,19 +634,22 @@ function bindComposer(onSend) {
   });
   curMode = normMode(c.id === "homeComp" ? localStorage.getItem("mode") : (T && T.mode));
   paintMode();
-  if (c.id !== "homeComp" && T && T.kind === "code") $("modeBtn").parentElement.style.display = "none";   // Code mode: luôn Opus
-  if (c.id === "homeComp") {
-    paintKind();
-    $("kChat").onclick = () => { curKind = ""; lsSet("kind", ""); paintKind(); };
-    $("kCode").onclick = () => { curKind = "code"; lsSet("kind", "code"); paintKind(); if (!lsGet("pdir")) pickDir(); };
-    $("bDir").onclick = () => pickDir();
-  }
-  $("modeBtn").onclick = (e) => { e.stopPropagation(); $("modeMenu").classList.toggle("show"); };
+  if (c.id !== "homeComp" && T && T.kind === "code") $("modeBtn").parentElement.style.display = "none";   // task Code: không đổi chế độ
+  if (c.id === "homeComp") paintKind();
+  $("modeBtn").onclick = (e) => {      // menu mở lên trên; phía trên không đủ chỗ (trang chủ) thì mở xuống dưới
+    e.stopPropagation(); const m = $("modeMenu"); m.classList.remove("down"); m.style.maxHeight = ""; m.classList.toggle("show");
+    if (!m.classList.contains("show")) return;
+    const up = m.getBoundingClientRect().top, below = innerHeight - $("modeBtn").getBoundingClientRect().bottom;
+    if (up < 8 && below > $("modeBtn").getBoundingClientRect().top) m.classList.add("down");   // bên dưới rộng hơn -> mở xuống
+    const r = m.getBoundingClientRect();
+    if (r.top < 8 || r.bottom > innerHeight - 8) { m.style.maxHeight = (m.classList.contains("down") ? innerHeight - r.top - 8 : r.bottom - 8) + "px"; m.style.overflowY = "auto"; }
+  };
   $("modeMenu").onclick = async (e) => {
     const b = e.target.closest("[data-mode]"); if (!b) return; e.stopPropagation();
     $("modeMenu").classList.remove("show"); if (b.dataset.mode === curMode) return;
+    if (c.id !== "homeComp" && b.dataset.mode === "code") return toast("Code mode cần thư mục dự án: tạo task mới ở chế độ Code");
     curMode = b.dataset.mode; paintMode();
-    if (c.id === "homeComp") localStorage.setItem("mode", curMode);
+    if (c.id === "homeComp") { localStorage.setItem("mode", curMode); paintKind(); }
     else { const r = await api("/api/task/act", { id: T.id, action: "mode", text: curMode }); toast(r.error || "Đã đổi chế độ"); kick(); }
   };
   ta.addEventListener("input", sendIcon);
@@ -783,8 +780,7 @@ async function sendNew() {
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   busy(true);
   try {
-    if (curKind === "code" && !lsGet("pdir")) { busy(false); await pickDir(); if (!lsGet("pdir")) return; busy(true); }
-    const r = await api("/api/task/new", { text, mode: curMode, project: homeProj(), template: curTpl, kind: curKind, pdir: curKind === "code" ? lsGet("pdir") : "" }); if (r.error) throw new Error(r.error);
+    const r = await api("/api/task/new", { text, mode: curMode, project: homeProj(), template: curTpl }); if (r.error) throw new Error(r.error);
     const names = [];
     for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(r.id, f)); }
     const s = await api("/api/task/submit", { id: r.id, files: names }); if (s.error) throw new Error(s.error);
@@ -1012,17 +1008,20 @@ function renderSettings() {
   const acc = Object.entries(S.ais).map(([k, a]) => `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${accState(k, a)}</span>
       ${a.pending ? `<button data-cancel="${k}">Hủy</button>` : `<button class="${a.ok ? "" : "pri"}" data-login="${k}" data-switch="${a.ok ? 1 : ""}" ${a.installed ? "" : "disabled"}>${a.ok ? "Đổi tài khoản" : "Đăng nhập"}</button>`}</div>`).join("");
   const st = S.setup || {};
+  // Gemini API key: gọn (1 nút) khi đang ổn; mở rộng khi gói Free, Gemini hết lượt/lỗi, hoặc vừa bấm Lấy key
+  const gem = S.ais.gemini || {}, gNeed = st.free || !!gem.limit_until || gem.ok === false || keyWait;
   const gk = st.gemini_key
     ? `<div class="row"><span class="path">Đã có key · ${st.gemini_api_models} model Gemini</span><button id="gDel">Xoá key</button></div>`
-    : `<div class="row"><input type="password" id="gKey" placeholder="Dán API key (AIza…)" autocomplete="off" style="flex:1"><button id="gGet">Lấy key ↗</button><button class="pri" id="gSave">Lưu</button></div>`;
-  const gkBox = `<div class="f"><span class="k">Gemini API key ${st.free ? "(nên thêm — miễn phí)" : "(tuỳ chọn)"}</span>${gk}
-    <small style="display:block;color:var(--mute);font-size:12px;margin-top:6px">Dùng khi Gemini hết lượt hoặc chưa đăng nhập. Bấm <b>Lấy key</b> → <b>Create API key</b> → copy → quay lại đây, Maestro tự dán và lưu. Key chỉ lưu trên máy này.<br>Lưu ý: dữ liệu gửi qua key miễn phí có thể được Google dùng để cải thiện sản phẩm — không dùng cho tài liệu mật.</small></div>`;
+    : gNeed ? `<div class="row"><input type="password" id="gKey" placeholder="Dán API key (AIza…)" autocomplete="off" style="flex:1"><button id="gGet">Lấy key ↗</button><button class="pri" id="gSave">Lưu</button></div>
+    <small style="display:block;color:var(--mute);font-size:12px;margin-top:6px">${st.free ? "Gói miễn phí: thêm key để có thêm lượt Gemini. " : gem.limit_until ? "Gemini đang hết lượt: thêm key để dùng tiếp ngay. " : ""}Bấm <b>Lấy key</b> → <b>Create API key</b> → copy → quay lại đây, Maestro tự dán và lưu. Key chỉ lưu trên máy này.<br>Lưu ý: dữ liệu gửi qua key miễn phí có thể được Google dùng để cải thiện sản phẩm — không dùng cho tài liệu mật.</small>`
+    : `<div class="row"><span class="path" style="color:var(--mute)">Dự phòng khi Gemini hết lượt (miễn phí)</span><button id="gGet">Lấy key ↗</button></div>`;
+  const gkBox = `<div class="f"><span class="k">Gemini API key</span>${gk}</div>`;
   $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI${st.free ? ` <span class="plan">Chế độ Free</span>` : st.pm === "codex" ? ` <span class="plan">ChatGPT làm quản lý</span>` : ""}</span>${acc}</div>${gkBox}
     <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>
     <div class="f"><span class="k">Memory</span>
       <small style="display:block;color:var(--mute);font-size:12px;margin-bottom:6px">Ghi nhớ của bạn — áp dụng cho mọi task (cách xưng hô, phong cách, quy tắc riêng).</small>
       <textarea id="memTxt" rows="4" style="width:100%;box-sizing:border-box" placeholder="Vd: Xưng hô tôi – bạn. Trả lời ngắn, tiếng Việt.">${esc(S.instructions || "")}</textarea>
-      <div class="row" style="margin-top:6px"><span style="flex:1;color:var(--mute);font-size:12px">${(() => { const L = S.learn || {}; return `Bài học chung của team: <b>${(L.rules || []).length}</b> đang áp dụng · Maestro tự gửi bài học về team (không gửi dữ liệu riêng)${L.sent ? ` · đã gửi ${L.sent}` : ""}${L.pending ? ` · chờ gửi ${L.pending}` : ""}`; })()}</span><button id="memSave">Lưu ghi nhớ</button></div>
+      <div class="row" style="margin-top:6px"><span style="flex:1;color:var(--mute);font-size:12px" id="memInfo">${(() => { const L = S.learn || {}; return `Bài học chung của team: <b>${(L.rules || []).length}</b> đang áp dụng · Maestro tự gửi bài học về team (không gửi dữ liệu riêng)${L.sent ? ` · đã gửi ${L.sent}` : ""}${L.pending ? ` · chờ gửi ${L.pending}` : ""}`; })()}</span></div>
       ${(S.learn?.rules || []).length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--mute)">Xem bài học chung</summary><ul style="font-size:12px;color:var(--mute);margin:6px 0 0 16px">${S.learn.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></details>` : ""}</div>
     <div class="f"><span class="k">Ứng dụng</span><div class="row"><label class="sw"><input type="checkbox" id="oAuto" ${S.autostart ? "checked" : ""}><span>Mở Maestro khi đăng nhập máy</span></label><span style="flex:1"></span><button id="oQuit" title="Tắt hẳn Maestro. Task đang chạy sẽ tự chạy tiếp khi mở lại.">Thoát Maestro</button></div></div>`;
   $("mfoot").innerHTML = `<button id="mUpd" title="Kiểm tra và cài bản mới">${I.refresh} Cập nhật${S.release && S.release !== "dev" ? " · v" + S.release : ""}</button><button class="icon" id="mBell" title="Thông báo" aria-label="Thông báo"><svg class="i" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button><button id="mLog" title="Lưu log (.zip) vào thư mục kết quả">Export log</button><button id="mClr" title="Xóa file nháp, file trùng. Giữ lịch sử.">Clear cache</button><span style="flex:1"></span><button class="pri" id="mDone">Xong</button>`;
@@ -1042,11 +1041,14 @@ function renderSettings() {
   };
   const saveKey = async (v) => { const r = await api("/api/gemini-key", { key: v }); toast(r.error || r.msg); if (!r.error) { await refresh(); renderSettings(); } return !r.error; };
   if ($("gSave")) $("gSave").onclick = () => { const v = $("gKey").value.trim(); if (v) saveKey(v); else $("gKey").focus(); };
-  if ($("gGet")) $("gGet").onclick = () => { window.open("https://aistudio.google.com/apikey", "_blank"); keyWait = true; };
+  if ($("gGet")) $("gGet").onclick = () => { window.open("https://aistudio.google.com/apikey", "_blank"); keyWait = true; renderSettings(); };
   if ($("gDel")) $("gDel").onclick = () => { if (confirm("Xoá Gemini API key khỏi máy này?")) saveKey(""); };
-  $("memSave").onclick = async () => { const r = await api("/api/memory", { instructions: $("memTxt").value }); toast(r.error || r.msg); if (!r.error) S.instructions = $("memTxt").value; };
+  let memT = 0;      // ghi nhớ tự lưu khi ngừng gõ (không cần nút Lưu)
+  const memSave = async () => { clearTimeout(memT); const v = $("memTxt")?.value ?? ""; if (v === (S.instructions || "")) return; const r = await api("/api/memory", { instructions: v }); if (r.error) toast(r.error); else { S.instructions = v; toast("Đã lưu ghi nhớ"); } };
+  $("memTxt").oninput = () => { clearTimeout(memT); memT = setTimeout(memSave, 1200); };
+  $("memTxt").onblur = memSave;
   $("mLog").onclick = async () => { const r = await api("/api/export-log", {}); toast(r.error || r.msg); };
-  $("oPick").onclick = async () => { const r = await api("/api/pick", {}); if (r.path) { form.output = r.path; const s = await api("/api/setup", form); if (s.error) toast(s.error); else S.output = form.output; renderSettings(); } };
+  $("oPick").onclick = async () => { if (picking) return; picking = true; let r = {}; try { r = await api("/api/pick", { title: "Chọn thư mục nhận kết quả" }); } finally { picking = false; } if (r.path) { form.output = r.path; const s = await api("/api/setup", form); if (s.error) toast(s.error); else S.output = form.output; renderSettings(); } };
   $("mDone").onclick = () => { if (!S.output) return toast("Chọn thư mục nhận kết quả"); closeSettings(); };
   $("mUpd").onclick = async () => {
     const b = $("mUpd"); b.disabled = true; b.innerHTML = '<span class="spin"></span> Đang kiểm tra…';

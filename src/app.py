@@ -74,7 +74,7 @@ CPU, RAM_GB = machine()
 MAX_RUNNING = max(1, min(4, CPU // 4, int(RAM_GB // 4)))
 LOW_SPEC = MAX_RUNNING == 1
 MODES = {"pro": "Pro (mạnh nhất, chấm kỹ)", "balanced": "Balanced (cân bằng)", "turbo": "Turbo (nhanh nhất, giảm thẩm định)",
-         "eco": "Eco (tiết kiệm hạn mức)"}
+         "eco": "Eco (tiết kiệm hạn mức)", "code": "Code (sửa code, chạy thử)"}
 MODE_ALIAS = {"fast": "pro", "saver": "eco"}          # tên cũ (task/template/trình duyệt của bản trước)
 
 
@@ -364,10 +364,11 @@ def save_cfg():
         wjson(CFG_FILE, CFG)
 
 
-def pick_folder():
+def pick_folder(title="Chọn thư mục nhận kết quả"):
+    title = re.sub(r'["\\]', "", title)[:80]
     if IS_MAC:     # tkinter không chạy được ngoài luồng chính trên Mac -> dùng hộp thoại của macOS
         try:
-            r = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "Chọn thư mục nhận kết quả")'],
+            r = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "' + title + '")'],
                                capture_output=True, text=True, timeout=600)
             return r.stdout.strip().rstrip("/") if r.returncode == 0 else ""
         except Exception:
@@ -378,7 +379,7 @@ def pick_folder():
         r = tkinter.Tk()
         r.withdraw()
         r.attributes("-topmost", True)
-        d = filedialog.askdirectory(parent=r)
+        d = filedialog.askdirectory(parent=r, title=title, mustexist=True)
         r.destroy()
         return os.path.normpath(d) if d else ""
     except Exception:
@@ -576,6 +577,7 @@ def subtasks(t):
 
 
 MODE_RULES = {
+    "code": "",          # Code mode có quy trình riêng (CODE_MD)
     "pro": """- Ưu tiên THỜI GIAN và chất lượng. Chạy song song tối đa {n} worker/sub-agent cho các phần độc lập.
 - Dùng model mạnh ngay từ đầu để ít phải sửa. Giám khảo được dùng model mạnh, tối đa 2 vòng sửa.""",
     "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song tối đa {n} worker/sub-agent cho phần độc lập; tuần tự khi phụ thuộc.
@@ -782,7 +784,13 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
         txt = pm_codex_md(txt)
     if free_setup():
         txt = txt.replace("\n## Cấm\n", "\n" + FREE_RULES + "\n## Cấm\n", 1)
-    (wdir(t) / ("AGENTS.md" if pm == "codex" else "CLAUDE.md")).write_text(txt, encoding="utf-8")
+    f = wdir(t) / ("AGENTS.md" if pm == "codex" else "CLAUDE.md")
+    import hashlib
+    h = hashlib.sha1(txt.encode()).hexdigest()
+    if t.get("session_started") and t.get("md_hash") != h:
+        t["md_changed"] = True          # lượt tới nhắc Claude đọc lại (giữ tới khi đã nhắc)
+    t["md_hash"] = h
+    f.write_text(txt, encoding="utf-8")
 
 
 LESSON_MD = f"""## Bài học cho cả team (khi task xong)
@@ -843,8 +851,8 @@ def build_prompt(t, nxt):
         if kind != "start" and text:
             base += f"\nBổ sung của người dùng:\n{text}\n"
         return base + fl + f"\nLàm theo {md_name(t)}."
-    if t.get("session_started"):        # app có thể vừa cập nhật: luật mới trong CLAUDE.md áp dụng cho lượt này
-        fl += f"\n{md_name(t)} có thể vừa được cập nhật: đọc lại ./{md_name(t)} và áp dụng bản mới nhất (thay cho quy tắc cũ trong phiên)."
+    if t.get("session_started") and t.get("md_changed"):   # hướng dẫn vừa đổi (app cập nhật / đổi chế độ...) -> đọc lại
+        fl += f"\n{md_name(t)} vừa được cập nhật: đọc lại ./{md_name(t)} và áp dụng bản mới nhất (thay cho quy tắc cũ trong phiên)."
     if kind == "answer":
         return f"Người dùng trả lời:\n\n{text}\n{fl}\nTiếp tục task."
     if kind == "urgent":
@@ -898,6 +906,9 @@ def start_run(t):
             name, n = f"{base} ({n})", n + 1
         t["folder"] = name
     out_dir(t).mkdir(parents=True, exist_ok=True)
+    if t.get("kind") == "code" and not t.get("pdir"):    # Code mode: tự tạo thư mục dự án mới trong thư mục kết quả
+        t["pdir"] = str(out_dir(t) / "code")
+        Path(t["pdir"]).mkdir(parents=True, exist_ok=True)
     write_claude_md(t)
     d = wdir(t)
     q = d / "question.md"
@@ -931,6 +942,7 @@ def start_run(t):
             args += ["--session-id", t["session"]]
         for f in dict.fromkeys([str(out_dir(t))] + ([t["pdir"]] if code else []) + drives()):
             args += ["--add-dir", f]
+    t.pop("md_changed", None)                   # đã nhắc trong prompt của lượt này
     t.update(status="running", started=now(), _pause=False, _cancel=False, _quit=False, _redirect=None)
     t["wi"] = tmsg(t, "work", "", status="running", started=now(), started_ts=time.time(), steps=[])
     tsave(t)
@@ -1323,6 +1335,9 @@ def act(tid, action, text="", files=None, template=""):
             else:
                 t["status"] = "queued"
                 t["next"] = {"kind": "answer" if s == "waiting" else "followup", "text": text, "files": files}
+        elif action == "mode" and (text == "code") != (t.get("kind") == "code"):
+            return {"error": "Code mode cần thư mục dự án: tạo task mới ở chế độ Code" if text == "code"
+                    else "Task Code chỉ chạy ở chế độ Code"}
         elif action == "mode" and MODE_ALIAS.get(text, text) in MODES:
             t["mode"] = norm_mode(text)                           # áp dụng từ lượt chạy kế tiếp
             write_claude_md(t)
@@ -1612,9 +1627,8 @@ def template_api(d):
 def new_task(text, mode="balanced", project="", template="", kind="", pdir=""):
     if not text.strip():
         return {"error": "Chưa nhập yêu cầu"}
-    if kind == "code":
-        if not pdir:
-            return {"error": "Chọn thư mục dự án cho Code mode"}
+    kind = "code" if norm_mode(mode) == "code" or kind == "code" else ""
+    if kind == "code" and pdir:                # thư mục dự án có sẵn (tuỳ chọn); không có -> tự tạo mới khi chạy
         p = Path(pdir).expanduser()
         bad = edit_refused(p.resolve()) if p.is_dir() else f"Không thấy thư mục dự án: {pdir}"
         if bad:
@@ -1626,7 +1640,7 @@ def new_task(text, mode="balanced", project="", template="", kind="", pdir=""):
          "status": "draft", "created": now(), "created_ts": time.time(), "messages": [],
          "mode": norm_mode(mode), "w2": True}
     if kind == "code":
-        t.update(kind="code", pdir=str(Path(pdir).expanduser()))
+        t.update(kind="code", pdir=str(Path(pdir).expanduser()) if pdir else "")
     if project and any(p["id"] == project for p in projects()):
         t["project"] = project
     tp = next((x for x in templates() if x["id"] == template), None)
@@ -2176,7 +2190,7 @@ def expected_secs(mode):
                     if 20 < d < 4 * 3600:
                         by.setdefault(x.get("mode", "balanced"), []).append(d)
         _exp.update(t=time.time(), v={k: sorted(v)[len(v) // 2] for k, v in by.items() if len(v) >= 2})
-    return max(60, _exp["v"].get(mode) or {"turbo": 240, "balanced": 420, "pro": 600, "eco": 600}.get(mode, 420))
+    return max(60, _exp["v"].get(mode) or {"turbo": 240, "balanced": 420, "pro": 600, "eco": 600, "code": 600}.get(mode, 420))
 
 
 def pm_limit(t):
@@ -2406,7 +2420,7 @@ class H(BaseHTTPRequestHandler):
             return update_now()
         if path == "/api/pick":
             with _pick_lock:
-                return {"path": pick_folder()}
+                return {"path": pick_folder(str(d.get("title") or "Chọn thư mục nhận kết quả"))}
         if path == "/api/setup":
             o = (d.get("output") or "").strip()
             if not o or not Path(o).is_dir():
@@ -3263,8 +3277,10 @@ def run_install(t):
 
 
 CODE_MD = """## Vai trò (Code mode)
-Bạn là kỹ sư phần mềm chính, làm như Claude Code: tự làm là chính, sửa code TRỰC TIẾP trong THƯ MỤC DỰ ÁN: {pdir}
-Đầu task: đọc README / CLAUDE.md / AGENTS.md / package.json / pyproject... của dự án để biết cách chạy, quy ước code.
+Bạn là kỹ sư phần mềm chính, làm như Claude Code: tự làm là chính, viết/sửa code TRỰC TIẾP trong THƯ MỤC DỰ ÁN: {pdir}
+(Maestro tự tạo thư mục này cho task; dự án mới thì tạo code ở đây.) Người dùng nêu đường dẫn một dự án CÓ SẴN -> làm trong
+thư mục đó; trước khi sửa, chép bản sao các file sẽ sửa vào work/backup/ (app chỉ tự lưu điểm khôi phục cho thư mục ở trên).
+Dự án có sẵn: đọc README / CLAUDE.md / AGENTS.md / package.json / pyproject... trước để biết cách chạy, quy ước code.
 Task này là một cuộc trò chuyện nhiều lượt.
 
 ## Quy trình code
@@ -3584,7 +3600,7 @@ def gem_pick(key, eff):
 
 
 def pick_model(ai, mode, hard=False):
-    mode = mode if mode == "code" else norm_mode(mode)
+    mode = norm_mode(mode)
     m, eff = MODEL_PLAN[ai][mode]
     if hard:
         eff = "high" if ai == "gemini" else "xhigh"
