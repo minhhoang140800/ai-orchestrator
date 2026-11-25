@@ -136,8 +136,37 @@ $ok = Step 'Python' { [bool](FindPy) } { if ($UseWinget) { & winget @wg 'Python.
 if (-not $ok) { Fail $M.no_python }
 $null = Step 'Node.js' { Has node } { if ($UseWinget) { & winget @wg 'OpenJS.NodeJS.LTS' }; RefreshPath; if (-not (Has node)) { InstallNodeDirect } }
 try { $nd = Split-Path -Parent (Get-Command node -ErrorAction Stop).Source; New-Item -ItemType Directory -Force -Path $AppHome | Out-Null; Set-Content -Path (Join-Path $AppHome 'node_dir.txt') -Value $nd -Encoding UTF8 } catch {}
+# O C con it cho trong: chuyen thu muc cai Claude Code / npm (Codex) sang o con trong nhieu nhat bang junction
+function FreeGB($d) { try { return [math]::Round((Get-PSDrive ($d.TrimEnd(':')) -ErrorAction Stop).Free / 1GB, 1) } catch { return 0 } }
+function MoveToDrive($src, $dst) {
+  $it = Get-Item $src -Force -ErrorAction SilentlyContinue
+  if ($it -and ($it.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return }
+  New-Item -ItemType Directory -Force -Path $dst | Out-Null
+  if ($it) { & robocopy $src $dst /E /MOVE /NFL /NDL /NJH /NJS /R:1 /W:1 *>> $Log; if (Test-Path $src) { Remove-Item $src -Recurse -Force -ErrorAction SilentlyContinue } }
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $src) | Out-Null
+  & cmd.exe /c mklink /J "$src" "$dst" *>> $Log
+}
+$sys = $env:SystemDrive
+$cFree = FreeGB $sys
+if ($cFree -lt 2) {
+  $best = Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | Where-Object { $_.Root -notlike "$sys*" -and $_.Free -gt 3GB } |
+    Where-Object { try { (New-Object IO.DriveInfo $_.Root).DriveType -eq 'Fixed' } catch { $false } } | Sort-Object Free -Descending | Select-Object -First 1
+  if ($best) {
+    $base = Join-Path $best.Root 'MaestroApps'
+    MoveToDrive (Join-Path $env:USERPROFILE '.local\share\claude') (Join-Path $base 'claude-share')
+    MoveToDrive (Join-Path $env:USERPROFILE '.cache\claude') (Join-Path $base 'claude-cache')
+    MoveToDrive (Join-Path $env:APPDATA 'npm') (Join-Path $base 'npm')
+    MoveToDrive (Join-Path $env:LOCALAPPDATA 'npm-cache') (Join-Path $base 'npm-cache')
+    Line ('O ' + $sys + ' con ' + $cFree + ' GB') ('-> cai sang ' + $base) 'Yellow'
+  } else {
+    Line ('O ' + $sys + ' con ' + $cFree + ' GB') 'khong co o khac du cho' 'Red'
+  }
+}
 $ok = Step 'Claude Code' { Has claude } { & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Invoke-RestMethod https://claude.ai/install.ps1 | Invoke-Expression' }
-if (-not $ok) { Fail $M.no_claude }
+if (-not $ok) {
+  if ((Get-Content $Log -Tail 60 -ErrorAction SilentlyContinue) -match 'ENOSPC') { Fail ('O ' + $sys + ' het dung luong (con ' + (FreeGB $sys) + ' GB). Giai phong it nhat 2 GB roi chay lai file nay.') }
+  Fail $M.no_claude
+}
 $null = Step 'ChatGPT (Codex)' { Has codex } { & npm.cmd install -g '@openai/codex' }
 $null = Step 'Gemini (Antigravity)' { Has agy } { & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Invoke-RestMethod https://antigravity.google/cli/install.ps1 | Invoke-Expression' }
 
