@@ -22,6 +22,23 @@ def gen_title(t):
         tsave(t)
 
 
+FOLDER_NO = re.compile(r"^(\d{1,4}) - ")
+
+
+def next_folder(parent, title):
+    """Thư mục kết quả của đoạn chat: '<số thứ tự> - <tên đoạn chat>' (01, 02, ...), đánh số tiếp theo trong cùng thư mục cha."""
+    root = Path(CFG["output"]) / parent
+    nums = [int(m.group(1)) for x in (root.iterdir() if root.is_dir() else []) if x.is_dir() for m in [FOLDER_NO.match(x.name)] if m]
+    nums += [int(m.group(1)) for x in TASKS.values() if x.get("folder") and Path(x["folder"]).parent == parent
+             for m in [FOLDER_NO.match(Path(x["folder"]).name)] if m]
+    n = max(nums, default=0) + 1
+    while True:
+        name = parent / f"{n:02d} - {safe_name(title, 70)}"
+        if not (Path(CFG["output"]) / name).exists():
+            return str(name)
+        n += 1
+
+
 def start_run(t):
     if not t.get("session_started"):
         t["pm"] = pick_pm() or "claude"         # chọn khi bắt đầu; phiên đã mở thì giữ AI quản lý cũ để nối tiếp được
@@ -35,16 +52,9 @@ def start_run(t):
         tmsg(t, "claude", ("Chưa cài Claude Code" if pm == "claude" else "Chưa cài ChatGPT (Codex)") if not exe
              else "Chưa chọn thư mục kết quả (Cài đặt → Set up)", kind="error")
         return tsave(t)
-    if not t.get("folder"):                   # <dự án>/<ngày>/<HH_MM> <tên task> — dễ theo dõi theo dự án và thời gian
+    if not t.get("folder"):                   # [<dự án>/]<số thứ tự> - <tên đoạn chat>; mỗi lần xuất: thư mục con YYYYMMDD-<tên>
         pj = project_of(t)
-        nw = datetime.datetime.now()
-        base = str(Path(safe_name(pj["name"] if pj else "Chung", 60)) / nw.strftime("%Y-%m-%d") /
-                   safe_name(nw.strftime("%H_%M ") + t["title"], 80))
-        used = {x.get("folder") for x in TASKS.values() if x is not t}
-        name, n = base, 2
-        while name in used or (Path(CFG["output"]) / name).exists():
-            name, n = f"{base} ({n})", n + 1
-        t["folder"] = name
+        t["folder"] = next_folder(Path(safe_name(pj["name"], 60)) if pj else Path(), t["title"])
     out_dir(t).mkdir(parents=True, exist_ok=True)
     if t.get("kind") == "code" and not t.get("pdir"):    # Code mode: tự tạo thư mục dự án mới trong thư mục kết quả
         t["pdir"] = str(out_dir(t) / "code")
@@ -424,6 +434,8 @@ def sched_tick():
                 tsave(t)
             if not pm_ready(t):
                 continue          # chờ đăng nhập (đã tự mở trang đăng nhập Claude)
+            if t.get("titling") and not t.get("folder") and time.time() - t.get("created_ts", 0) < 10:
+                continue          # lượt đầu: chờ đặt tên tối đa 10 giây để thư mục kết quả mang đúng tên đoạn chat
             if t.get("_cleaning"):
                 continue          # đang dọn nháp lượt trước (vài giây) -> chạy ngay sau đó
             try:

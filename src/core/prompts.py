@@ -160,6 +160,8 @@ research web dài) ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật. Ta
 ## Đường dẫn
 - Thư mục hiện tại: nháp/brief/log, bị XÓA khi task xong -> không để sản phẩm ở đây. File người dùng gửi: {tdir(t) / "input"}
 - OUTPUT (sản phẩm giao người dùng): {out_dir(t)} — người dùng chỉ định nơi khác thì lưu đúng nơi đó, ghi đường dẫn đầy đủ.
+  Mỗi lần xuất sản phẩm: đặt trong thư mục con YYYYMMDD-<tên ngắn> của OUTPUT (vd {datetime.date.today():%Y%m%d}-concept_boards);
+  lần sửa sau tạo thư mục mới cùng quy tắc (vd ...-concept_boards_v2), không ghi đè bản trước.
 - Được ĐỌC mọi ổ: {', '.join(drives())}. Chỉ sửa file có sẵn khi người dùng yêu cầu sửa chính file đó; không xóa/di chuyển
   file ngoài thư mục hiện tại và OUTPUT. Sản phẩm task trước (dùng lại, tránh làm lại): {STORE / "registry.json"}
 

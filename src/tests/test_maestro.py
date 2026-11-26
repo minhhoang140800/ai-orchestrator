@@ -229,6 +229,32 @@ class FailReason(unittest.TestCase):
         self.assertEqual(NS["fail_reason"]({"status": "completed"}, v, True), "")
 
 
+class Folders(unittest.TestCase):
+    """Thư mục kết quả: '<số thứ tự> - <tên đoạn chat>'; mỗi lần xuất: thư mục con YYYYMMDD-<tên>."""
+    def test_numbering(self):
+        out = Path(NS["CFG"]["output"]) / "fold-test"
+        out.mkdir(exist_ok=True)
+        NS["CFG"]["output"] = str(out)
+        try:
+            nf = NS["next_folder"]
+            self.assertEqual(nf(Path(), "Gợi ý cải tiến game"), "01 - Gợi ý cải tiến game")
+            (out / "01 - Gợi ý cải tiến game").mkdir()
+            (out / "07 - Việc cũ").mkdir()
+            (out / "_AI-Orchestrator").mkdir()
+            self.assertEqual(nf(Path(), "Banner Tết"), "08 - Banner Tết")
+            self.assertEqual(nf(Path("Idle Clicker"), "Icon"), str(Path("Idle Clicker") / "01 - Icon"))
+            self.assertEqual(nf(Path(), 'Tên: có / ký tự "lạ"'), "08 - " + NS["safe_name"]('Tên: có / ký tự "lạ"', 70))
+        finally:
+            NS["CFG"]["output"] = str(out.parent)
+
+    def test_export_subfolder_rule(self):
+        t = {"id": "F1", "text": "x", "mode": "balanced", "folder": "01 - Thử", "watch": False}
+        NS["write_claude_md"](t)
+        md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("YYYYMMDD-<tên ngắn>", md)
+        self.assertIn(time.strftime("%Y%m%d") + "-concept_boards", md)
+
+
 class App(unittest.TestCase):
     def test_starts_and_serves(self):
         s = socket.socket()
