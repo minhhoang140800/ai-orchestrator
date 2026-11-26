@@ -5,11 +5,32 @@
 PAID_CLAUDE = {"pro", "max", "team", "enterprise"}
 
 
+def claude_cfg_plan(email=""):
+    """Dự phòng khi `auth status` không báo subscriptionType: đọc oauthAccount.organizationType trong ~/.claude.json
+    (vd claude_pro, claude_max). Chỉ nhận khi email khớp tài khoản đang đăng nhập; không đọc token."""
+    for f in (Path.home() / ".claude.json", Path.home() / ".claude" / ".claude.json"):
+        acc = (rjson(f) or {}).get("oauthAccount") or {}
+        if not acc:
+            continue
+        if email and acc.get("emailAddress") and acc["emailAddress"].lower() != email.lower():
+            return ""
+        p = str(acc.get("organizationType") or "").lower().removeprefix("claude_")
+        return p if p in PAID_CLAUDE else ""
+    return ""
+
+
 def claude_plan(j):
     """Gói Claude từ `claude auth status --json` -> (tên gói, trả phí?). None = không rõ (bản CLI cũ) -> coi như trước đây."""
     if not j.get("loggedIn"):
         return "", None
     plan = j.get("subscriptionType") or ""
+    if not plan:                                # có máy không trả subscriptionType: thử planTier (vd max_5x), rồi ~/.claude.json
+        tier = str(j.get("planTier") or "").lower().split("_")[0]
+        plan = tier if tier in PAID_CLAUDE else claude_cfg_plan(j.get("email") or "")
+        if plan:
+            return plan, True
+        dlog("claude_plan: không đọc được gói " + json.dumps({k: j.get(k) for k in (
+            "authMethod", "apiProvider", "subscriptionType", "storedClaudeAiLogin", "planTier")}))
     if j.get("authMethod") not in (None, "claude.ai") or "storedClaudeAiLogin" not in j and "subscriptionType" not in j:
         return plan, None                     # đăng nhập kiểu khác / CLI không báo gói
     return plan or "free", plan in PAID_CLAUDE

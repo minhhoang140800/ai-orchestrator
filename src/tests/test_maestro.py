@@ -262,6 +262,43 @@ class Folders(unittest.TestCase):
         self.assertIn(time.strftime("%Y%m%d") + "-concept_boards", md)
 
 
+class Accounts(unittest.TestCase):
+    """Gói Claude khi CLI không báo subscriptionType; email Gemini đọc từ log Antigravity."""
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="home-"))
+        self.old = {k: os.environ.get(k) for k in ("USERPROFILE", "HOME")}
+        os.environ["USERPROFILE"] = os.environ["HOME"] = str(self.home)
+
+    def tearDown(self):
+        for k, v in self.old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_claude_plan(self):
+        cp = NS["claude_plan"]
+        base = {"loggedIn": True, "authMethod": "claude.ai", "storedClaudeAiLogin": True, "email": "a@b.com"}
+        self.assertEqual(cp({**base, "subscriptionType": "max"}), ("max", True))
+        self.assertEqual(cp({**base, "planTier": "max_5x"}), ("max", True))           # thiếu subscriptionType -> planTier
+        (self.home / ".claude.json").write_text(json.dumps({"oauthAccount": {"emailAddress": "A@b.com",
+                                                                             "organizationType": "claude_pro"}}), encoding="utf-8")
+        self.assertEqual(cp(base), ("pro", True))                                        # -> ~/.claude.json
+        self.assertEqual(NS["claude_cfg_plan"]("khac@x.com"), "")                        # email không khớp: không nhận
+        (self.home / ".claude.json").write_text(json.dumps({"oauthAccount": {"organizationType": "claude_free"}}), encoding="utf-8")
+        self.assertEqual(cp(base), ("free", False))
+        self.assertEqual(cp({"loggedIn": False}), ("", None))
+
+    def test_gemini_email_from_log(self):
+        d = self.home / ".gemini" / "antigravity-cli" / "log"
+        d.mkdir(parents=True)
+        (d / "cli-20261126_100000.log").write_text("x\nINFO authenticated successfully as cu@gmail.com\n", encoding="utf-8")
+        time.sleep(0.05)
+        (d / "cli-20261126_110000.log").write_text("INFO authenticated successfully as moi@gmail.com\nok\n", encoding="utf-8")
+        self.assertEqual(NS["agy_log_email"](), "moi@gmail.com")
+        self.assertEqual(NS["ai_email"]("gemini"), "moi@gmail.com")
+
+
 class App(unittest.TestCase):
     def test_starts_and_serves(self):
         s = socket.socket()

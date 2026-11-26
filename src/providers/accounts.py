@@ -38,15 +38,30 @@ def ai_email(ai):
                 act = (rjson(f) or {}).get("active")
                 if act:
                     return act
-            exe = find_bin("agy")
-            if exe:
-                p = subprocess.run([exe, "status"], stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                                   encoding="utf-8", errors="replace", timeout=20, creationflags=NO_WINDOW)
-                m = EMAIL_RE.search((p.stdout or "") + (p.stderr or ""))
-                if m:
-                    return m.group(0)
+            return agy_log_email()
     except Exception:
         pass
+    return ""
+
+
+AGY_AUTH_RE = re.compile(r"authenticated successfully as\s+([\w.+-]+@[\w-]+(?:\.[\w-]+)+)")
+
+
+def agy_log_email():
+    """Gemini (Antigravity): CLI không có lệnh trạng thái (`agy status` không tồn tại) -> lấy email từ dòng
+    'authenticated successfully as <email>' trong các log mới nhất của CLI."""
+    d = Path.home() / ".gemini" / "antigravity-cli" / "log"
+    try:
+        logs = sorted(d.glob("cli-*.log"), key=lambda f: f.stat().st_mtime, reverse=True)[:5]
+    except Exception:
+        return ""
+    for f in logs:
+        try:
+            m = AGY_AUTH_RE.findall(f.read_text(encoding="utf-8", errors="replace")[-400000:])
+        except Exception:
+            continue
+        if m:
+            return m[-1]
     return ""
 
 
@@ -114,6 +129,9 @@ def ai_status(ai):
             plan = codex_plan() if ok else ""
             cur.update(ok=ok, msg=msg, email=ai_email(ai) if ok else "", plan=plan,
                        paid=(plan != "free") if plan else None)
+        elif ai == "gemini":                    # không có lệnh trạng thái: giữ kết quả đăng nhập, chỉ cập nhật email
+            if cur.get("ok"):
+                cur["email"] = ai_email(ai) or cur.get("email", "")
     except Exception as e:
         cur.setdefault("ok", False)
         cur["msg"] = str(e)[:150]
@@ -130,7 +148,7 @@ def refresh_status():
     _status_at["t"] = time.time()
 
     def run():
-        for ai in ("claude", "codex"):
+        for ai in ("claude", "codex", "gemini"):
             if not CFG["ais"].get(ai, {}).get("pending"):
                 with _status_lock:
                     before = dict(CFG["ais"].get(ai, {}))
