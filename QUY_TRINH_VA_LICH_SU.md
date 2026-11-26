@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v10.5 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v10.6 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -111,6 +111,16 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | Gemini API key kiểu mới (auth key, có `.` và `-`, dài hơn) bị báo "không giống API key" | Nhận 20-300 ký tự chữ/số/`-_.`; key đúng hay sai do bước thử gọi Google quyết định (v10.5) |
 | Đọc ảnh đính kèm chậm | App tạo sẵn bản thu nhỏ (cạnh dài ≤1568px) cho ảnh lớn, dặn Claude đọc tất cả ảnh song song trong 1 lần (v10.5) |
 | Code mode dùng Opus cả cho câu hỏi đơn giản | Tin nhắn là câu hỏi/tra cứu (không bảo làm, không kèm file) -> Sonnet; câu hỏi cần nhiều nguồn web -> giao Gemini research (v10.5) |
+| Audit v10.5 (2 bản + Gemini phản biện): mọi việc đều đi qua quản lý; chờ đặt tên tới 30s; giao diện 30s/lần; % tiến độ đoán | v10.6: lễ tân phân loại bằng quy tắc (hỏi đáp / việc nhỏ / đầy đủ, không chắc -> đầy đủ); câu hỏi dùng Opus low; bỏ chờ đặt tên; giao diện 2,5 giây/lần; hiện "x/y việc xong" |
+| Dọn nháp chạy nền xoá nhầm nháp lượt mới; tiêu chí/quyết định mất giữa các lượt | Kiểm tra lượt trước khi xoá; lượt mới ghi lại decisions.json + criteria.md từ lịch sử (v10.6) |
+| Hủy task không dừng worker; task treo mãi; đọc stderr sau stdout có thể treo | Worker ghi pid, Hủy dừng cả cây tiến trình; giới hạn 60 phút không hoạt động / 4 giờ mỗi lượt; đọc stderr song song (v10.6) |
+| Số worker song song chỉ nằm trong hướng dẫn | App giữ chỗ bằng file khoá data/slots (giới hạn cứng theo cấu hình máy) (v10.6) |
+| Gemini tạo file không giới hạn quyền | Thêm --sandbox (v10.6) |
+| Lệnh worker --bg lỗi in tiếng Việt (cp1252); đề bài ChatGPT-quản lý qua cmd.exe bị cắt | Lệnh con in UTF-8; đề bài ChatGPT ghi ra file .pm_prompt.md (v10.6) |
+| Gỡ cài có thể xoá cả Desktop/Documents; gỡ cả Claude/Codex/Gemini người dùng cài sẵn | Không xoá thư mục chung của Windows; bộ cài ghi installed_by_maestro.txt, gỡ cài chỉ gỡ những gì Maestro cài (v10.6) |
+| Learning tự động tốn 90s Haiku/task, có thể lọt dữ liệu riêng | Tắt (v10.6) |
+| Save Template hiện ở mọi task | Chỉ gợi ý khi đã có từ 2 task cùng loại (so khớp từ khoá tên/yêu cầu), không với Code mode / task dùng template (v10.6) |
+| Hướng dẫn cho Claude 8,2-9,1k ký tự | Rút gọn còn 6,7-8k; lệnh app chỉ ghi 1 lần (APP); luật số worker/thời gian/quyền do app ép (v10.6) |
 
 ---
 
@@ -128,6 +138,10 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 - Code mode: Opus; tự tạo thư mục dự án (không chọn thư mục); thiếu phần mềm → nút cài, bấm là tự chạy.
 - Mức ưu tiên tiến trình: Bình thường, trừ máy ≤8 GB RAM.
 - Không phát hành/push lên `main` khi Hoàng chưa duyệt.
+- Bỏ chữ ký số cho bản cập nhật; giữ link điện thoại như hiện tại (không thắt chặt).
+- Câu hỏi ngắn/đơn giản: Opus low. Learning tự động: tắt. Không giới hạn file tải lên, Export log không lọc.
+- Kiến trúc mới (tách module, SQLite...) làm riêng SAU khi v10.6 ổn định.
+- Benchmark: `src/bench.py` (logs: đo từ lịch sử, không tốn hạn mức; run: bộ việc mẫu, tốn hạn mức) chỉ chạy trên máy phát triển.
 - Dùng trên điện thoại: icon điện thoại ở đầu Cài đặt, 1 dòng hướng dẫn; QR không đổi cho tới khi bấm Đổi mã; icon thông báo cũng ở đầu Cài đặt.
 
 ---
