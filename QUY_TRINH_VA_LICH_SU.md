@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v11.0 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v11.1 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -104,6 +104,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | Mở task lần đầu, nút Giám sát/Project hiện theo trang chủ | Truyền đúng task khi vẽ đầu trang (v9.9) |
 | Kết quả 2 lần vẫn chưa đúng | Gợi ý bật Giám sát, nút ngay cuối đoạn chat (v9.9) |
 | Phong cách | Porcelain 2.0: font Geist, icon Lucide, chat 820px (v8.6) |
+| Thư mục kết quả khó tìm (<dự án>/<ngày>/<giờ tên task>, trùng tên thì "(2)") | `<số thứ tự> - <tên đoạn chat>` (có dự án thì nằm trong thư mục dự án); mỗi lần xuất vào thư mục con `YYYYMMDD-<tên>`, sửa lại thì tạo thư mục mới. Lượt đầu chờ đặt tên tối đa 10 giây để thư mục đúng tên đoạn chat (v11.1) |
 | Muốn dùng Maestro trên điện thoại, mọi mạng, không cài app | Cloudflare Quick Tunnel (cloudflared tự tải, chạy tách khỏi app) + mã bí mật (cookie). QR cố định: trang GitHub Pages (nhánh `gh-pages`) đọc link hiện tại từ kênh ntfy.sh rồi chuyển sang; mã nằm sau `#` (v10.4) |
 | Giao diện điện thoại tràn ngang, composer lơ lửng | Thanh bên thành ngăn kéo, composer sát đáy trang chủ (v10.4) |
 | Dòng toạ độ đánh dấu hiện trong bong bóng chat; ảnh nằm trong bong bóng | Ẩn dòng toạ độ khi hiển thị (vẫn gửi cho AI); ảnh/file đưa ra ngoài bong bóng (v10.4) |
