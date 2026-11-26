@@ -52,6 +52,10 @@ def app_url(port=None):
 IS_WIN = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 NO_WINDOW = 0x08000000 if IS_WIN else 0
+# Gemini CLI (Antigravity) tự cập nhật nền ~15-40 phút/lần bằng tiến trình mở console riêng -> trên máy dùng Windows Terminal
+# làm console mặc định sẽ bật cửa sổ đen. Tắt cơ chế đó (mọi lệnh agy do app / Claude / worker gọi đều kế thừa biến này);
+# Maestro tự cập nhật Gemini CLI ngầm mỗi ngày 1 lần (agy_update_loop).
+os.environ.setdefault("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
 def machine():
     """Số luồng CPU và RAM (GB) của máy."""
     cpu, ram = os.cpu_count() or 2, 8.0

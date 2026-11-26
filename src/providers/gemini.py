@@ -200,6 +200,21 @@ def api_worker(st, v, key, text, a):
         fh.write("--- gemini api ---\n" + "\n".join(log) + "\n")
 
 
+def agy_update_loop():
+    """Cập nhật Gemini CLI ngầm (không cửa sổ) tối đa 1 lần/ngày, lúc không có task chạy."""
+    while True:
+        time.sleep(600)
+        try:
+            exe = find_bin("agy")
+            last = float((rjson(DATA / "agy_update.json", {}) or {}).get("at") or 0)
+            if exe and time.time() - last > 24 * 3600 and not any(t["status"] == "running" for t in list(TASKS.values())):
+                p = _run_hidden([exe, "update"], 600)
+                wjson(DATA / "agy_update.json", {"at": int(time.time()), "rc": p.returncode,
+                                                  "out": ((p.stdout or "") + (p.stderr or ""))[-300:]})
+        except Exception as e:
+            dlog(f"agy_update_loop: {e}")
+
+
 def gemini_models():
     """Lấy tên model Gemini thật của tài khoản (agy models) để chọn Neon/Hydrogen."""
     exe = find_bin("agy")

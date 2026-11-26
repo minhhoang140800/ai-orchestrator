@@ -488,6 +488,13 @@ class AutoJudge(unittest.TestCase):
         self.assertNotIn("judge", st)
 
 
+class NoConsole(unittest.TestCase):
+    """Gemini CLI tự cập nhật nền bằng tiến trình mở console riêng (Windows Terminal hiện cửa sổ đen) -> app tắt cơ chế đó."""
+    def test_agy_autoupdate_off(self):
+        self.assertEqual(os.environ.get("AGY_CLI_DISABLE_AUTO_UPDATE"), "true")
+        self.assertTrue(callable(NS["agy_update_loop"]))
+
+
 class AskUser(unittest.TestCase):
     """Câu trả lời kết thúc bằng câu hỏi -> task 'Chờ bạn trả lời'; luật hỏi trước khi bắt tay khi đề bài mơ hồ."""
     def test_trailing_question(self):

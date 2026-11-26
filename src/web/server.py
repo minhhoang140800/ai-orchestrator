@@ -419,6 +419,7 @@ def serve(background=False):
     threading.Thread(target=ensure_libs, daemon=True).start()
     threading.Thread(target=usage_loop, daemon=True).start()
     threading.Thread(target=check_update, daemon=True).start()
+    threading.Thread(target=agy_update_loop, daemon=True).start()
     threading.Thread(target=remote_watch, daemon=True).start()
     if not background and not os.environ.get("AIO_NO_BROWSER"):
         webbrowser.open(url)
