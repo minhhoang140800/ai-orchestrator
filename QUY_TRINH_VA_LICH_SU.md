@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v11.6 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v11.7 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -77,6 +77,10 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | Claude gần như không bao giờ hỏi lại (luật quá chặt; hỏi ở cuối câu trả lời nên app báo Xong) | Câu trả lời kết thúc bằng câu hỏi -> task "Chờ bạn trả lời" + thông báo; luật mới: hỏi NGAY trước khi làm khi đề bài mơ hồ/thiếu dữ kiện/có nghi vấn dễ làm sai hướng (tối đa 3 câu, kèm phương án mặc định); hỏi giữa chừng khi vướng (v11.5) |
 | Câu hỏi tô vàng, phải gõ tay câu trả lời | Câu hỏi viết dạng "A - ...", "B - ..." (có "(đề xuất)"); giao diện hiện nút lựa chọn như ChatGPT + "gõ câu trả lời khác", không tô vàng (v11.6) |
 | Task chạy lâu: tìm trong thư mục kết quả không thấy file đã đạt (file nằm trong nháp ẩn `.work/work/<ID>/vN`, chỉ chép sang khi xong) | Nút "Mở thư mục" từng việc trong Activity; luật: việc đạt chép ngay sang thư mục kết quả (v11.6) |
+| File worker làm ra nằm trong nháp `.work`, Claude chép ra sau -> mất công, người dùng không xem được giữa chừng | Worker xong việc nào, app chuyển THẲNG file vào `<thư mục task>/<YYYYMMDD>-<tên việc>` (lần sửa `_v2`), sổ sách ở lại nháp và tự dọn; giám khảo vẫn tự giao sửa được (tìm việc qua export_dir) (v11.7) |
+| Giám khảo chấm cả lô ở cuối -> file lỗi phải chờ cả lô xong mới sửa | Có criteria.md: app chấm từng việc vẽ ngay khi xong, trượt thì tự giao sửa (tối đa 2 vòng); trạng thái giữ "đang chấm" tới khi xong; cuối lô chỉ chấm nhanh tính đồng bộ (v11.7) |
+| Ô Memory bị kéo lên khi cuộn; task gần đây xếp theo ngày tạo | Giữ vị trí cuộn khi bảng Cài đặt vẽ lại; xếp theo tin nhắn mới nhất (v11.7) |
+| Cửa sổ console đen thỉnh thoảng hiện | Máy dùng Windows Terminal làm console mặc định: lệnh "chạy ẩn" kiểu cũ vẫn hiện cửa sổ. Code Maestro đã dùng cờ ẩn đúng (CREATE_NO_WINDOW); nguồn thật chưa bắt được, đang theo dõi bằng script ghi cửa sổ + tiến trình vừa khởi động |
 | Chờ từng worker một | Giao cả lô `--bg`, chờ 1 lần bằng `wait` (v9.3) |
 | Turbo vẫn tự xem/làm thêm (vd gen keyframe trước storyboard) | Bớt bước tự kiểm ở Turbo; Turbo không gộp ảnh thành lưới |
 | Giám khảo chậm | Model nhỏ cho việc không phải code, thu nhỏ ảnh, timeout 5 phút; app tự giao lại file trượt (v9.9) |
