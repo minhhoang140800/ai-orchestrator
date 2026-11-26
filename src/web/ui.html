@@ -55,7 +55,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .claude .txt code{font:12.5px ui-monospace,Consolas,monospace;background:var(--soft);border-radius:4px;padding:1px 5px}
 .claude.question .txt,.claude.error .txt{white-space:normal}
 .openf{margin-top:10px;display:inline-flex;align-items:center;gap:8px}
-.claude.question .txt{background:#fbf0de;border-radius:10px;padding:9px 12px}
+.claude.question .txt{border-radius:10px}
 .claude.error .txt{background:#f8e5e2;border-radius:10px;padding:9px 12px;font-size:13px}
 .files{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .fcard{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:9px 12px;min-width:220px;max-width:340px;text-align:left}
@@ -181,7 +181,7 @@ main{background:var(--bg)}
 .thread{max-width:760px}
 .msg.user{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:9px 14px}
 .claude .txt{font-size:14px;line-height:1.65}.claude .txt code{background:var(--soft);border:1px solid var(--line);border-radius:4px}
-.claude.question .txt{background:#F8F2E8;border:1px solid #EADCC3;border-radius:8px;padding:10px 14px}
+
 .claude.error .txt{background:#F8EDED;border:1px solid #EBD2D2;border-radius:8px;padding:10px 14px}
 .subs,.dec,.lib table{border-radius:8px;border-color:var(--line)}.sub{padding:8px 14px}
 .chip{border:1px solid var(--line);background:#fff;border-radius:6px;padding:0 8px;color:var(--mute)}
@@ -331,7 +331,8 @@ aside{padding:0 12px;background:var(--side)}
 .mwrap.u{align-items:flex-end}
 .msg.user{align-self:flex-end;max-width:min(80%,640px);padding:12px 16px;border-radius:18px;background:#F3F3F3;border:0;font-size:15px;line-height:1.6;white-space:pre-wrap}
 .claude{border:0;background:transparent;padding:0;width:100%}
-.claude.question,.claude.error{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.claude.error{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.qopts{display:flex;flex-direction:column;gap:6px;margin-top:12px;max-width:560px}.qopt{display:flex;gap:10px;align-items:flex-start;text-align:left;padding:9px 14px;border:1px solid var(--line);border-radius:12px;background:#fff;font-size:14px;line-height:1.45;cursor:pointer;height:auto}.qopt:hover{border-color:#bdbdbd;background:var(--soft)}.qopt b{flex:none;min-width:18px}.qopt.rec{border-color:#9a9a9a}.qopt small{color:var(--mute);margin-left:4px}.qother{font-size:12px;color:var(--mute);margin-top:2px}
 /* chữ trong câu trả lời */
 .claude .txt{font-size:15.5px;line-height:1.65;color:var(--ink)}
 .claude .txt p{margin:0 0 14px}.claude .txt>:last-child{margin-bottom:0}
@@ -2075,6 +2076,16 @@ function artifact(m, i) {      // thẻ kết quả: tên thư mục, số file 
     <div class="artl">${show.map((f) => `<button class="artf" data-ofo="${esc(f)}" data-oi="${i}" title="Mở ${esc(f)}">${ficon(f)}<span class="artn">${esc(f)}</span><span class="artx">${esc((f.split(".").pop() || "").toUpperCase())}</span></button>`).join("")}
     ${!all && n > 3 ? `<button class="artm" data-fmore="${T.id}:${i}">+ ${n - 3} file</button>` : ""}</div></div>`;
 }
+function qOpts(text) {      // "A - ...", "**B.** ...", "- C: ..." -> lựa chọn; chỉ khi 2-6 lựa chọn, không trùng chữ cái
+  const opts = [], keep = [];
+  for (const l of (text || "").split("\n")) {
+    const m = l.replace(/[*_`]/g, "").match(/^\s*(?:[-•]\s*)?([A-F])\s*[-–.:)]\s+(.+)$/);
+    if (m) opts.push([m[1], m[2].trim()]); else keep.push(l);
+  }
+  const ks = opts.map((o) => o[0]);
+  if (opts.length < 2 || opts.length > 6 || new Set(ks).size !== ks.length) return { opts: [], text };
+  return { opts, text: keep.join("\n").trim() };
+}
 function attHtml(fs) {
   if (!fs.length) return "";
   const isImg = (f) => /\.(png|jpe?g|gif|webp)$/i.test(f), src = (f) => `/api/input?t=${T.id}&name=${encodeURIComponent(f)}`;
@@ -2108,7 +2119,7 @@ function actHtml(t) {
   return `<div class="ah"><b>Activity</b><button class="ghost icon" data-actx="1" aria-label="Đóng">×</button></div>
     <div class="as"><div class="ak">Trạng thái</div>${costTxt(t.cost)}<div>${ST[t.status] || t.status}${live && ws[0][0].phase ? ` · ${esc(ws[0][0].phase)}` : ""}</div></div>
     ${ws.map(([m], n) => `<div class="as"><div class="ak">${m.status === "running" ? "Đang làm" : "Lượt " + (ws.length - n)} · ${esc(m.started || "")}</div>${costTxt(m.cost, "Lượt này tốn")}
-      ${(m.subtasks || []).map((x) => `<div class="asub"><span>${esc(x.title || x.id)}</span><small>${esc((x.worker === "codex" ? "ChatGPT" : x.worker === "gemini" ? "Gemini" : x.worker) + (x.model ? " · " + x.model : ""))}${x.seconds ? " · " + dur(x.seconds) : ""}</small><span class="pill ${x.status}">${ST[x.status] || x.status}</span>${x.reason ? `<details class="arsn"><summary>Lý do</summary><pre>${esc(x.reason)}</pre></details>` : ""}</div>`).join("")}
+      ${(m.subtasks || []).map((x) => `<div class="asub"><span>${esc(x.title || x.id)}</span><small>${esc((x.worker === "codex" ? "ChatGPT" : x.worker === "gemini" ? "Gemini" : x.worker) + (x.model ? " · " + x.model : ""))}${x.seconds ? " · " + dur(x.seconds) : ""}</small><span class="pill ${x.status}">${ST[x.status] || x.status}</span>${x.reason ? `<details class="arsn"><summary>Lý do</summary><pre>${esc(x.reason)}</pre></details>` : ""}${x.worker !== "judge" ? `<button class="lnk" data-subdir="${esc(x.id)}" title="Mở thư mục file của việc này (xem trước khi task xong)">Mở thư mục</button>` : ""}</div>`).join("")}
       ${(m.steps || []).length ? `<ol class="asteps">${m.steps.map((x) => `<li title="${esc(x)}">${esc(x)}</li>`).join("")}</ol>` : m.status === "running" ? `<ol class="asteps"><li>Đang khởi động…</li></ol>` : ""}</div>`).join("")}
     ${files.length ? `<div class="as"><div class="ak">File kết quả · ${files.length}</div>${files.slice(0, 40).map((f) => `<div class="afile" title="${esc(f)}">${ficon(f)}<span>${esc(f)}</span></div>`).join("")}</div>` : ""}`;
 }
@@ -2149,7 +2160,9 @@ function renderTask() {
     const pv = ims.length ? `<div class="opv">${ims.map((f) => { const q = `t=${T.id}&i=${i}&f=${encodeURIComponent(f)}`; return `<a href="/api/ofile?${q}&full=1" data-lb="1" data-of="${esc(f)}" data-oi="${i}" title="${esc(f)}"><img src="/api/ofile?${q}" alt="${esc(f)}" loading="lazy"><span>${esc(f.split("/").pop())}</span></a>`; }).join("")}</div>` : "";
     const inst = m.kind === "install" ? `<div class="inst">Cần cài: <ul>${(m.items || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${i === lastC && t.status === "waiting"
       ? (t.installing ? `<span class="spin"></span> Đang cài — xem cửa sổ cài đặt vừa mở` : `<button class="pri" data-act="install">Cài đặt</button> <small style="color:var(--mute)">Maestro tự chạy mọi thứ, xong tự làm tiếp</small>`) : ""}</div>` : "";
-    return `<div class="mwrap c"><div class="claude ${m.kind === "install" ? "question" : m.kind || ""}"><div class="txt">${md(m.text)}</div>${inst}${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>${mActs(m, i, "claude")}</div>`;
+    const qo = m.kind === "question" && i === lastC && t.status === "waiting" ? qOpts(m.text) : null;   // câu hỏi: lựa chọn A/B bấm được
+    const qbox = qo && qo.opts.length ? `<div class="qopts">${qo.opts.map(([k, v]) => `<button class="qopt ${/\(đề xuất\)/i.test(v) ? "rec" : ""}" data-qopt="${esc(k + " - " + v.replace(/\s*\(đề xuất\)/i, ""))}"><b>${k}</b><span>${esc(v.replace(/\s*\(đề xuất\)/i, ""))}${/\(đề xuất\)/i.test(v) ? "<small>đề xuất</small>" : ""}</span></button>`).join("")}<div class="qother">Hoặc gõ câu trả lời khác ở ô bên dưới</div></div>` : "";
+    return `<div class="mwrap c"><div class="claude ${m.kind === "install" ? "question" : m.kind || ""}"><div class="txt">${md(qbox ? qo.text : m.text)}</div>${qbox}${inst}${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>${mActs(m, i, "claude")}</div>`;
   }).join("");
   const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Chưa có AI quản lý (Claude gói trả phí hoặc ChatGPT). Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>${esc(t.wait || "Đang chuẩn bị…")}</span></div>` : "";
   const comp = $("taskComp");
@@ -2236,7 +2249,7 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec],[data-opset],[data-paste],[data-fb],[data-watch],[data-openact],[data-ofo],[data-fmore],[data-whx]");
+  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec],[data-opset],[data-paste],[data-fb],[data-watch],[data-openact],[data-ofo],[data-fmore],[data-whx],[data-subdir],[data-qopt]");
   if (!el) return;
   const d = el.dataset;
   if (d.libtab) { libTab = d.libtab; return renderLib(); }
@@ -2272,6 +2285,8 @@ document.addEventListener("click", async (e) => {
   else if (d.whx) { lsSet("whint:" + d.whx, "1"); lastSnap = ""; renderTask(); }
   else if (d.openact) { actOpen = true; lsSet("act", "1"); renderTask(); }
   else if (d.fmore) { fMore.add(d.fmore); lastSnap = ""; renderTask(); }
+  else if (d.subdir) { const r = await api("/api/task/subdir", { id: T.id, sub: d.subdir }); if (r.error) toast(r.error); }
+  else if (d.qopt) { const r = await api("/api/task/act", { id: T.id, action: "send", text: d.qopt, files: [] }); if (r.error) toast(r.error); T = null; lastSnap = ""; await refresh(); }
   else if (d.ofo) { const r = await api("/api/ofile", { t: T.id, i: d.oi, f: d.ofo, op: "open" }); if (r.error) toast(r.error); }
   else if (d.watch) {
     if (T && $("taskComp")) { const on = !T.judge; const r = await api("/api/task/act", { id: T.id, action: "judge", text: on ? "on" : "off" }); if (r.error) return toast(r.error); T.judge = on; toast(on ? "Đã bật Giám sát (áp dụng từ lượt làm tiếp theo)" : "Đã tắt Giám sát"); lastSnap = ""; renderTask(); }

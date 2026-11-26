@@ -45,6 +45,19 @@ def finish_clean(t, wi=None):
         t.pop("_cleaning", None)
 
 
+def open_sub_dir(tid, sub):
+    """Mở thư mục kết quả của 1 việc đã giao (work/<ID>/vN mới nhất, gồm cả bên làm thay gpt/ gemini/)."""
+    t = TASKS.get(tid)
+    if not t or not re.fullmatch(r"[\w.-]{1,60}", sub or ""):
+        return {"error": "Không tìm thấy việc"}
+    d = wdir(t) / "work" / sub
+    vs = sorted((v for v in d.iterdir() if v.is_dir() and re.fullmatch(r"v\d+", v.name)), key=lambda v: int(v.name[1:])) if d.is_dir() else []
+    if not vs:
+        return {"error": "Thư mục việc này đã được dọn (task xong: file nằm trong thư mục kết quả)"}
+    open_path(vs[-1])
+    return {"ok": True}
+
+
 def restore_notes(t):
     """Lượt mới sau khi nháp đã dọn: ghi lại tasks/decisions.json + tasks/criteria.md từ lịch sử task."""
     d = wdir(t) / "tasks"

@@ -397,12 +397,31 @@ class AskUser(unittest.TestCase):
         self.assertFalse(au("Đã phát hành v11.5. Bạn bấm Cập nhật để dùng."))
         self.assertFalse(au("Câu hỏi của bạn: vì sao? Trả lời: do hết lượt.\n\nĐã sửa xong."))
 
+    def test_open_sub_dir(self):
+        t = {"id": "SD1", "text": "x", "status": "running", "folder": "02 - Thử", "messages": []}
+        NS["TASKS"]["SD1"] = t
+        opened = []
+        old = NS["open_path"]
+        NS["open_path"] = lambda p, *a: opened.append(Path(p))
+        try:
+            for v in ("v1", "v2"):
+                (NS["wdir"](t) / "work" / "S1" / v).mkdir(parents=True, exist_ok=True)
+            self.assertEqual(NS["open_sub_dir"]("SD1", "S1"), {"ok": True})
+            self.assertEqual(opened[-1].name, "v2")                          # bản mới nhất
+            self.assertIn("error", NS["open_sub_dir"]("SD1", "../../x"))     # chặn đường dẫn lạ
+            self.assertIn("error", NS["open_sub_dir"]("SD1", "S9"))
+        finally:
+            NS["open_path"] = old
+            NS["TASKS"].pop("SD1", None)
+
     def test_prompt_rule(self):
         t = {"id": "Q1", "text": "x", "mode": "balanced", "folder": "01 - Hỏi", "watch": False}
         NS["write_claude_md"](t)
         md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("TRƯỚC khi bắt tay", md)
         self.assertIn("ĐANG làm mà vướng", md)
+        self.assertIn('"A - <ngắn gọn>"', md)                     # câu hỏi dạng lựa chọn (nút bấm)
+        self.assertIn("chép NGAY file của việc đó sang OUTPUT", md)
 
 
 class App(unittest.TestCase):

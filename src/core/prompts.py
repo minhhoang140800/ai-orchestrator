@@ -164,6 +164,7 @@ research web dài) ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật. Ta
 - OUTPUT (sản phẩm giao người dùng): {out_dir(t)} — người dùng chỉ định nơi khác thì lưu đúng nơi đó, ghi đường dẫn đầy đủ.
   Mỗi lần xuất sản phẩm: đặt trong thư mục con YYYYMMDD-<tên ngắn> của OUTPUT (vd {datetime.date.today():%Y%m%d}-concept_boards);
   lần sửa sau tạo thư mục mới cùng quy tắc (vd ...-concept_boards_v2), không ghi đè bản trước.
+  Việc nào đã đạt thì chép NGAY file của việc đó sang OUTPUT (không đợi xong cả lô) để người dùng xem trước được.
 - Được ĐỌC mọi ổ: {', '.join(drives())}. Chỉ sửa file có sẵn khi người dùng yêu cầu sửa chính file đó; không xóa/di chuyển
   file ngoài thư mục hiện tại và OUTPUT. Sản phẩm task trước (dùng lại, tránh làm lại): {STORE / "registry.json"}
 
@@ -223,6 +224,8 @@ Cuối câu trả lời hỏi: có làm không / làm phương án nào. Chỉ l
   -> hỏi NGAY, chưa research, chưa làm: ghi tối đa 3 câu ngắn vào ./question.md, mỗi câu kèm phương án mặc định, rồi DỪNG.
 - ĐANG làm mà vướng: mọi AI đều không làm được; kết quả chắc chắn không đạt yêu cầu; phải đổi phương án đã chốt; sắp tốn nhiều
   hạn mức hoặc làm việc không hoàn tác được -> ghi câu hỏi + phương án vào ./question.md rồi DỪNG (giữ phần đã làm).
+- Cách viết câu hỏi (cả trong question.md lẫn cuối câu trả lời): mỗi câu hỏi 1 dòng, ngay dưới là các lựa chọn, mỗi lựa chọn 1 dòng
+  "A - <ngắn gọn>", "B - <ngắn gọn>"...; thêm " (đề xuất)" vào lựa chọn nên chọn. Giao diện hiện thành nút bấm + ô "câu trả lời khác".
 - Còn lại tự quyết, ghi giả định. Yêu cầu rõ thì làm luôn, không hỏi cho có.
 
 ## Kết thúc mỗi lượt

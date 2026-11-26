@@ -354,7 +354,10 @@ def cmd_worker(argv):
         st.update(status="failed", error=f"Không thấy {task}")
     elif skip_gem and not os.environ.get("AIO_NOFALLBACK"):
         (v / "TASK.md").write_text(task_txt, encoding="utf-8")
-        st.update(status="failed", error=("Gemini" if a.worker == "gemini" else "GPT") + " vừa không tạo được ảnh (30 phút qua) — giao thẳng bên kia")
+        bu = img_block_until(a.worker)
+        st.update(status="failed", error=("Gemini" if a.worker == "gemini" else "GPT") + (
+            " hết lượt vẽ ảnh tới " + datetime.datetime.fromtimestamp(bu).strftime("%H:%M") if bu else
+            " vừa không tạo được ảnh (30 phút qua)") + " — giao thẳng bên kia")
     elif not exe and not use_api:
         st.update(status="failed", error="Worker chưa cài")
     elif use_api:

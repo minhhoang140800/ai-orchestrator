@@ -322,6 +322,8 @@ class H(BaseHTTPRequestHandler):
             return act(d.get("id", ""), d.get("action", ""), d.get("text", ""), d.get("files"), d.get("template", ""))
         if path == "/api/task/file":
             return open_task_file(d.get("id", ""), d.get("path", ""))
+        if path == "/api/task/subdir":
+            return open_sub_dir(d.get("id", ""), d.get("sub", ""))
         return {"error": "bad request"}
 
 
