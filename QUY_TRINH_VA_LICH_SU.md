@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v11.7 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v11.8 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -80,7 +80,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | File worker làm ra nằm trong nháp `.work`, Claude chép ra sau -> mất công, người dùng không xem được giữa chừng | Worker xong việc nào, app chuyển THẲNG file vào `<thư mục task>/<YYYYMMDD>-<tên việc>` (lần sửa `_v2`), sổ sách ở lại nháp và tự dọn; giám khảo vẫn tự giao sửa được (tìm việc qua export_dir) (v11.7) |
 | Giám khảo chấm cả lô ở cuối -> file lỗi phải chờ cả lô xong mới sửa | Có criteria.md: app chấm từng việc vẽ ngay khi xong, trượt thì tự giao sửa (tối đa 2 vòng); trạng thái giữ "đang chấm" tới khi xong; cuối lô chỉ chấm nhanh tính đồng bộ (v11.7) |
 | Ô Memory bị kéo lên khi cuộn; task gần đây xếp theo ngày tạo | Giữ vị trí cuộn khi bảng Cài đặt vẽ lại; xếp theo tin nhắn mới nhất (v11.7) |
-| Cửa sổ console đen thỉnh thoảng hiện | Máy dùng Windows Terminal làm console mặc định: lệnh "chạy ẩn" kiểu cũ vẫn hiện cửa sổ. Code Maestro đã dùng cờ ẩn đúng (CREATE_NO_WINDOW); nguồn thật chưa bắt được, đang theo dõi bằng script ghi cửa sổ + tiến trình vừa khởi động |
+| Cửa sổ console đen thỉnh thoảng hiện rồi tắt | Nguyên nhân: Gemini CLI tự cập nhật nền ~15-40 phút/lần bằng tiến trình `agy --bg-updater` mở console riêng (máy dùng Windows Terminal làm console mặc định nên hiện cửa sổ); khớp giờ 15:43:29, 16:01:15. Sửa: đặt `AGY_CLI_DISABLE_AUTO_UPDATE=true` (giá trị `1` không có tác dụng) cho mọi lệnh agy; Maestro tự chạy `agy update` ngầm 1 lần/ngày khi không có task (v11.8) |
 | Chờ từng worker một | Giao cả lô `--bg`, chờ 1 lần bằng `wait` (v9.3) |
 | Turbo vẫn tự xem/làm thêm (vd gen keyframe trước storyboard) | Bớt bước tự kiểm ở Turbo; Turbo không gộp ảnh thành lưới |
 | Giám khảo chậm | Model nhỏ cho việc không phải code, thu nhỏ ảnh, timeout 5 phút; app tự giao lại file trượt (v9.9) |
