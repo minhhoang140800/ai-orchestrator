@@ -22,6 +22,16 @@ def gen_title(t):
         tsave(t)
 
 
+ASK_END = re.compile(r"\?\s*$")
+
+
+def asks_user(text):
+    """Câu trả lời cuối kết thúc bằng câu hỏi cho người dùng (vd 'Bạn chọn A hay B?') -> task chờ trả lời, không coi là Xong."""
+    lines = [re.sub(r"[*_`>#\s]+", " ", x).strip() for x in (text or "").strip().splitlines()]
+    lines = [x for x in lines if x]
+    return bool(lines) and bool(ASK_END.search(lines[-1])) and len(lines[-1]) <= 400
+
+
 FOLDER_NO = re.compile(r"^(\d{1,4}) - ")
 
 
@@ -339,8 +349,13 @@ def watch(t, p, nxt):
             t["finished"] = now()
             rt = (result.get("result") or "Xong.").strip()
             fs, fd = new_files(t, since, rt)
-            tmsg(t, "claude", rt, files=fs, dir=fd)
-            threading.Thread(target=after_turn, args=(t, t.get("wi")), daemon=True).start()   # dọn nháp + cập nhật bộ nhớ (nền)
+            if asks_user(rt):                  # câu trả lời kết thúc bằng câu hỏi cho người dùng -> "Chờ bạn trả lời" + thông báo
+                t["status"] = "waiting"
+                tmsg(t, "claude", rt, kind="question", files=fs, dir=fd)
+                threading.Thread(target=mem_update, args=(t,), daemon=True).start()     # giữ nháp (task chưa xong), vẫn ghi nhớ
+            else:
+                tmsg(t, "claude", rt, files=fs, dir=fd)
+                threading.Thread(target=after_turn, args=(t, t.get("wi")), daemon=True).start()   # dọn nháp + cập nhật bộ nhớ (nền)
         else:
             msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {p.returncode}"
             if is_limit(msg[-1500:]) or is_limit(err):          # AI quản lý hết hạn mức: chờ tới giờ reset rồi tự chạy tiếp

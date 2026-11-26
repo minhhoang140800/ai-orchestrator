@@ -218,8 +218,12 @@ Tin nhắn là CÂU HỎI ("có thể … không", "làm thế nào", "có cách
 Cuối câu trả lời hỏi: có làm không / làm phương án nào. Chỉ làm khi người dùng bảo làm. Không chắc -> coi là hỏi.
 
 ## Khi cần người dùng quyết định
-Chỉ hỏi khi thật sự quan trọng (không hoàn tác được, tốn nhiều hạn mức, mâu thuẫn, thiếu dữ liệu): ghi câu hỏi ngắn + phương án
-vào ./question.md rồi DỪNG. Còn lại tự quyết, ghi giả định.
+- TRƯỚC khi bắt tay (yêu cầu mới / tin nhắn mới): yêu cầu hiểu được 2 cách ra sản phẩm khác hẳn nhau, thiếu dữ kiện bắt buộc
+  (file, link, game nào, số lượng, kích thước, thị trường...), hoặc có nghi vấn mà đoán sai sẽ phải research lâu / làm sai hướng
+  -> hỏi NGAY, chưa research, chưa làm: ghi tối đa 3 câu ngắn vào ./question.md, mỗi câu kèm phương án mặc định, rồi DỪNG.
+- ĐANG làm mà vướng: mọi AI đều không làm được; kết quả chắc chắn không đạt yêu cầu; phải đổi phương án đã chốt; sắp tốn nhiều
+  hạn mức hoặc làm việc không hoàn tác được -> ghi câu hỏi + phương án vào ./question.md rồi DỪNG (giữ phần đã làm).
+- Còn lại tự quyết, ghi giả định. Yêu cầu rõ thì làm luôn, không hỏi cho có.
 
 ## Kết thúc mỗi lượt
 Báo cáo, research, so sánh: viết thẳng trong câu trả lời, KHÔNG tạo file .md/.txt; chỉ tạo file khi sản phẩm vốn là file hoặc

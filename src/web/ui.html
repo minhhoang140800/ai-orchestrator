@@ -2372,7 +2372,8 @@ function accState(k, a) {
   if (a.code) return `<small>1. Đăng nhập Google trên tab vừa mở${a.url ? ` (<a href="${esc(a.url)}" target="_blank">mở lại</a>)` : ""} → bấm <b>Copy to Clipboard</b>. 2. Quay lại đây — Maestro tự dán mã (hoặc bấm Dán).</small>${codeBox}`;
   if (a.pending) return `<small>Đăng nhập trong cửa sổ vừa mở${a.url ? ` · <a href="${esc(a.url)}" target="aio_login">mở lại trang đăng nhập</a>` : "…"}</small>`;
   if (a.ok && k === "claude" && a.paid === false) return `<small class="bad">${a.email ? esc(a.email) + " · " : ""}gói miễn phí — Claude Code cần gói trả phí; ChatGPT sẽ làm quản lý thay</small>`;
-  if (a.ok) return `<small>${a.email ? esc(a.email) : "Đã đăng nhập"}${planTxt(a.plan)}</small>`;
+  const imgTxt = a.img_until ? `<small class="bad" style="display:block">${k === "gemini" ? "Gemini CLI" : "GPT"} vẽ ảnh: hết lượt, mở lại lúc ${new Date(a.img_until * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} — tới đó việc vẽ giao ${k === "gemini" ? "GPT" : "Gemini"}</small>` : "";
+  if (a.ok) return `<small>${a.email ? esc(a.email) : "Đã đăng nhập"}${planTxt(a.plan)}</small>${imgTxt}`;
   return `<small class="bad">${esc(a.msg || "Chưa đăng nhập")}</small>`;
 }
 const REMOTE_VIEW = !/^(127\.0\.0\.1|localhost|.*\.localhost)$/.test(location.hostname);   // đang mở từ điện thoại

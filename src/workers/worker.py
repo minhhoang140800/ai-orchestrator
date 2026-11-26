@@ -17,14 +17,93 @@ IMG_FAIL_F = "img_fail.json"
 IMG_FAIL_TTL = 30 * 60          # 1 bên không vẽ được: 30 phút tới giao thẳng bên kia (chỉ thử 1 lần)
 
 
+# Gemini CLI (Antigravity) hết lượt vẽ ảnh: vẫn báo SUCCESS, lỗi nằm trong câu trả lời / log. Hạn mức vẽ của CLI tách khỏi
+# Gemini web/app. Thông báo có giờ mở lại ("Your quota will reset after 3h20m14s").
+IMG_QUOTA_RE = re.compile(r"image generation quota exceeded|exhausted your capacity on this model", re.I)
+IMG_RESET_RE = re.compile(r"reset after\s*(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?", re.I)
+
+
+def img_quota_until(text):
+    """Thông báo hết lượt vẽ ảnh -> giờ mở lại (timestamp); không phải lỗi hết lượt vẽ -> 0."""
+    if not IMG_QUOTA_RE.search(text or ""):
+        return 0
+    m = IMG_RESET_RE.search(text)
+    secs = sum(int(x or 0) * k for x, k in zip(m.groups(), (3600, 60, 1))) if m else 0
+    return int(time.time() + (secs if secs > 0 else 3 * 3600))      # không đọc được giờ -> ước 3 giờ
+
+
 def img_failed_recent(worker):
-    return time.time() - float((rjson(DATA / IMG_FAIL_F, {}) or {}).get(worker, 0)) < IMG_FAIL_TTL
+    d = rjson(DATA / IMG_FAIL_F, {}) or {}
+    if d.get(worker + "_until"):                                      # biết giờ mở lại (hết lượt vẽ)
+        return time.time() < float(d[worker + "_until"])
+    return time.time() - float(d.get(worker, 0)) < IMG_FAIL_TTL
 
 
-def mark_img_fail(worker):
+def mark_img_fail(worker, until=0):
+    """Bên này không vẽ được: nhớ tới giờ mở lại (nếu biết), không thì 30 phút; tới đó việc vẽ giao thẳng bên kia."""
     d = rjson(DATA / IMG_FAIL_F, {}) or {}
     d[worker] = int(time.time())
+    if until:
+        d[worker + "_until"] = int(until)
+    else:
+        d.pop(worker + "_until", None)
     wjson(DATA / IMG_FAIL_F, d)
+
+
+def img_block_until(worker):
+    """Giờ mở lại vẽ ảnh của 1 bên (để hiện trong Cài đặt); 0 = đang vẽ được / không rõ."""
+    u = float((rjson(DATA / IMG_FAIL_F, {}) or {}).get(worker + "_until") or 0)
+    return int(u) if u > time.time() else 0
+
+
+CODE_DRAWN = "_ve_bang_code"      # ảnh Gemini tự vẽ bằng code sau khi hết lượt vẽ AI (không tính là ảnh đạt)
+
+
+def _imgs(d):
+    return [f for f in d.rglob("*") if f.suffix.lower() in IMG_EXT and "_backup" not in f.parts and CODE_DRAWN not in f.parts]
+
+
+AGY_LOG_LINE = re.compile(r"^E(\d{2})(\d{2}) (\d{2}):(\d{2}):(\d{2})\.\d+\s+\d+ generate_image\.go:\d+\] error generating image: (.*)$", re.M)
+
+
+def agy_img_error(t0):
+    """Log Gemini CLI của lần chạy này (tạo sau t0): lần đầu báo lỗi vẽ ảnh -> (thời điểm lỗi, giờ mở lại); không có -> (0, 0).
+    Gemini hết lượt vẽ vẫn báo SUCCESS và có khi tự vẽ bằng code (Python/PIL) mà không nói -> phải đọc log mới biết."""
+    d = Path.home() / ".gemini" / "antigravity-cli" / "log"
+    try:
+        logs = sorted((f for f in d.glob("cli-*.log") if f.stat().st_mtime >= t0 - 5), key=lambda f: f.stat().st_mtime)
+    except Exception:
+        return 0, 0
+    yr = datetime.datetime.now().year
+    for f in logs:
+        try:
+            txt = f.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        for m in AGY_LOG_LINE.finditer(txt):
+            mo, dd, hh, mi, ss, msg = m.groups()
+            try:
+                at = datetime.datetime(yr, int(mo), int(dd), int(hh), int(mi), int(ss)).timestamp()
+            except ValueError:
+                continue
+            if at >= t0 - 5:
+                return at, img_quota_until(msg) or int(time.time() + 3 * 3600)
+    return 0, 0
+
+
+def set_aside_code_drawn(v, since):
+    """Ảnh tạo SAU lúc hết lượt vẽ AI = Gemini tự vẽ bằng code -> chuyển vào _ve_bang_code (giữ lại để xem, không tính đạt)."""
+    moved = []
+    for f in _imgs(v):
+        try:
+            if f.stat().st_mtime >= since - 1:
+                dst = v / CODE_DRAWN / f.relative_to(v)
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(f, dst)
+                moved.append(str(f.relative_to(v)).replace("\\", "/"))
+        except Exception:
+            pass
+    return moved
 
 
 def with_criteria(text, proj):
@@ -60,9 +139,8 @@ def fail_reason(st, v, want_img):
     (còn lại sau khi nháp bị dọn), hiện ở Activity và Export log để biết vì sao, không phải đoán."""
     parts = [f"{n}: {st[k]}" for k, n in (("gemini_error", "Gemini"), ("codex_error", "GPT"), ("agy_error", "Antigravity"))
              if st.get(k)]
-    if want_img and st.get("status") == "completed" and not any(
-            f.suffix.lower() in IMG_EXT for f in v.rglob("*") if "_backup" not in f.parts) and not any(
-            str(x).lower().endswith(IMG_EXT) for x in st.get("edited") or []):
+    if want_img and st.get("status") == "completed" and not _imgs(v) and not any(
+            str(x).lower().endswith(IMG_EXT) for x in st.get("edited") or []) and not st.get("via"):
         parts.append("Báo xong nhưng không tạo ra file ảnh")
     if st.get("status") not in ("completed", "running", None) and st.get("error"):
         parts.append("Lỗi: " + str(st["error"]))
@@ -79,13 +157,14 @@ def worker_fallback(st, v, a, edit, want_img):
     Bên nào không vẽ được ảnh -> nhớ 30 phút, việc vẽ sau giao thẳng bên kia (chỉ thử 1 lần)."""
     src = a.worker
     dst = "codex" if src == "gemini" else "gemini"
-    no_img = want_img and st.get("status") == "completed" and not any(
-        f.suffix.lower() in IMG_EXT for f in v.rglob("*") if "_backup" not in f.parts) and not any(
+    no_img = want_img and st.get("status") == "completed" and not _imgs(v) and not any(
         str(x).lower().endswith(IMG_EXT) for x in st.get("edited") or [])
     failed = st.get("status") in ("limit", "failed", "timeout")
-    if want_img and (no_img or failed) and "giao thẳng" not in st.get("error", ""):
-        mark_img_fail(src)                       # thật sự đã thử mà không vẽ được (không tính lần bỏ qua)
-    if not (no_img or failed) or (src == "codex" and not want_img):
+    quota = int(st.get("img_quota_until") or 0)            # hết lượt vẽ giữa chừng (Gemini CLI)
+    partial = want_img and quota and not no_img and not failed and bool(_imgs(v))   # vẽ dở: có vài ảnh rồi hết lượt
+    if want_img and (no_img or failed or partial) and "giao thẳng" not in st.get("error", ""):
+        mark_img_fail(src, quota)                # thật sự đã thử mà không vẽ được (không tính lần bỏ qua)
+    if not (no_img or failed or partial) or (src == "codex" and not want_img):
         return
     cfgd = rjson(CFG_FILE, {}) or {}
     ok = ((cfgd.get("ais") or {}).get(dst) or {}).get("ok") is not False
@@ -94,7 +173,17 @@ def worker_fallback(st, v, a, edit, want_img):
         return                                   # bên kia không dùng được / cũng vừa không vẽ được -> để Claude quyết
     gv = v / ("gpt" if dst == "codex" else "gemini")
     gv.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, str(APP), "worker", dst, "--task", str(v / "TASK.md"), "--out", str(v / (gv.name + "_out")),
+    task_f = v / "TASK.md"
+    if partial:                                  # vẽ dở -> bên kia chỉ vẽ NỐT phần còn thiếu, giữ cùng phong cách
+        have = [str(f.relative_to(v)).replace("\\", "/") for f in _imgs(v)]
+        task_f = gv.parent / "TASK_vẽ_nốt.md"
+        task_f.write_text((v / "TASK.md").read_text(encoding="utf-8", errors="replace") + (
+            "\n\n---\nPHẦN CÒN THIẾU: worker trước đã vẽ được " + str(len(have)) + " ảnh rồi hết lượt. Ảnh đã có (trong "
+            + str(v) + "): " + ", ".join(have) + ".\nChỉ vẽ NỐT những ảnh còn thiếu theo đề bài trên; xem ảnh đã có để giữ cùng "
+            "phong cách, kích thước, cách đặt tên; KHÔNG vẽ lại ảnh đã có. Cuối câu trả lời ghi rõ đã vẽ thêm ảnh nào."
+            + (" Ảnh trong thư mục " + CODE_DRAWN + " do worker trước tự vẽ bằng code sau khi hết lượt (không đạt): vẽ lại "
+               "bằng AI." if st.get("code_drawn") else "")), encoding="utf-8")
+    cmd = [sys.executable, str(APP), "worker", dst, "--task", str(task_f), "--out", str(v / (gv.name + "_out")),
            "--vdir", str(gv), "--timeout", str(a.timeout)] + (["--edit", str(edit)] if edit else []) + \
           (["--write"] if dst == "gemini" and want_img and not edit else [])
     try:
@@ -105,7 +194,13 @@ def worker_fallback(st, v, a, edit, want_img):
     gs = rjson(gv / "status.json", {}) or {}
     if (gv / "result.md").is_file():
         shutil.copy2(gv / "result.md", v / "result.md")
-    st[src + "_error"] = (("Gemini" if src == "gemini" else "GPT") + " không tạo ra ảnh" if no_img else st.get("error", ""))[:300]
+    who = "Gemini" if src == "gemini" else "GPT"
+    st[src + "_error"] = (f"{who} vẽ được {len(_imgs(v)) - len(_imgs(gv))} ảnh rồi hết lượt vẽ; bên kia vẽ nốt phần còn thiếu"
+                          if partial else f"{who} không tạo ra ảnh" if no_img else st.get("error", ""))[:300]
+    if st.get("code_drawn"):
+        st[src + "_error"] += f"; {len(st['code_drawn'])} ảnh {who} tự vẽ bằng code đã chuyển vào {CODE_DRAWN}"
+    if quota:
+        st[src + "_error"] += " (" + src + " vẽ lại được lúc " + datetime.datetime.fromtimestamp(quota).strftime("%H:%M") + ")"
     tag = "gpt" if dst == "codex" else "gemini"
     st.update(status=gs.get("status") or "failed", model=f"{tag}:" + str(gs.get("model") or "?"), via=f"{tag}-fallback",
               error=gs.get("error", ""), seconds=(st.get("seconds") or 0) + (gs.get("seconds") or 0))
@@ -338,6 +433,16 @@ def cmd_worker(argv):
             except Exception:
                 resp = so
             (v / "result.md").write_text(resp, encoding="utf-8")
+            if want_img:
+                qu = img_quota_until(str(resp) + "\n" + se[-3000:])
+                at, qu2 = agy_img_error(t0)
+                if at:                                 # hết lượt vẽ AI giữa chừng: ảnh tạo sau lúc đó là vẽ bằng code
+                    qu = qu or qu2
+                    cd = set_aside_code_drawn(v, at)
+                    if cd:
+                        st["code_drawn"] = cd
+                if qu:
+                    st["img_quota_until"] = qu
         res = v / "result.md"
         if to:
             st.update(status="timeout", error=f"Quá {a.timeout}s")

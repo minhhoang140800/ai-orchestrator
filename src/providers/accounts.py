@@ -85,7 +85,8 @@ def setup_state():
 def ai_state():
     lm = limits()
     return {k: {"installed": bool(find_bin(v["bin"])), **CFG["ais"].get(k, {}),
-                **({"limit_until": lm[k]["until"], "limit_known": lm[k].get("known", True)} if k in lm else {})}
+                **({"limit_until": lm[k]["until"], "limit_known": lm[k].get("known", True)} if k in lm else {}),
+                **({"img_until": img_block_until(k)} if img_block_until(k) else {})}      # hết lượt VẼ ẢNH (CLI), vẫn làm việc chữ
             for k, v in AIS.items()}
 
 

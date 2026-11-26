@@ -299,6 +299,112 @@ class Accounts(unittest.TestCase):
         self.assertEqual(NS["ai_email"]("gemini"), "moi@gmail.com")
 
 
+class ImageQuota(unittest.TestCase):
+    """Gemini CLI hết lượt vẽ: nhớ đúng giờ mở lại; vẽ dở thì bên kia vẽ nốt phần thiếu."""
+    MSG = ("Encountered error in tool execution: image generation quota exceeded, try again later: transport error "
+           "(ResourceExhausted, HTTP 429): You have exhausted your capacity on this model. Your quota will reset after 3h20m14s.")
+
+    def setUp(self):
+        (Path(NS["DATA"]) / NS["IMG_FAIL_F"]).unlink(missing_ok=True)
+
+    def test_parse_reset(self):
+        u = NS["img_quota_until"](self.MSG)
+        self.assertAlmostEqual(u - time.time(), 3 * 3600 + 20 * 60 + 14, delta=5)
+        self.assertEqual(NS["img_quota_until"]("Done, 4 images saved."), 0)
+
+    def test_block_until_reset(self):
+        until = int(time.time() + 3 * 3600)
+        NS["mark_img_fail"]("gemini", until)
+        self.assertTrue(NS["img_failed_recent"]("gemini"))
+        self.assertEqual(NS["img_block_until"]("gemini"), until)
+        NS["mark_img_fail"]("gemini", int(time.time() - 5))           # đã qua giờ mở lại -> vẽ lại được
+        self.assertFalse(NS["img_failed_recent"]("gemini"))
+        NS["mark_img_fail"]("codex")                                   # không rõ giờ: nhớ 30 phút như cũ
+        self.assertTrue(NS["img_failed_recent"]("codex"))
+        self.assertEqual(NS["img_block_until"]("codex"), 0)
+
+    def test_partial_then_other_draws_rest(self):
+        v = Path(tempfile.mkdtemp()) / "v1"
+        v.mkdir()
+        (v / "TASK.md").write_text("Vẽ 4 icon game, mỗi icon 1 file png", encoding="utf-8")
+        for i in (1, 2):
+            (v / f"icon_{i}.png").write_bytes(b"x")
+        st = {"status": "completed", "img_quota_until": NS["img_quota_until"](self.MSG)}
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["task"] = Path(cmd[cmd.index("--task") + 1]).read_text(encoding="utf-8")
+            gv = Path(cmd[cmd.index("--vdir") + 1])
+            for i in (3, 4):
+                (gv / f"icon_{i}.png").write_bytes(b"x")
+            NS["wjson"](gv / "status.json", {"status": "completed", "model": "gpt-x", "seconds": 5})
+        old = (NS["subprocess"].run, NS["find_bin"], NS["usage_block"])
+        NS["subprocess"].run, NS["find_bin"], NS["usage_block"] = fake_run, (lambda *a: "x"), (lambda *a, **k: 0)
+        try:
+            a = type("A", (), {"worker": "gemini", "timeout": 60})()
+            NS["worker_fallback"](st, v, a, None, True)
+        finally:
+            NS["subprocess"].run, NS["find_bin"], NS["usage_block"] = old
+        self.assertIn("PHẦN CÒN THIẾU", seen["task"])
+        self.assertIn("icon_1.png", seen["task"])
+        self.assertEqual(st.get("via"), "gpt-fallback")
+        self.assertIn("vẽ được 2 ảnh rồi hết lượt", st.get("gemini_error", ""))
+        self.assertEqual(len(NS["_imgs"](v)), 4)
+        self.assertTrue(NS["img_failed_recent"]("gemini"))
+
+
+class CodeDrawn(unittest.TestCase):
+    """Gemini CLI hết lượt vẽ rồi tự vẽ bằng code (vẫn báo xong): đọc log CLI -> chuyển ảnh đó sang _ve_bang_code."""
+    def test_log_and_set_aside(self):
+        home = Path(tempfile.mkdtemp(prefix="home-"))
+        old = {k: os.environ.get(k) for k in ("USERPROFILE", "HOME")}
+        os.environ["USERPROFILE"] = os.environ["HOME"] = str(home)
+        try:
+            t0 = time.time() - 60
+            err_at = datetime_now = time.localtime(t0 + 20)
+            line = time.strftime("E%m%d %H:%M:%S", err_at) + (".007222    1859 generate_image.go:171] error generating image: "
+                                                              "transport error (ResourceExhausted, HTTP 429): You have exhausted "
+                                                              "your capacity on this model. Your quota will reset after 2h5m0s.")
+            d = home / ".gemini" / "antigravity-cli" / "log"
+            d.mkdir(parents=True)
+            (d / "cli-x.log").write_text("I1126 info\n" + line + "\n", encoding="utf-8")
+            at, until = NS["agy_img_error"](t0)
+            self.assertAlmostEqual(at, time.mktime(err_at), delta=1)
+            self.assertAlmostEqual(until - time.time(), 2 * 3600 + 5 * 60, delta=5)
+            v = Path(tempfile.mkdtemp()) / "v1"
+            v.mkdir()
+            ok_img, code_img = v / "ai.png", v / "code.png"
+            ok_img.write_bytes(b"x")
+            os.utime(ok_img, (at - 10, at - 10))                   # vẽ trước lúc hết lượt -> ảnh AI thật
+            code_img.write_bytes(b"x")                              # tạo sau -> vẽ bằng code
+            self.assertEqual(NS["set_aside_code_drawn"](v, at), ["code.png"])
+            self.assertEqual([f.name for f in NS["_imgs"](v)], ["ai.png"])
+            self.assertTrue((v / NS["CODE_DRAWN"] / "code.png").exists())
+        finally:
+            for k, val in old.items():
+                if val is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = val
+
+
+class AskUser(unittest.TestCase):
+    """Câu trả lời kết thúc bằng câu hỏi -> task 'Chờ bạn trả lời'; luật hỏi trước khi bắt tay khi đề bài mơ hồ."""
+    def test_trailing_question(self):
+        au = NS["asks_user"]
+        self.assertTrue(au("Đã xong phần 1.\n\nBạn chọn **A hay B**?"))
+        self.assertTrue(au("Có 2 hướng:\n- A\n- B\n\nBạn muốn tôi làm B không?  "))
+        self.assertFalse(au("Đã phát hành v11.5. Bạn bấm Cập nhật để dùng."))
+        self.assertFalse(au("Câu hỏi của bạn: vì sao? Trả lời: do hết lượt.\n\nĐã sửa xong."))
+
+    def test_prompt_rule(self):
+        t = {"id": "Q1", "text": "x", "mode": "balanced", "folder": "01 - Hỏi", "watch": False}
+        NS["write_claude_md"](t)
+        md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("TRƯỚC khi bắt tay", md)
+        self.assertIn("ĐANG làm mà vướng", md)
+
+
 class App(unittest.TestCase):
     def test_starts_and_serves(self):
         s = socket.socket()
