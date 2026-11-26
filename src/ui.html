@@ -792,7 +792,7 @@ function bindComposer(onSend) {
   $("modeMenu").onclick = async (e) => {
     const b = e.target.closest("[data-mode]"); if (!b) return; e.stopPropagation();
     $("modeMenu").classList.remove("show"); if (b.dataset.mode === curMode) return;
-    if (c.id !== "homeComp" && b.dataset.mode === "code") return toast("Code mode cần thư mục dự án: tạo task mới ở chế độ Code");
+    if (c.id !== "homeComp" && b.dataset.mode === "code") return toast("Tạo task mới để chạy Code Mode");
     curMode = b.dataset.mode; paintMode();
     if (c.id === "homeComp") { localStorage.setItem("mode", curMode); lsSet("judge", JUDGE_MODES.includes(curMode) ? "1" : "0"); paintKind(); repaintWatch(); }
     else { const r = await api("/api/task/act", { id: T.id, action: "mode", text: curMode }); toast(r.error || "Đã đổi chế độ"); if (!r.error) { T.judge = JUDGE_MODES.includes(curMode); repaintWatch(); } kick(); }

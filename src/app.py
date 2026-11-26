@@ -1394,7 +1394,7 @@ def act(tid, action, text="", files=None, template=""):
                 t["status"] = "queued"
                 t["next"] = {"kind": "answer" if s == "waiting" else "followup", "text": text, "files": files}
         elif action == "mode" and (text == "code") != (t.get("kind") == "code"):
-            return {"error": "Code mode cần thư mục dự án: tạo task mới ở chế độ Code" if text == "code"
+            return {"error": "Tạo task mới để chạy Code Mode" if text == "code"
                     else "Task Code chỉ chạy ở chế độ Code"}
         elif action == "judge":
             t["judge"] = text == "on"                  # Giám sát: áp dụng từ lượt chạy kế tiếp
