@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v11.8 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v11.9 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -115,6 +115,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | Kết quả 2 lần vẫn chưa đúng | Gợi ý bật Giám sát, nút ngay cuối đoạn chat (v9.9) |
 | Phong cách | Porcelain 2.0: font Geist, icon Lucide, chat 820px (v8.6) |
 | Thư mục kết quả khó tìm (<dự án>/<ngày>/<giờ tên task>, trùng tên thì "(2)") | `<số thứ tự> - <tên đoạn chat>` (có dự án thì nằm trong thư mục dự án); mỗi lần xuất vào thư mục con `YYYYMMDD-<tên>`, sửa lại thì tạo thư mục mới. Lượt đầu chờ đặt tên tối đa 10 giây để thư mục đúng tên đoạn chat (v11.1) |
+| Kết quả kém dần, chậm (so với ply36 Tug of War 23/11: GPT vẽ trực tiếp, hướng dẫn ngắn, phiên mới): Gemini trước cho ảnh, hướng dẫn 21,9k ký tự, nhiều bước (tiêu chí, chấm, A/B), phiên nối tiếp từ 23/11 | v11.9: bỏ luật Gemini trước, app tự học chọn worker theo kết quả + thời gian (worker_stats.json; Gemini vẽ kém -> giao thẳng GPT, 24h cho thử lại); theo dõi worker đang chạy, dừng sớm khi hết lượt / GPT im lặng quá 5-8 phút / chạy quá 4 lần thường thấy; worker ảnh không tự kiểm tra kỹ; nhãn bên đang làm thật; Giám sát tắt = chỉ giao việc (không tiêu chí/giám khảo/tự xem lại); câu hỏi A/B là tuỳ chọn; đề bài tự học (mẫu đề bài làm tốt); bộ nhớ gọn (chung <=700 + lịch sử theo dự án), bộ nhớ dự án dài chỉ nhúng 1.000 ký tự đầu; phiên Claude >=20 lượt hoặc nghỉ >1 ngày -> tin nhắn mới mở phiên mới kèm tóm tắt. Hướng dẫn Mini Soccer: 21,9k -> ~12-13k |
 | Muốn dùng Maestro trên điện thoại, mọi mạng, không cài app | Cloudflare Quick Tunnel (cloudflared tự tải, chạy tách khỏi app) + mã bí mật (cookie). QR cố định: trang GitHub Pages (nhánh `gh-pages`) đọc link hiện tại từ kênh ntfy.sh rồi chuyển sang; mã nằm sau `#` (v10.4) |
 | Giao diện điện thoại tràn ngang, composer lơ lửng | Thanh bên thành ngăn kéo, composer sát đáy trang chủ (v10.4) |
 | Dòng toạ độ đánh dấu hiện trong bong bóng chat; ảnh nằm trong bong bóng | Ẩn dòng toạ độ khi hiển thị (vẫn gửi cho AI); ảnh/file đưa ra ngoài bong bóng (v10.4) |
@@ -141,11 +142,11 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 ## 4. Quyết định đã chốt (giữ nguyên trừ khi người dùng đổi)
 
 - Claude làm việc quan trọng/cần tư duy và viết lách; việc khối lượng giao worker.
-- Không cân tải, không tự mở phiên mới.
+- Không cân tải. Phiên Claude: đã qua 20 lượt hoặc nghỉ hơn 1 ngày thì tin nhắn mới mở phiên mới kèm tóm tắt (v11.9, thay quyết định cũ "không tự mở phiên mới").
 - Gemini ở Balanced chạy medium, lên high khi task khó hoặc làm lại.
-- Giám sát: Pro/Balanced/Code tự bật; Code bỏ giám khảo khi test đã qua hết.
+- Giám sát: Pro/Balanced/Code tự bật; Code bỏ giám khảo khi test đã qua hết. Giám sát tắt = Claude chỉ giao việc (không tiêu chí, không giám khảo, không tự xem lại). Câu hỏi dạng A/B chỉ khi có lựa chọn rõ (v11.9).
 - "Chỉ dùng trong gói" luôn bật, không có công tắc; không tự mua thêm credit.
-- Ảnh: bên không vẽ được thì thử 1 lần rồi đổi worker, nhớ 30 phút. Số ảnh (1 ảnh hay nhiều ảnh, có gộp lưới hay không) do yêu cầu của người dùng quyết định; bỏ luật "Turbo không gộp ảnh thành lưới" (v11.3).
+- Chọn worker: app tự học theo kết quả + thời gian (bỏ luật "Gemini trước", v11.9); bên không vẽ được thì nhớ 30 phút / tới giờ mở lại. Số ảnh (1 ảnh hay nhiều ảnh, có gộp lưới hay không) do yêu cầu của người dùng quyết định; bỏ luật "Turbo không gộp ảnh thành lưới" (v11.3).
 - Bảng Mức dùng: "% đã dùng" kiểu Claude, không đếm số lượt.
 - Đo mức dùng mỗi lượt (chạy nền) + tổng task.
 - Learning: không có công tắc, tự gửi bài học, không gửi dữ liệu riêng; quy tắc chung chỉ áp dụng khi hợp >90% loại task.
