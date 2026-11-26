@@ -984,9 +984,7 @@ def start_run(t):
     t.pop("md_changed", None)                   # đã nhắc trong prompt của lượt này
     t.update(status="running", started=now(), _pause=False, _cancel=False, _quit=False, _redirect=None)
     t["wi"] = tmsg(t, "work", "", status="running", started=now(), started_ts=time.time(), steps=[])
-    if t.get("u0") is None:                     # đo mức dùng 1 lần khi task bắt đầu (không đo từng lượt cho đỡ tốn)
-        t["u0"] = {}
-        threading.Thread(target=usage_task_start, args=(t,), daemon=True).start()
+    threading.Thread(target=usage_turn, args=(t, work(t), "u0"), daemon=True).start()   # đo mức dùng trước lượt (chạy nền)
     tsave(t)
     try:
         proc = subprocess.Popen(args, cwd=str(d), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -1262,12 +1260,11 @@ def watch(t, p, nxt):
         registry(force=True)
     except Exception:
         pass
-    if t.get("status") == "done" and "u0" in t:
-        try:
-            usage_task_done(t)              # task hoàn thành: đo lại -> mức task tốn (≈, task khác chạy cùng lúc cũng tính vào)
-            tsave(t)
-        except Exception as e:
-            dlog(f"usage_task_done: {e}")
+    try:
+        usage_turn(t, w, "u1")              # đo sau lượt (chạy sau khi đã trả kết quả) -> lượt này tốn bao nhiêu, cộng vào cả task
+        tsave(t)
+    except Exception as e:
+        dlog(f"usage_turn: {e}")
 
 
 _ready = {"t": 0.0}
@@ -2804,6 +2801,8 @@ def export_log():
                 elif m["role"] == "work":
                     dur = (m.get("ended_ts") or time.time()) - m.get("started_ts", time.time())
                     lines.append(f"- {m.get('started', '')}  LƯỢT LÀM: {fmt(dur)} — {m.get('status')} — {len(m.get('steps', []))} bước")
+                    if m.get("cost"):
+                        lines.append("    mức dùng lượt ≈ " + "; ".join(f"{k} +{v.get('five_hour', 0)}% phiên +{v.get('week', 0)}% tuần" for k, v in m["cost"].items()))
                     for s in m.get("subtasks", []):
                         lines.append(f"    - sub-task {s['id']}: {s['worker'] or '?'} {s['model']}  lần {s['attempt']}  "
                                      f"{fmt(s['seconds']) if s.get('seconds') is not None else '?'}  {s['status']}  {s['error']}")
@@ -3965,24 +3964,31 @@ def usage_snap():
     return out
 
 
-def usage_task_start(t):
+def usage_turn(t, w, key):
+    """Đo mức dùng trước (u0) / sau (u1) một lượt làm (chỉ đọc số mức dùng, không tốn lượt AI);
+    đủ cả hai thì ghi phần tăng vào lượt đó (cost) và cộng dồn vào cả task (t.cost)."""
+    if w is None:
+        return
     try:
-        t["u0"] = usage_snap()
+        snap = usage_snap()
     except Exception as e:
         dlog(f"usage_snap: {e}")
-
-
-def usage_task_done(t):
-    """Phần % tăng từ lúc task bắt đầu tới khi hoàn thành; task được giao tiếp sau đó thì đo lại và cộng dồn."""
-    u0, u1 = t.get("u0") or {}, usage_snap()
-    cost = t.get("cost") or {}
-    for ai, v1 in u1.items():
+        return
+    if key == "u0":
+        w["u0"] = snap
+        return
+    u0 = w.pop("u0", None)
+    if u0 is None:
+        return
+    cost, tot = {}, t.get("cost") or {}
+    for ai, v1 in snap.items():
         v0 = u0.get(ai) or {}
         for k in v1:
             if k in v0 and v1[k] - v0[k] > 0:
-                cost.setdefault(ai, {})[k] = round(cost.get(ai, {}).get(k, 0) + v1[k] - v0[k], 1)
-    t["cost"] = cost
-    t["u0"] = u1                                # mốc cho lần giao tiếp theo (không phải đo lại lúc bắt đầu)
+                cost.setdefault(ai, {})[k] = round(v1[k] - v0[k], 1)
+                tot.setdefault(ai, {})[k] = round(tot.get(ai, {}).get(k, 0) + v1[k] - v0[k], 1)
+    w["cost"] = cost
+    t["cost"] = tot
 
 
 def usage_counts():
