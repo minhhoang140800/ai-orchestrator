@@ -1007,10 +1007,11 @@ let decOpen = false;
 /* ---------------- Activity panel + thao tác trên tin nhắn ---------------- */
 let actOpen = !!localStorage.getItem("act");
 function ago(ts) { if (!ts) return ""; const s = Math.max(0, Date.now() / 1000 - ts); return s < 60 ? "vừa xong" : s < 3600 ? Math.floor(s / 60) + " phút trước" : s < 86400 ? Math.floor(s / 3600) + " giờ trước" : Math.floor(s / 86400) + " ngày trước"; }
+setInterval(() => document.querySelectorAll("[data-ago]").forEach((e) => { const ts = +e.dataset.ago; if (ts) e.textContent = ago(ts); }), 30000);   // "x phút trước" tự cập nhật
 function mts(m) { return m.ts || (m.time ? new Date(String(m.time).replace(" ", "T")).getTime() / 1000 : 0); }
 function mActs(m, i, who) {
   const busy = ["running", "queued", "login"].includes(T.status);
-  return `<div class="macts"><span class="mt" title="${esc(m.time || "")}">${esc(ago(mts(m)))}</span>
+  return `<div class="macts"><span class="mt" data-ago="${mts(m) || ""}" title="${esc(m.time || "")}">${esc(ago(mts(m)))}</span>
     ${!busy ? `<button data-mretry="${i}" title="${who === "user" ? "Gửi lại yêu cầu này" : "Làm lại câu trả lời này"}"><svg class="i" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg></button>` : ""}
     ${who === "user" ? `<button data-medit="${i}" title="Sửa và gửi lại">${I.edit}</button>` : ""}
     <button data-mcopy="${i}" title="Copy"><svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button></div>`;
