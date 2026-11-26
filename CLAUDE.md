@@ -51,7 +51,8 @@ git add -A && git commit -m "vX.Y: <tóm tắt>" && git push
 ```
 `build.py` tự chặn nếu thiếu địa chỉ cập nhật, lỗi cú pháp hoặc app không khởi động được. File gửi người dùng khi cần cài
 lại: `src/dist/Maestro_setup.bat` (Windows), `Maestro_mac.zip` (Mac). Gốc repo giữ: `app.py`, `latest.json`,
-`Maestro_vX.Y.bat`, `Maestro_mac.zip`, `Maestro_Uninstall.bat`.
+`Maestro_vX.Y.bat`, `Maestro_setup_latest.bat` (bản cài mới nhất, `Maestro_m_setup.bat` tải từ GitHub), `Maestro_mac.zip`,
+`Maestro_m_setup.bat` (src/m_setup.bat), `Maestro_m_uninstall.bat` (src/m_uninstall.bat: [1] giữ data, [2] xoá data).
 
 ## Đọc log người dùng gửi
 Nút Export log tạo `Maestro-log-*.zip`: `summary.md` (task, lượt làm, sub-task), `debug.log`, `install.log`

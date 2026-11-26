@@ -112,6 +112,8 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .accrow small.bad{color:var(--bad)}
 .kchip{display:inline-block;padding:1px 7px;border:1px solid var(--line);border-radius:6px;font-size:12px;color:var(--mute);margin-right:6px}
 .inst{margin-top:8px;font-size:13px}.inst li{margin:2px 0}
+.whint{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px 10px 16px;background:var(--soft);font-size:14px;color:var(--ink)}
+.whint .grow{flex:1}.whint .icon{color:var(--mute)}
 .wbtn{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;margin-right:8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--mute);font:inherit;font-size:13px;cursor:pointer;position:relative}
 .wbtn:hover{color:var(--ink,#222)}.wbtn.on{background:var(--ink,#222);border-color:var(--ink,#222);color:#fff}
 .wbtn[data-tip]:hover::after{content:attr(data-tip);position:absolute;top:calc(100% + 6px);right:0;white-space:nowrap;background:#222;color:#fff;font-size:12px;padding:5px 8px;border-radius:6px;z-index:30;pointer-events:none}
@@ -867,17 +869,17 @@ function renderLib() {
 /* ---------------- Project (bộ nhớ dự án) + Template ---------------- */
 let curTpl = "", pEdit = "";
 const homeProj = () => { const v = localStorage.getItem("proj") || ""; return S.projects.some((p) => p.id === v) ? v : ""; };
-const curProj = () => (T && $("taskComp") ? T.project || "" : homeProj());
+const curProj = (t) => (t ? t.project || "" : T && $("taskComp") ? T.project || "" : homeProj());
 function whenTxt(c) { const d = new Date(String(c).replace(" ", "T")); if (isNaN(d)) return c || ""; const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5); return days <= 0 ? "Hôm nay" : days === 1 ? "Hôm qua" : `${days} ngày trước`; }
 const WHISTLE = '<svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="15" r="5"/><path d="M12.6 11.4 21 8v4.2l-6.6 1.4"/><path d="M4 5.5l1.6 1.6M8.5 3.5v2.3M2 9.5h2.3"/></svg>';
 const JUDGE_MODES = ["pro", "balanced", "code"];      // các chế độ tự bật Giám sát
 function homeJudge() { const v = lsGet("judge"); return v ? v === "1" : JUDGE_MODES.includes(normMode(lsGet("mode"))); }
-function watchBtn() {       // nút Giám sát: giám khảo chấm, sửa tới khi đạt (Pro/Balanced tự bật khi đổi chế độ)
-  const on = T && $("taskComp") ? !!T.judge : homeJudge();
-  return `<button class="wbtn ${on ? "on" : ""}" id="wBtn" data-watch="1" aria-pressed="${on}" data-tip="Giám sát: Lâu hơn, tự check và fix đến khi hoàn thiện">${WHISTLE}Giám sát</button>`;
+function watchBtn(t) {       // nút Giám sát: giám khảo chấm, sửa tới khi đạt (Pro/Balanced tự bật khi đổi chế độ)
+  const on = t ? !!t.judge : T && $("taskComp") ? !!T.judge : homeJudge();
+  return `<button class="wbtn ${on ? "on" : ""}" id="wBtn" data-watch="1" aria-pressed="${on}" data-tip="Giám sát: Lâu hơn, check lại và fix đến khi hoàn thiện">${WHISTLE}Giám sát</button>`;
 }
 function repaintWatch() { const b = $("wBtn"); if (b) b.outerHTML = watchBtn(); }
-function projBtn() { const p = S.projects.find((x) => x.id === curProj()); return `<button class="pbtn" id="pBtn" aria-haspopup="true" title="Dự án và bộ nhớ dự án">${I.proj}${p ? esc(p.name) : "Project"}${I.down}</button>`; }
+function projBtn(t) { const p = S.projects.find((x) => x.id === curProj(t)); return `<button class="pbtn" id="pBtn" aria-haspopup="true" title="Dự án và bộ nhớ dự án">${I.proj}${p ? esc(p.name) : "Project"}${I.down}</button>`; }
 function bindProj() { const b = $("pBtn"); if (b) b.onclick = (e) => { e.stopPropagation(); const m = $("pMenu"); if (m.classList.contains("show")) return m.classList.remove("show"); pEdit = curProj(); openProj(b); }; }
 async function openProj(b) {
   const m = $("pMenu"), r = b.getBoundingClientRect();
@@ -935,7 +937,7 @@ function freeBar() {        // gói miễn phí: ChatGPT làm quản lý, mời 
 function renderHome() {
   T = null; lastSnap = "";
   const rec = S.tasks.slice(0, 5);
-  $("main").innerHTML = `<div class="crumb">${document.querySelector(".app").classList.contains("nosb") ? SBSHOW : ""}<span>Workspace / Task mới</span><span class="grow"></span>${watchBtn()}${projBtn()}</div>
+  $("main").innerHTML = `<div class="crumb">${document.querySelector(".app").classList.contains("nosb") ? SBSHOW : ""}<span>Workspace / Task mới</span><span class="grow"></span>${projBtn()}${watchBtn()}</div>
     <div class="home"><div class="in"><h2>Hôm nay làm gì?</h2>
     ${freeBar()}${composer("homeComp", PH_NEW)}
     ${rec.length ? `<div class="recent"><div class="k">Task gần đây</div>${rec.map((t) => `<button data-sel="${t.id}"><span>${esc(t.title)}</span><small>${esc(whenTxt(t.created))}</small></button>`).join("")}</div>` : ""}</div></div>`;
@@ -1051,8 +1053,8 @@ function renderTask() {
   const sc0 = document.querySelector(".scroll"), wasBottom = !sc0 || sc0.scrollHeight - sc0.scrollTop - sc0.clientHeight < 80;
   const acts = [];
   if (["paused", "failed"].includes(t.status)) acts.push(`<button class="pri" data-act="resume">Tiếp tục</button>`);
-  acts.push(watchBtn());
-  acts.push(projBtn());
+  acts.push(projBtn(t));
+  acts.push(watchBtn(t));
   acts.push(`<button class="ghost icon ${actOpen ? "on" : ""}" id="bAct" title="Activity — toàn bộ tiến trình" aria-label="Activity" aria-pressed="${actOpen}">${lu("activity")}</button>`);
   acts.push(`<button class="ghost icon" id="bMore" title="Thêm" aria-label="Thêm" aria-haspopup="true">${lu("ellipsis")}</button>`);
   const lastC = t.messages.map((m) => m.role).lastIndexOf("claude");
@@ -1087,7 +1089,7 @@ function renderTask() {
       <span class="grow"></span>${acts.join("")}`;
   $("decbar").innerHTML = decHtml(t);
   sendIcon(); if (curMode !== normMode(t.mode) && !$("modeMenu").classList.contains("show")) { curMode = normMode(t.mode); paintMode(); }
-  $("thread").innerHTML = body + queued;
+  $("thread").innerHTML = body + queued + watchHint(t);
   $("tTitle").onclick = startRename; $("tTitle").onkeydown = (e) => { if (e.key === "Enter") startRename(); }; bindProj();
   $("bMore").onclick = (e) => { e.stopPropagation(); moreMenu($("bMore"), t, live); };
   $("bAct").onclick = () => { actOpen = !actOpen; localStorage.setItem("act", actOpen ? "1" : ""); renderTask(); };
@@ -1098,6 +1100,16 @@ function renderTask() {
 function botBtn() {
   const sc = document.querySelector(".scroll"), b = $("toBot"); if (!sc || !b) return;
   b.hidden = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 160;
+}
+const FIX_RE = /sửa|chưa (đúng|đạt|ổn|được)|không (đúng|đạt|ổn|giống)|sai|làm lại|lỗi|thiếu|chỉnh|vẫn|lại đi|chưa ra/i;
+function watchHint(t) {     // kết quả 2 lần vẫn chưa đúng yêu cầu (người dùng nhắn sửa 2 lần) + Giám sát tắt -> gợi ý bật, nút ngay cuối chat
+  if (t.judge || ["running", "queued"].includes(t.status) || lsGet("whint:" + t.id)) return "";
+  const ms = t.messages, firstAns = ms.findIndex((m) => m.role === "claude");
+  if (firstAns < 0) return "";
+  const fixes = ms.slice(firstAns + 1).filter((m) => m.role === "user" && FIX_RE.test(m.text || "")).length;
+  if (fixes < 2) return "";
+  return `<div class="whint"><span class="grow">Kết quả đã 2 lần chưa đúng ý? Bật <b>Giám sát</b> để Maestro check lại và fix đến khi hoàn thiện (lâu hơn).</span>
+    <button class="wbtn" data-watch="1">${WHISTLE}Giám sát</button><button class="ghost icon" data-whx="${t.id}" title="Ẩn gợi ý" aria-label="Ẩn gợi ý">${lu("x")}</button></div>`;
 }
 function moreMenu(b, t, live) {       // menu "⋯" ở đầu trang task
   const m = $("hMenu"), r = b.getBoundingClientRect();
@@ -1145,7 +1157,7 @@ setInterval(() => {   // đồng hồ "Đang làm"
 
 /* ---------------- clicks ---------------- */
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec],[data-opset],[data-paste],[data-fb],[data-watch],[data-openact],[data-ofo],[data-fmore]");
+  const el = e.target.closest("[data-sel],[data-act],[data-dechide],[data-actx],[data-mcopy],[data-medit],[data-mretry],[data-savet],[data-bacc],[data-brej],[data-untpl],[data-rmf],[data-tab],[data-login],[data-test],[data-w],[data-file],[data-cancel],[data-relogin],[data-code],[data-libtab],[data-art],[data-dec],[data-opset],[data-paste],[data-fb],[data-watch],[data-openact],[data-ofo],[data-fmore],[data-whx]");
   if (!el) return;
   const d = el.dataset;
   if (d.libtab) { libTab = d.libtab; return renderLib(); }
@@ -1178,11 +1190,12 @@ document.addEventListener("click", async (e) => {
   else if (d.rmf) { files.splice(+d.rmf, 1); renderAtts(); }
   else if (d.relogin) { await api("/api/ai/cancel", { ai: "claude" }); setTimeout(() => api("/api/ai/login", { ai: "claude" }), 1500); }
   else if (d.code) { const v = $("code_" + d.code).value.trim(); if (!v) return; el.disabled = true; el.innerHTML = '<span class="spin"></span>'; const r = await api("/api/ai/code", { ai: d.code, code: v }); if (r.error) toast(r.error); setTimeout(() => { if (el.isConnected) { el.disabled = false; el.textContent = "Gửi"; toast("Mã chưa được chấp nhận — thử lại hoặc bấm Hủy rồi Đăng nhập lại"); } }, 12000); }
+  else if (d.whx) { lsSet("whint:" + d.whx, "1"); lastSnap = ""; renderTask(); }
   else if (d.openact) { actOpen = true; lsSet("act", "1"); renderTask(); }
   else if (d.fmore) { fMore.add(d.fmore); lastSnap = ""; renderTask(); }
   else if (d.ofo) { const r = await api("/api/ofile", { t: T.id, i: d.oi, f: d.ofo, op: "open" }); if (r.error) toast(r.error); }
   else if (d.watch) {
-    if (T && $("taskComp")) { const on = !T.judge; const r = await api("/api/task/act", { id: T.id, action: "judge", text: on ? "on" : "off" }); if (r.error) return toast(r.error); T.judge = on; toast(on ? "Đã bật Giám sát (áp dụng từ lượt làm tiếp theo)" : "Đã tắt Giám sát"); }
+    if (T && $("taskComp")) { const on = !T.judge; const r = await api("/api/task/act", { id: T.id, action: "judge", text: on ? "on" : "off" }); if (r.error) return toast(r.error); T.judge = on; toast(on ? "Đã bật Giám sát (áp dụng từ lượt làm tiếp theo)" : "Đã tắt Giám sát"); lastSnap = ""; renderTask(); }
     else { lsSet("judge", homeJudge() ? "0" : "1"); }
     repaintWatch();
   }
@@ -1322,7 +1335,12 @@ function renderSettings() {
   $("mDone").onclick = () => { if (!S.output) return toast("Chọn thư mục nhận kết quả"); closeSettings(); };
   $("mUpd").onclick = async () => {
     const b = $("mUpd"); b.disabled = true; b.innerHTML = '<span class="spin"></span> Đang kiểm tra…';
-    const r = await api("/api/update", {}); toast(r.error || r.msg);
+    let r = await api("/api/update", {});
+    if (r.ask) {          // đang có task chạy: hỏi trước
+      if (confirm("Đang có task chạy.\n\nOK: cập nhật ngay (task tạm dừng, cập nhật xong tự chạy tiếp)\nHủy: tự cập nhật khi các task chạy xong")) r = await api("/api/update", { force: true });
+      else { toast("Maestro sẽ tự cập nhật khi các task chạy xong"); renderSettings(); return; }
+    }
+    toast(r.error || r.msg);
     if (r.restart) { setTimeout(function wait() { fetch("/icon.svg").then(() => location.reload(), () => setTimeout(wait, 1000)); }, 2500); return; }
     renderSettings();
   };

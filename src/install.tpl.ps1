@@ -171,7 +171,27 @@ if (-not $ok) {
   if ((Get-Content $Log -Tail 60 -ErrorAction SilentlyContinue) -match 'ENOSPC') { Fail ('O ' + $sys + ' het dung luong (con ' + (FreeGB $sys) + ' GB). Giai phong it nhat 2 GB roi chay lai file nay.') }
   Fail $M.no_claude
 }
-$null = Step 'ChatGPT (Codex)' { Has codex } { & npm.cmd install -g '@openai/codex' }
+# Codex cai bang npm: lan chay dau, cua so cai chua thay node/npm vua cai -> tu tim npm canh node, them vao PATH, thu lai 1 lan
+function NpmCmd {
+  foreach ($d in @($nd, (Join-Path $env:ProgramFiles 'nodejs'), (Join-Path $env:LOCALAPPDATA 'Programs\nodejs'))) {
+    if ($d -and (Test-Path (Join-Path $d 'npm.cmd'))) { if ($env:Path -notlike "*$d*") { $env:Path = $d + ';' + $env:Path }; return (Join-Path $d 'npm.cmd') }
+  }
+  $c = Get-Command npm.cmd -ErrorAction SilentlyContinue; if ($c) { return $c.Source }
+  return 'npm.cmd'
+}
+function HasCodex { return (Has codex) -or (Test-Path (Join-Path $env:APPDATA 'npm\codex.cmd')) }
+$null = Step 'ChatGPT (Codex)' { HasCodex } {
+  RefreshPath
+  if (-not $nd) { try { $nd = Split-Path -Parent (Get-Command node -ErrorAction Stop).Source } catch {} }
+  $npm = NpmCmd
+  for ($k = 0; $k -lt 2 -and -not (HasCodex); $k++) {
+    & $npm install -g '@openai/codex'
+    RefreshPath
+    if (-not (HasCodex)) { Start-Sleep -Seconds 3 }
+  }
+  $np = Join-Path $env:APPDATA 'npm'
+  if ((Test-Path $np) -and ($env:Path -notlike "*$np*")) { $env:Path = $env:Path + ';' + $np }
+}
 $null = Step 'Gemini (Antigravity)' { Has agy } { & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Invoke-RestMethod https://antigravity.google/cli/install.ps1 | Invoke-Expression' }
 
 $py = FindPy

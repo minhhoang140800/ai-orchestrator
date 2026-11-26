@@ -108,7 +108,7 @@ AIS = {
     "codex": {"bin": "codex", "login": ["login"], "test": ["exec", "--skip-git-repo-check", *CODEX_SANDBOX, PING]},
     "gemini": {"bin": "agy", "login": [], "test": ["-p", PING]},
 }
-ICON_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="21.3" fill="#1E1E1E"/><g fill="none" stroke="#FFF" stroke-width="6.6"><path d="M23.5 33.8V50.9L50 77.3L76.5 50.9V33.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M50 33.8V74"/></g><circle cx="50" cy="33.8" r="3.3" fill="#FFF"/></svg>'
+ICON_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="103 103 1049 1049"><rect x="103" y="103" width="1049" height="1049" rx="250" fill="#1A1A1A"/><g fill="#FFF"><path id="L" d="M380 345H628A15 15 0 0 1 643 360V480A15 15 0 0 1 628 495H515A15 15 0 0 0 500 510V707A15 15 0 0 1 485 722H380A65 65 0 0 1 315 657V410A65 65 0 0 1 380 345Z"/><use href="#L" transform="rotate(180 627.5 627)"/><rect x="560" y="559" width="133" height="136" rx="34"/></g></svg>'
 
 
 # ---------------------------------------------------------------- helpers
@@ -799,8 +799,10 @@ Sửa lỗi: giao lại cùng --out. App tự chọn model — không truyền -
   "file đã sửa, lặp tới khi ĐẠT (tối đa 4 vòng; vẫn fail thì báo rõ còn lỗi gì):") if judge else
   ("GIÁM SÁT BẬT — không có giám khảo Claude: giao gemini soát theo criteria.md, sửa và soát lại tới khi đạt (tối đa 4 vòng).")
   if watch_on else "Giám sát TẮT — không gọi giám khảo; tự xem lại theo yêu cầu 1 lần, lỗi nhỏ thẩm mỹ thì ghi chú cho người dùng."}
-{f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1 [--model haiku|sonnet]
-  Văn bản/task nhẹ: --model haiku. Giám khảo model nhỏ trừ Pro. Code: chạy test trước, giám khảo soát phần đã sửa.
+{f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1
+  App tự chọn model giám khảo (nhanh) — không truyền --model. Chấm file NGAY trong work/<ID>/vN (trước khi chép sang OUTPUT):
+  file trượt do worker làm thì app TỰ giao lại đúng worker đó sửa đúng lỗi rồi chấm lại (review.json: auto_fix + đường dẫn
+  file mới) — bạn chỉ xử lý phần app không tự sửa được, rồi chép bản đạt sang OUTPUT. Tiêu chí được app gửi kèm cho worker.
 """ if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial.
 
 {inline}{extra_md}{brain_md}{tpl_md}## Chế độ: {mode_name}
@@ -2543,7 +2545,7 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/gemini-key":
             return set_gemini_key(str(d.get("key") or ""))
         if path == "/api/update":
-            return update_now()
+            return update_now(force=bool(d.get("force")))
         if path == "/api/pick":
             with _pick_lock:
                 return {"path": pick_folder(str(d.get("title") or "Chọn thư mục nhận kết quả"))}
@@ -2906,13 +2908,15 @@ def fetch_update():
     return ""
 
 
-def update_now():
+def update_now(force=False):
     try:
         new = fetch_update()
     except Exception:
         return {"error": "Không kết nối được GitHub, thử lại sau"}
     if not new and not UPDATED["pending"]:
         return {"ok": True, "msg": f"Đang dùng bản mới nhất (v{RELEASE})"}
+    if busy_tasks() and not force:          # có task đang chạy: hỏi trước (không bấm thì tự cập nhật khi các task xong)
+        return {"ask": True, "msg": f"Có bản mới v{new or UPDATED.get('release') or ''}"}
     threading.Thread(target=lambda: (time.sleep(0.5), apply_update()), daemon=True).start()   # task đang chạy: dừng, cập nhật xong tự chạy tiếp
     return {"ok": True, "restart": True, "msg": "Đang cập nhật, trang sẽ tự tải lại…"}
 
@@ -3238,6 +3242,15 @@ def mark_img_fail(worker):
     d = rjson(DATA / IMG_FAIL_F, {}) or {}
     d[worker] = int(time.time())
     wjson(DATA / IMG_FAIL_F, d)
+
+
+def with_criteria(text, proj):
+    """Gửi kèm tiêu chí nghiệm thu (tasks/criteria.md) cho worker ngay từ đầu để tự kiểm trước khi nộp -> ít bị chấm trượt."""
+    f = Path(proj) / "tasks" / "criteria.md"
+    if not f.is_file() or "TIÊU CHÍ NGHIỆM THU" in text:
+        return text
+    return (text + "\n\n---\nTIÊU CHÍ NGHIỆM THU (giám khảo sẽ chấm đúng theo đây — tự kiểm tra từng mục BẮT BUỘC trước khi nộp,"
+            " chỉ sửa trong phạm vi việc của bạn):\n" + f.read_text(encoding="utf-8", errors="replace")[:6000])
 
 
 def worker_fallback(st, v, a, edit, want_img):
@@ -3576,7 +3589,15 @@ def cmd_worker(argv):
             n += 1
         v = out / f"v{n}"
         v.mkdir()
-    st = {"worker": a.worker, "model": a.model, "out_dir": str(v)}
+    keep, skip = [], False                          # lệnh giao việc gốc (để giám khảo/app giao lại đúng như cũ khi cần sửa)
+    for x in argv:
+        if skip:
+            skip = False
+        elif x == "--vdir":
+            skip = True
+        elif x != "--bg":
+            keep.append(x)
+    st = {"worker": a.worker, "model": a.model, "out_dir": str(v), "args": keep}
     wjson(v / "status.json", {**st, "status": "running"})
     if not os.environ.get("AIO_WCHILD"):
         # chạy worker tách khỏi phiên Claude (qua 1 tiến trình trung gian tự thoát): app cập nhật/khởi động lại
@@ -3621,11 +3642,11 @@ def cmd_worker(argv):
     elif not exe and not use_api:
         st.update(status="failed", error="Worker chưa cài")
     elif use_api:
-        text = task.read_text(encoding="utf-8")
+        text = with_criteria(task.read_text(encoding="utf-8"), proj)
         (v / "TASK.md").write_text(text, encoding="utf-8")
         api_worker(st, v, key, text, a)
     else:
-        text = task.read_text(encoding="utf-8")
+        text = with_criteria(task.read_text(encoding="utf-8"), proj)
         (v / "TASK.md").write_text(text, encoding="utf-8")
         inp_ = os.environ.get("AIO_INPUT") or str(proj / "input")
         edit_note = (f"Được SỬA TRỰC TIẾP file trong thư mục {edit} (giữ nguyên định dạng, công thức, bố cục; chỉ sửa đúng phần "
@@ -4245,6 +4266,119 @@ Chỉ trả về MỘT khối JSON, không thêm chữ nào khác:
 "scores": {{"<tiêu chí>": 1-5}}, "issues": ["<lỗi cụ thể>"], "fix": "<chỉ dẫn sửa ngắn>"}}], "summary": "<1-2 câu>"}}"""
 
 
+CODE_EXT = (".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".json", ".java", ".kt", ".cs", ".go", ".rs", ".cpp", ".c", ".h",
+            ".swift", ".php", ".rb", ".sh", ".ps1", ".lua", ".gd", ".sql", ".vue")
+
+
+JUDGE_SKIP = {"TASK.md", "status.json", "worker.log", "result.md", "prompt.md", "last.txt"}   # sổ sách của worker, không chấm
+
+
+def judge_view(f, d):
+    """Ảnh lớn -> bản thu nhỏ (cạnh dài 1280px) cho giám khảo xem nhanh hơn; giữ nguyên file gốc."""
+    if f.suffix.lower() not in IMG_EXT:
+        return f
+    try:
+        from PIL import Image
+        im = Image.open(f)
+        if max(im.size) <= 1400:
+            return f
+        d.mkdir(parents=True, exist_ok=True)
+        o = d / (f.stem + "__xem.png")
+        im.thumbnail((1280, 1280))
+        im.save(o)
+        return o
+    except Exception:
+        return f
+
+
+def judge_once(files, refs, crit, brief, model, timeout, v):
+    """1 phiên Claude chấm độc lập -> (status, verdict). Ảnh lớn được thu nhỏ trước cho nhanh."""
+    exe = find_bin("claude")
+    views = {judge_view(f, v / "xem"): f for f in files}            # file xem -> file gốc
+    prompt = JUDGE_PROMPT.format(
+        criteria=crit.read_text(encoding="utf-8")[:12000], brief=brief,
+        images="\n".join(f"- {x}" + (f"   (bản thu nhỏ của {o.name})" if x != o else "") for x, o in views.items()),
+        ref_note=" và các MẪU ĐÃ DUYỆT (chuẩn để so sánh)" if refs else "",
+        refs=("\nMẪU ĐÃ DUYỆT (chỉ để so sánh, không chấm):\n" + "\n".join(f"- {judge_view(f, v / 'xem')}" for f in refs) + "\n") if refs else "")
+    cmd = [exe, "-p", prompt, "--output-format", "json", "--allowedTools", "Read,Glob,Grep,Bash", "--model", model]
+    for d in dict.fromkeys([str(x.parent) for x in list(views) + refs]):
+        cmd += ["--add-dir", d]
+    t0 = time.time()
+    code, so, se, to = run_limited(cmd, v, timeout)
+    with open(v / "worker.log", "a", encoding="utf-8") as fh:
+        fh.write(f"--- stdout ---\n{so}\n--- stderr ---\n{se}\n")
+    verdict = None
+    try:
+        text = json.loads(so).get("result", "")
+        verdict = json.loads(text[text.index("{"):text.rindex("}") + 1])
+    except Exception:
+        pass
+    st = {"seconds": round(time.time() - t0), "exit_code": code}
+    if to:
+        st.update(status="timeout", error=f"Quá {timeout}s")
+    elif not isinstance(verdict, dict) or "images" not in verdict:
+        st.update(status="failed", error="Giám khảo không trả kết quả đọc được: " + (se or so).strip()[-300:])
+        verdict = None
+    else:
+        for it in verdict["images"]:                 # tên bản thu nhỏ -> tên file gốc
+            for x, o in views.items():
+                if str(it.get("file", "")) in (str(x), x.name) and x != o:
+                    it["file"] = str(o)
+        bad = [i for i in verdict["images"] if i.get("verdict") != "pass"]
+        verdict["overall"] = "fail" if bad or verdict.get("overall") != "pass" else "pass"
+        st.update(status="completed" if verdict["overall"] == "pass" else "rejected",
+                  error="" if not bad else f"{len(bad)}/{len(verdict['images'])} file chưa đạt")
+    return st, verdict
+
+
+def fix_failed(verdict, files, rnd):
+    """File trượt nằm trong work/<ID>/vN do worker làm -> app tự giao lại đúng worker đó sửa đúng lỗi (không qua Claude).
+    Trả về {file cũ: [file mới...]} của các việc đã giao lại."""
+    groups = {}
+    for it in verdict.get("images") or []:
+        if it.get("verdict") == "pass":
+            continue
+        name = str(it.get("file", ""))
+        f = next((x for x in files if name in (str(x), x.name)), None)
+        vd = next((p for p in ([f] + list(f.parents) if f else []) if re.fullmatch(r"v\d+", p.name) and p.parent.parent.name == "work"), None)
+        if not vd or not (vd / "TASK.md").is_file():
+            continue
+        groups.setdefault(vd, []).append((f, it))
+    out, threads = {}, []
+
+    def run(vd, items):
+        st0 = rjson(vd / "status.json", {}) or {}
+        args = list(st0.get("args") or [])
+        if not args:
+            return
+        fixf = vd.parent / f"fix_r{rnd}.md"
+        fixf.write_text((vd / "TASK.md").read_text(encoding="utf-8") + "\n\n---\nGIÁM KHẢO CHẤM TRƯỢT — chỉ sửa đúng các lỗi sau, "
+                        "giữ nguyên phần đã đạt và giữ tên file:\n" + "\n".join(
+                            f"- {f.name}: {'; '.join(map(str, it.get('issues') or []))} -> {it.get('fix', '')}" for f, it in items),
+                        encoding="utf-8")
+        if "--task" in args:
+            args[args.index("--task") + 1] = str(fixf)
+        p = subprocess.run([sys.executable, str(APP), "worker", *args], cwd=str(Path.cwd()), stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW)
+        try:
+            ns = json.loads((p.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            return
+        nv = Path(ns.get("out_dir", ""))
+        if ns.get("via") in ("gpt-fallback", "gemini-fallback"):
+            nv = nv / ("gpt" if ns["via"].startswith("gpt") else "gemini")
+        new = [nv / x for x in ns.get("files") or [] if (nv / x).is_file() and not x.startswith(("gpt/", "gemini/"))]
+        for f, _ in items:
+            out[str(f)] = [x for x in new if x.name == f.name] or new
+    for vd, items in groups.items():
+        th = threading.Thread(target=run, args=(vd, items))
+        th.start()
+        threads.append(th)
+    for th in threads:
+        th.join()
+    return out
+
+
 def cmd_judge(argv):
     import argparse
     ap = argparse.ArgumentParser(prog="judge", description="Giám khảo độc lập (phiên Claude mới) nghiệm thu file theo tiêu chí")
@@ -4255,12 +4389,14 @@ def cmd_judge(argv):
     ap.add_argument("--brief", default="(không)", help="yêu cầu riêng của lần này: pose, số áo, kích thước...")
     ap.add_argument("--out", required=True, help="vd work/J1")
     ap.add_argument("--model")
-    ap.add_argument("--timeout", type=int, default=600)
+    ap.add_argument("--timeout", type=int)
+    ap.add_argument("--rounds", type=int, default=2, help="số vòng app tự giao lại file trượt cho worker (0 = không)")
     a = ap.parse_args(argv)
     imgs = []
     for p in a.images:
         p = Path(p).resolve()
-        imgs += sorted(f for f in p.rglob("*") if f.is_file()) if p.is_dir() else [p]
+        imgs += sorted(f for f in p.rglob("*") if f.is_file() and "xem" not in f.parts
+                       and f.name not in JUDGE_SKIP and not f.name.startswith("fix_r")) if p.is_dir() else [p]
     imgs = [f for f in imgs if f.is_file()][:12]
     refs = sorted(f for f in Path(a.refs).resolve().iterdir() if f.is_file())[:5] if a.refs and Path(a.refs).is_dir() else []
     out = Path(a.out).resolve()
@@ -4271,43 +4407,46 @@ def cmd_judge(argv):
     v = out / f"v{n}"
     v.mkdir()
     (v / "TASK.md").write_text(f"Chấm độc lập {len(imgs)} file\n\n{a.brief}", encoding="utf-8")
-    st = {"worker": "judge", "model": a.model, "out_dir": str(v)}
+    code = any(f.suffix.lower() in CODE_EXT for f in imgs)
+    # nhanh: không phải code thì dùng model nhỏ (Pro: sonnet); code giữ sonnet như cũ
+    model = a.model or ("sonnet" if code or os.environ.get("AIO_MODE") == "pro" else "haiku")
+    timeout = a.timeout or (600 if code else 300)
+    st = {"worker": "judge", "model": model, "out_dir": str(v)}
     wjson(v / "status.json", {**st, "status": "running"})
-    exe = find_bin("claude")
     crit = Path(a.criteria)
-    if not exe or not crit.is_file() or not imgs:
-        st.update(status="failed", error="Chưa cài Claude" if not exe else f"Không thấy tiêu chí {crit}" if not crit.is_file() else "Không có file để chấm")
+    if not find_bin("claude") or not crit.is_file() or not imgs:
+        st.update(status="failed", error="Chưa cài Claude" if not find_bin("claude") else f"Không thấy tiêu chí {crit}" if not crit.is_file() else "Không có file để chấm")
     else:
-        prompt = JUDGE_PROMPT.format(
-            criteria=crit.read_text(encoding="utf-8")[:12000], brief=a.brief,
-            images="\n".join(f"- {f}" for f in imgs),
-            ref_note=" và các MẪU ĐÃ DUYỆT (chuẩn để so sánh)" if refs else "",
-            refs=("\nMẪU ĐÃ DUYỆT (chỉ để so sánh, không chấm):\n" + "\n".join(f"- {f}" for f in refs) + "\n") if refs else "")
-        cmd = [exe, "-p", prompt, "--output-format", "json", "--allowedTools", "Read,Glob,Grep,Bash"]
-        for d in dict.fromkeys([str(f.parent) for f in imgs + refs]):
-            cmd += ["--add-dir", d]
-        if a.model:
-            cmd += ["--model", a.model]
-        t0 = time.time()
-        code, so, se, to = run_limited(cmd, v, a.timeout)
-        st.update(seconds=round(time.time() - t0), exit_code=code)
-        (v / "worker.log").write_text(f"--- stdout ---\n{so}\n--- stderr ---\n{se}\n", encoding="utf-8")
-        verdict = None
-        try:
-            text = json.loads(so).get("result", "")
-            verdict = json.loads(text[text.index("{"):text.rindex("}") + 1])
-        except Exception:
-            pass
-        if to:
-            st.update(status="timeout", error=f"Quá {a.timeout}s")
-        elif not isinstance(verdict, dict) or "images" not in verdict:
-            st.update(status="failed", error="Giám khảo không trả kết quả đọc được: " + (se or so).strip()[-300:])
-        else:
+        todo, final, fixed, rnd = list(imgs), {}, [], 0
+        while True:
+            r, verdict = judge_once(todo, refs, crit, a.brief, model, timeout, v)
+            st.update({k: x for k, x in r.items() if k != "error"}, seconds=st.get("seconds", 0) + r.get("seconds", 0))
+            if not verdict:
+                st["error"] = r.get("error", "")
+                break
+            for it in verdict["images"]:
+                final[str(it.get("file"))] = it
             bad = [i for i in verdict["images"] if i.get("verdict") != "pass"]
-            verdict["overall"] = "fail" if bad or verdict.get("overall") != "pass" else "pass"
-            wjson(v / "review.json", verdict)
-            st.update(status="completed" if verdict["overall"] == "pass" else "rejected",
-                      error="" if not bad else f"{len(bad)}/{len(verdict['images'])} file chưa đạt", review=verdict)
+            if not bad or code or rnd >= a.rounds:
+                break
+            rnd += 1
+            newmap = fix_failed(verdict, todo, rnd)
+            if not newmap:
+                break                                  # file trượt không do worker làm (vd đã chép sang OUTPUT) -> Claude xử lý
+            fixed.append({"round": rnd, "files": {k: [str(x) for x in vv] for k, vv in newmap.items()}})
+            for k in newmap:
+                final.pop(k, None)
+            todo = [x for vv in newmap.values() for x in vv][:12]
+            if not todo:
+                break
+        if final:
+            items = list(final.values())
+            bad = [i for i in items if i.get("verdict") != "pass"]
+            review = {"overall": "fail" if bad else "pass", "images": items, "auto_fix": fixed,
+                      "summary": f"{len(items) - len(bad)}/{len(items)} file đạt" + (f" (app đã tự giao sửa {len(fixed)} vòng)" if fixed else "")}
+            wjson(v / "review.json", review)
+            st.update(status="completed" if not bad else "rejected", review=review,
+                      error="" if not bad else f"{len(bad)}/{len(items)} file chưa đạt")
     wjson(v / "status.json", {k: x for k, x in st.items() if k != "review"})
     print(json.dumps(st, ensure_ascii=False))
     sys.exit(0 if st["status"] == "completed" else 1)
