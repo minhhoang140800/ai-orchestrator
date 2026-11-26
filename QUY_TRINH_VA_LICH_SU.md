@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v11.2 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v11.3 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -135,7 +135,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 - Gemini ở Balanced chạy medium, lên high khi task khó hoặc làm lại.
 - Giám sát: Pro/Balanced/Code tự bật; Code bỏ giám khảo khi test đã qua hết.
 - "Chỉ dùng trong gói" luôn bật, không có công tắc; không tự mua thêm credit.
-- Ảnh: bên không vẽ được thì thử 1 lần rồi đổi worker, nhớ 30 phút. Turbo không gộp ảnh thành lưới (riêng concept board/moodboard: vẽ cả board trong 1 ảnh — v11.2).
+- Ảnh: bên không vẽ được thì thử 1 lần rồi đổi worker, nhớ 30 phút. Số ảnh (1 ảnh hay nhiều ảnh, có gộp lưới hay không) do yêu cầu của người dùng quyết định; bỏ luật "Turbo không gộp ảnh thành lưới" (v11.3).
 - Bảng Mức dùng: "% đã dùng" kiểu Claude, không đếm số lượt.
 - Đo mức dùng mỗi lượt (chạy nền) + tổng task.
 - Learning: không có công tắc, tự gửi bài học, không gửi dữ liệu riêng; quy tắc chung chỉ áp dụng khi hợp >90% loại task.
