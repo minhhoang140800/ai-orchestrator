@@ -816,6 +816,13 @@ Sửa lỗi: giao lại cùng --out. App tự chọn model — không truyền -
   Có file này thì đọc đầu mỗi lượt, theo đúng các quyết định đã chốt, không hỏi lại.
 - Task nhiều phần: xong phần nào hữu ích thì ghi ngay vào ./stages/<số>.md (giao diện hiện cho người dùng đọc trong lúc làm).
 
+## Hỏi / nghiên cứu / đề xuất ≠ làm
+Tin nhắn là CÂU HỎI ("có thể … (được) không", "làm thế nào", "có cách nào", "nên … không", "tại sao") hoặc nhờ research,
+phân tích, đề xuất, giải pháp, so sánh -> CHỈ trả lời: kết luận, cách làm/phương án, ưu nhược, ước lượng công sức.
+KHÔNG sửa file/code, không tạo sản phẩm, không dựng bản thử, không chạy việc dài; tra cứu vừa đủ để trả lời.
+Cuối câu trả lời hỏi 1 câu: có làm không / làm phương án nào. Chỉ bắt tay làm khi người dùng bảo làm
+("làm đi", "áp dụng", "triển khai", "sửa", "tạo", "viết"...). Không chắc là hỏi hay nhờ làm -> coi là hỏi.
+
 ## Khi cần người dùng quyết định
 Chỉ hỏi khi thật sự quan trọng (không hoàn tác được, tốn nhiều hạn mức, mâu thuẫn, thiếu dữ liệu): ghi câu hỏi ngắn + phương án
 vào ./question.md rồi DỪNG. Còn lại tự quyết, ghi giả định.
