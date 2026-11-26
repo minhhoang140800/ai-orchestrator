@@ -10,6 +10,9 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parent
 ROOT = SRC.parent
+t = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", str(SRC / "tests")], cwd=str(ROOT))
+if t.returncode != 0:
+    sys.exit("Test chưa qua -> không phát hành. Xem lỗi phía trên.")
 rel_f = SRC / "RELEASE"
 cur = rel_f.read_text(encoding="utf-8").strip()
 new = sys.argv[1] if len(sys.argv) > 1 else f"{float(cur) + 0.1:.1f}"

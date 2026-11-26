@@ -27,8 +27,12 @@ import unicodedata as _u
 # Cửa sổ cmd hay lỗi font tiếng Việt có dấu -> dùng tiếng Việt không dấu
 MSG = {k: _u.normalize("NFKD", v.replace("đ", "d").replace("Đ", "D").replace("–", "-").replace("→", "->").replace("—", "-")).encode("ascii", "ignore").decode().replace("…", "...")
        for k, v in MSG.items()}
-app = (d / "app.py").read_text(encoding="utf-8")
-ui = base64.b64encode((d / "ui.html").read_bytes()).decode()
+import sys as _sys0
+_sys0.path.insert(0, str(d))
+from assemble import assemble          # ghép các module (core/providers/workers/features/web) + điểm vào -> 1 file
+app = assemble(d)
+# giao diện: chuẩn hoá xuống dòng LF để bản build không phụ thuộc máy build (checkout CRLF trên Windows)
+ui = base64.b64encode((d / "web" / "ui.html").read_bytes().replace(b"\r\n", b"\n")).decode()
 assert 'UI_B64 = ""' in app
 import os
 built = app.replace('UI_B64 = ""', f'UI_B64 = "{ui}"', 1)

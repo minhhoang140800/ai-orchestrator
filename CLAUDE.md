@@ -18,15 +18,21 @@ Code mode (`kind=code`, `CODE_MD`, `code_checkpoint`/`code_restore`, cài phần
 Learning: task xong → `lessons.json` → `learn_queue` (lọc dữ liệu riêng: `scrub`) → Google Form (`src/learn_form.json`);
 tác vụ hẹn giờ Chủ nhật làm theo `learning/WEEKLY.md`, gộp vào `src/learnings.md` (mục "Đang áp dụng" nhúng vào app khi build).
 
-## Mã nguồn (`src/`)
-- `app.py` — toàn bộ backend 1 file (Python stdlib; tuỳ chọn pillow/openpyxl/pywinpty). Gồm: HTTP server + API,
-  quản lý task (luồng `scheduler`/`watch`), sinh `CLAUDE.md` cho từng task (`write_claude_md`: luật chia việc, chấm,
-  chế độ Pro/Balanced/Turbo/Eco, model), lệnh con cho Claude gọi: `worker codex|gemini`, `wait`, `check`, `judge`.
-  Model theo chế độ: `MODEL_PLAN`, `pick_model` (tự hạ khi sắp hết hạn mức: `limits.json`, `pressure`).
-  Hết hạn mức: `is_limit`, `parse_reset`, `note_limit`. Tự cập nhật: `fetch_update` (GitHub API/raw/jsDelivr),
-  `apply_update` → `boot()` chạy bản trong `versions/` có health-check, lỗi thì quay về bản cũ.
-- `ui.html` — toàn bộ giao diện (1 file, nhúng vào app.py khi build). Phong cách Porcelain 2.0 (sáng; chat kiểu ChatGPT,
-  task kiểu Linear; icon Lucide; lớp CSS "Porcelain 2.0" ở cuối thẻ style). `fonts/` — Geist + Geist Mono (OFL), nhúng khi build, phục vụ ở /fonts/.
+## Mã nguồn (`src/`) — kiến trúc từ v11
+Backend chia module theo trách nhiệm, chỉ Python stdlib (tuỳ chọn pillow/openpyxl/pywinpty). Mọi module chạy CHUNG 1 không gian
+tên (không import chéo): khi phát triển `app.py` nạp lần lượt theo `assemble.PARTS`; khi build `assemble()` ghép thành 1 file
+`dist/app.py` (cơ chế tự cập nhật/bộ cài vẫn dựa trên 1 file). Thêm module mới: ghi vào `PARTS` đúng thứ tự (tên dùng ngay lúc nạp
+— hằng số, lớp cha — phải có ở module trước). `tests/` kiểm tra thứ tự + mỗi tên chỉ định nghĩa 1 lần.
+- `app.py` — điểm vào: nạp module, phân lệnh (serve / `worker codex|gemini` / `wait` / `check` / `judge`). `assemble.py` — thứ tự ghép.
+- `core/`: `config` (CFG, đường dẫn, máy), `procs` (tiến trình, debug log), `store` (JSON, task.json), `tasks` (vòng đời task, `act`,
+  dọn nháp), `router` (lễ tân hỏi đáp/việc nhỏ/đầy đủ), `prompts` (`write_claude_md`, `CODE_MD`, `build_prompt`), `models`
+  (`MODEL_PLAN`, `pick_model`), `usage` (hạn mức, `is_limit`, `usage_block`), `scheduler` (`sched_tick`, `start_run`, `watch`).
+- `providers/`: `accounts` (đăng nhập, trạng thái, `pick_pm`), `claude`, `codex`, `gemini` (agy + Gemini API key).
+- `workers/`: `worker` (`cmd_worker`, `cmd_wait`, chuyển worker 2 chiều, `fail_reason` lưu lý do lỗi), `check`, `judge`.
+- `features/`: `brain` (dự án, template), `codemode`, `updater` (`fetch_update`, `apply_update`, `boot`), `diagnostics`
+  (Export log, Clear cache), `system` (tự mở khi bật máy), `memory` (bộ nhớ người dùng tự ghi sau mỗi lượt), `remote` (điện thoại).
+- `web/`: `server.py` (class `H`, API, `task_detail`, `serve`), `ui.html` (toàn bộ giao diện, Porcelain 2.0, icon Lucide).
+  `fonts/` — Geist + Geist Mono (OFL), nhúng khi build, phục vụ ở /fonts/.
 - `install.tpl.ps1` — bộ cài Windows (nhúng trong .bat tự giải nén; thông báo ASCII không dấu).
 - `install_mac.tpl.sh` — bộ cài Mac (`Maestro_setup.command`, đóng zip để giữ quyền chạy).
 - `build.py`, `release.py`, `bench.py` (benchmark trên máy phát triển), icon (`icon.ico`, `icon1024.png`), `RELEASE` (số bản).
@@ -34,7 +40,7 @@ tác vụ hẹn giờ Chủ nhật làm theo `learning/WEEKLY.md`, gộp vào `s
 ## Dữ liệu trên máy người dùng (không nằm trong repo)
 - App: `%LOCALAPPDATA%\AIOrchestrator` (Mac: `~/Library/Application Support/Maestro`): `app.py` (bộ khởi động),
   `versions/`, `data/config.json`, `data/debug.log`, `limits.json`, `boot.json`.
-- Task/lịch sử: `<thư mục nhận kết quả>/_AI-Orchestrator/` (tasks, projects.json, templates.json).
+- Task/lịch sử: `<thư mục nhận kết quả>/_AI-Orchestrator/` (tasks, projects.json, templates.json, `memory_auto.md` = bộ nhớ người dùng).
 - Kết quả: `<thư mục nhận kết quả>/<Dự án>/<YYYY-MM-DD>/<HH_MM> <tên task>/`, nháp ở `.work/` (xoá khi task xong).
 
 ## Chạy thử trên máy dev
@@ -42,7 +48,7 @@ tác vụ hẹn giờ Chủ nhật làm theo `learning/WEEKLY.md`, gộp vào `s
 cd src
 AIO_HOME=/tmp/h AIO_PORT=8827 AIO_NO_BROWSER=1 python app.py      # mở http://127.0.0.1:8827/
 ```
-Kiểm tra cú pháp: `python -c "import ast;ast.parse(open('src/app.py').read())"`; JS trong ui.html: tách thẻ <script> rồi `node --check`.
+Test (bắt buộc trước khi phát hành): `python -m unittest discover -s src/tests`. JS trong `web/ui.html`: tách thẻ <script> rồi `node --check`.
 Có thể giả lập claude/codex/agy bằng script giả đặt trước trong PATH (biến `FAKE_STATE` được app hỗ trợ).
 
 ## Phát hành

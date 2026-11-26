@@ -9,7 +9,8 @@ Claude điều phối, giao việc cho ChatGPT (Codex CLI) và Gemini (Antigravi
 
 ## Cùng phát triển
 
-- **Mã nguồn** nằm trong `src/` (`app.py` backend, `ui.html` giao diện). Kiến trúc, cách chạy thử: xem `CLAUDE.md`.
+- **Mã nguồn** nằm trong `src/`: backend chia module (`core/`, `providers/`, `workers/`, `features/`, `web/server.py`), giao diện `web/ui.html`;
+  build ghép thành 1 file. Kiến trúc, cách chạy thử, test: xem `CLAUDE.md`.
 - File ở gốc repo (`app.py`, `latest.json`, `Maestro_*.bat`, `Maestro_mac.zip`) là **bản đã build** — không sửa tay.
 - **Không push thẳng lên `main`:** mọi app đã cài tự cập nhật từ `main`. Hãy tạo nhánh riêng → mở Pull Request;
   chủ repo duyệt, rồi chạy `python src/release.py` để build và phát hành.
