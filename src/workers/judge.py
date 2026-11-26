@@ -102,8 +102,9 @@ def fix_failed(verdict, files, rnd):
         f = next((x for x in files if name in (str(x), x.name)), None)
         vd = next((p for p in ([f] + list(f.parents) if f else []) if re.fullmatch(r"v\d+", p.name) and p.parent.parent.name == "work"), None)
         if not vd and f:                                 # file đã được chuyển thẳng ra thư mục kết quả (export_dir)
-            vd = next((s.parent for s in Path.cwd().glob("work/*/v*/status.json")
-                       if (rjson(s, {}) or {}).get("export_dir") and Path(rjson(s, {})["export_dir"]) in f.parents), None)
+            hits = [s.parent for s in Path.cwd().glob("work/*/v*/status.json")     # nhiều việc chung 1 thư mục nhóm: so đúng file
+                    if (lambda st: st.get("export_dir") and any(Path(st["export_dir"]) / x == f for x in st.get("files") or []))(rjson(s, {}) or {})]
+            vd = max(hits, key=lambda p: int(p.name[1:])) if hits else None
         if not vd or not (vd / "TASK.md").is_file():
             continue
         groups.setdefault(vd, []).append((f, it))

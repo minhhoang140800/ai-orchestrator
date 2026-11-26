@@ -25,6 +25,8 @@ if __name__ == "__main__":
         cmd_worker(sys.argv[2:])
     elif len(sys.argv) > 1 and sys.argv[1] == "check":
         cmd_check(sys.argv[2:])
+    elif len(sys.argv) > 1 and sys.argv[1] == "quota":
+        print(quota_md(fresh=True))
     elif len(sys.argv) > 1 and sys.argv[1] == "judge":
         cmd_judge(sys.argv[2:])
     else:

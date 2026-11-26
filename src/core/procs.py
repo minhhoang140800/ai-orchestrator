@@ -71,7 +71,7 @@ def worker_slot():
     import atexit
     d = DATA / "slots"
     d.mkdir(parents=True, exist_ok=True)
-    n = max(1, MAX_RUNNING * MAX_WORKERS)
+    n = max(1, MAX_RUNNING * MAX_WORKERS, MAX_PER_TASK)
     checked = {}                                # kiểm tra khoá cũ tối đa 20 giây/lần (tasklist chậm)
     while True:
         for i in range(n):

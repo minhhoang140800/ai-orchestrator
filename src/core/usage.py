@@ -195,6 +195,35 @@ def usage_turn(t, w, key):
     t["cost"] = tot
 
 
+def quota_md(fresh=False):
+    """Hạn mức còn lại + giờ reset của từng AI (chỉ đọc số, không tốn lượt) -> vài dòng cho Claude tự chọn số worker."""
+    try:
+        d = usage_refresh(force=fresh) or {}
+    except Exception:
+        d = rjson(USAGE_F, {}) or {}
+    lm = limits()
+    hm = lambda ts: datetime.datetime.fromtimestamp(ts).strftime("%H:%M" if ts - time.time() < 20 * 3600 else "%d/%m %H:%M")
+    out = []
+    for ai, name in (("codex", "ChatGPT"), ("gemini", "Gemini"), ("claude", "Claude")):
+        u, parts = d.get(ai) or {}, []
+        if u.get("known"):
+            for k, lab in (("five_hour", "5 giờ"), ("week", "tuần")):
+                w = u.get(k) or {}
+                if w.get("left") is not None:
+                    parts.append(f"{lab} còn {round(w['left'])}%" + (f" (reset {hm(w['resets_at'])})" if w.get("resets_at") else ""))
+        if ai in lm:
+            parts.insert(0, f"ĐANG HẾT LƯỢT tới {hm(lm[ai]['until'])}")
+        try:
+            iu = img_block_until(ai) if ai != "claude" else 0
+        except Exception:
+            iu = 0
+        if iu:
+            parts.append(f"vẽ ảnh hết lượt tới {hm(iu)}")
+        out.append(f"{name}: " + ("; ".join(parts) if parts else ("không đọc được mức dùng (chỉ biết khi hết lượt)" if ai == "gemini"
+                                                                  else "chưa đọc được mức dùng")))
+    return " · ".join(out)
+
+
 def usage_counts():
     """App tự đếm: số lượt / phút của mỗi AI hôm nay và 7 ngày qua (từ lịch sử task trên máy)."""
     now_ = time.time()

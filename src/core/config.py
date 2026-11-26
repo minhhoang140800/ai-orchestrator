@@ -95,6 +95,9 @@ def machine_tier(cpu, ram):
 
 
 MAX_RUNNING, MAX_WORKERS, LOW_PRIO = machine_tier(CPU, RAM_GB)
+# Trần số worker 1 task được chạy cùng lúc (Claude tự chọn số thật theo độ nặng việc + hạn mức còn lại + giờ reset).
+# Worker chủ yếu chờ máy chủ AI; máy chỉ tốn ~0,5–1 GB RAM/worker -> trần theo RAM.
+MAX_PER_TASK = 1 if MAX_RUNNING == 1 else max(MAX_WORKERS, min(10, int(RAM_GB // 2)))
 LOW_SPEC = MAX_RUNNING == 1
 MODES = {"pro": "Pro (mạnh nhất, chấm kỹ)", "balanced": "Balanced (cân bằng)", "turbo": "Turbo (nhanh nhất, giảm thẩm định)",
          "eco": "Eco (tiết kiệm hạn mức)", "code": "Code (sửa code, chạy thử)"}

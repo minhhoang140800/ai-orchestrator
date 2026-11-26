@@ -254,7 +254,9 @@ main{position:relative}
 .mhead{display:flex;align-items:center;position:relative}.hicons{display:flex;gap:2px;margin:-6px -8px -6px 0;position:relative}.hicons .icon{width:34px;height:34px;color:var(--mute)}.hicons .icon.on{background:var(--soft,#f0f0f0);color:var(--ink,#202020)}
 .ppop{position:absolute;right:0;top:calc(100% + 8px);width:244px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:14px;z-index:30;font-size:13px;font-weight:400;text-align:center}
 .ppop .qr{width:200px;height:200px;margin:0 auto}.ppop .qr svg{width:100%;height:100%;display:block}.ppop .pl{margin-top:10px;color:var(--ink,#202020);font-weight:500}.ppop .ps{margin-top:6px;font-size:12px;color:var(--mute)}.ppop .ps .ok{color:#2e7d4f}
-.ppop .pa{display:flex;justify-content:center;gap:14px;margin-top:10px}.lnk{border:0;background:none;padding:0;font-size:12px;color:var(--mute);text-decoration:underline;cursor:pointer;height:auto}
+.ppop .pa{display:flex;justify-content:center;gap:14px;margin-top:10px}
+.ppop .pcode{display:flex;gap:6px;margin-top:10px}.ppop .pcode input{flex:1;min-width:0;height:30px;box-sizing:border-box;padding:0 8px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel,#fafafa)}
+.ppop .pcode .sm{height:30px;padding:0 10px;font-size:12px;white-space:nowrap;flex:none}.ppop .pjoin{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);text-align:left}.ppop .pl2{font-size:12px;font-weight:500;color:var(--ink,#202020)}.lnk{border:0;background:none;padding:0;font-size:12px;color:var(--mute);text-decoration:underline;cursor:pointer;height:auto}
 .uatts{display:flex;justify-content:flex-end;max-width:min(80%,640px);margin-bottom:6px}.uatts .thumbs{justify-content:flex-end;margin-top:0}.uatts .att{margin:0}
 .rqr{display:flex;gap:14px;align-items:flex-start;margin-top:10px}.rqr .qr{flex:none;width:148px;height:148px;background:#fff;border:1px solid var(--line,#e5e5e5);border-radius:10px;padding:6px;box-sizing:border-box}.rqr .qr svg{width:100%;height:100%;display:block}.rtx{font-size:13px;line-height:1.5;display:flex;flex-direction:column;gap:6px}.rtx span{color:var(--mute)}@media (max-width:560px){.rqr{flex-direction:column}}
 .sw{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px}.sw input{width:16px;height:16px;accent-color:#202020}
@@ -313,6 +315,7 @@ aside{padding:0 12px;background:var(--side)}
 .dot{width:6px;height:6px}
 .icon,button.icon{min-width:32px;min-height:32px;display:inline-flex;align-items:center;justify-content:center;padding:0}
 /* đầu trang: cao 56px, cùng trục với thanh bên */
+.mpart{display:contents}
 .thead,.crumb{height:56px;box-sizing:border-box;padding:0 16px 0 24px;gap:8px;display:flex;align-items:center;flex:none;border-bottom:1px solid var(--line)}
 .crumb{font-size:13px;color:var(--mute)}
 .sbshow{margin-left:-8px;color:var(--mute)}
@@ -392,11 +395,16 @@ display:flex;align-items:center;justify-content:center;background:#fff;border:1p
 .mmenu button:focus-visible{outline-offset:-2px}.mmenu{z-index:60}
 /* điện thoại (Dùng trên điện thoại): thanh bên thành ngăn kéo, hộp thoại vừa màn hình */
 @media (max-width:760px){.app{grid-template-columns:minmax(0,1fr)!important;grid-template-rows:minmax(0,1fr)}
-.app:not(.nosb) aside{position:fixed;left:0;top:0;bottom:0;width:min(84vw,320px);max-height:none;z-index:20;box-shadow:0 0 0 100vmax rgba(0,0,0,.32)}
+.app:not(.nosb) aside{position:fixed;left:0;top:0;bottom:0;width:min(84vw,320px);max-height:none;z-index:20}
+.app:not(.nosb)::after{content:"";position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:19}
 .ov{padding:10px 8px}.modal{max-height:calc(100dvh - 20px)}.mfoot{flex-wrap:wrap;gap:6px}
 .crumb{padding:0 10px 0 12px}.crumb>span:not(.grow){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.crumb button{white-space:nowrap;flex:none}
 .home{padding:20px 16px 12px}.home .in{display:flex;flex-direction:column;flex:1;min-height:100%}.home h2{font-size:24px;margin:8px 0 16px}
-.home .recent{order:1;margin-top:0}.home .freebar{order:2}.home .comp{order:3;margin-top:auto}}
+.home .recent{order:1;margin-top:0}.home .freebar{order:2}.home .comp{order:3;margin-top:auto}
+.thead{padding:0 8px 0 10px;gap:4px}.thead h1{max-width:none;flex:1 1 auto;min-width:0}.thead .grow{display:none}
+.thead .bl,.crumb .bl,.thead .hst,.thead .kchip{display:none}.thead .wbtn,.thead .pbtn,.crumb .wbtn,.crumb .pbtn{padding:0 8px;flex:none}
+.thead>button{flex:none}}
+@media (hover:none){.wbtn[data-tip]:hover::after{display:none}}
 </style>
 </head>
 <body>
@@ -1638,9 +1646,30 @@ async function loadTask() {
   T = clean; T._now = now;
   if (!changed || renaming) return;
   if (selecting()) { pendingRender = true; return; }   // chờ bỏ chọn rồi mới cập nhật
+  if (typing()) { pendingRender = true; setTimeout(idleRender, TYPE_IDLE + 50); return; }   // đang gõ: vẽ lại sau, gõ không bị khựng
   lastSnap = snap; pendingRender = false;
   renderTask();
 }
+let lastKey = 0;
+const TYPE_IDLE = 1200;          // ms sau phím cuối mới vẽ lại đoạn chat (vẽ lại cả đoạn chat dài làm gõ bị trễ)
+const typing = () => Date.now() - lastKey < TYPE_IDLE;
+function idleRender() {
+  if (!pendingRender || !T || renaming || selecting()) return;
+  if (typing()) return void setTimeout(idleRender, TYPE_IDLE + 50);
+  pendingRender = false; lastSnap = JSON.stringify({ ...T, _now: undefined }); renderTask();
+}
+function patchThread(el, parts) {     // chỉ thay tin nhắn có thay đổi (thay cả đoạn chat làm chữ/ảnh nháy, nhất là trên điện thoại)
+  parts = parts.filter(Boolean);
+  const kids = el.children;
+  if (kids.length && !kids[0].classList.contains("mpart")) el.innerHTML = "";
+  parts.forEach((h, i) => {
+    let k = kids[i];
+    if (!k) { k = document.createElement("div"); k.className = "mpart"; el.appendChild(k); }
+    if (k._h !== h) { k.innerHTML = h; k._h = h; }
+  });
+  while (kids.length > parts.length) el.lastElementChild.remove();
+}
+const setHtml = (el, h) => { if (el && el._h !== h) { el.innerHTML = h; el._h = h; } };   // chỉ thay DOM khi nội dung đổi
 document.addEventListener("selectionchange", () => { if (pendingRender && !selecting() && T && !renaming) { pendingRender = false; lastSnap = JSON.stringify({ ...T, _now: undefined }); renderTask(); } });
 
 /* ---------------- sidebar ---------------- */
@@ -1793,8 +1822,8 @@ function navOn() {          // chỉ tô đậm mục đang mở: Task mới (tr
 function renderSide() {
   navOn();
   const ls = [...S.tasks.filter((t) => t.pinned), ...S.tasks.filter((t) => !t.pinned)];
-  $("tlist").innerHTML = ls.length ? ls.map((t) => `<div class="titem ${t.id === sel ? "on" : ""} ${sMenuFor === t.id ? "menu" : ""}" data-sel="${t.id}" title="${esc(ST[t.status])}" role="button" tabindex="0"><span class="sd ${t.status}"></span><span class="t">${esc(t.title)}</span>${t.pinned ? `<span class="pin">${I.pin}</span>` : ""}<button class="tmore" data-more="${t.id}" aria-label="Tùy chọn">${I.more}</button></div>`).join("")
-    : `<div class="hint" style="padding:6px 10px">Chưa có task</div>`;
+  setHtml($("tlist"), ls.length ? ls.map((t) => `<div class="titem ${t.id === sel ? "on" : ""} ${sMenuFor === t.id ? "menu" : ""}" data-sel="${t.id}" title="${esc(ST[t.status])}" role="button" tabindex="0"><span class="sd ${t.status}"></span><span class="t">${esc(t.title)}</span>${t.pinned ? `<span class="pin">${I.pin}</span>` : ""}<button class="tmore" data-more="${t.id}" aria-label="Tùy chọn">${I.more}</button></div>`).join("")
+    : `<div class="hint" style="padding:6px 10px">Chưa có task</div>`);
   $("aiDots").innerHTML = Object.entries(S.ais).map(([k, a]) => `<span title="${esc(limTxt(a))}"><span class="dot ${aiDot(a)}"></span>${AIN[k]}</span>`).join("");
 }
 
@@ -1850,7 +1879,7 @@ function bindComposer(onSend) {
   ta.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); onSend(); }
   });
-  ta.addEventListener("input", () => fit(ta));
+  ta.addEventListener("input", () => { lastKey = Date.now(); fit(ta); });
   ta.addEventListener("paste", (e) => {        // dán ảnh/file từ clipboard (Ctrl+V)
     const got = [...(e.clipboardData?.items || [])].filter((it) => it.kind === "file").map((it) => it.getAsFile()).filter(Boolean);
     if (!got.length) return;
@@ -1964,10 +1993,10 @@ const JUDGE_MODES = ["pro", "balanced", "code"];      // các chế độ tự b
 function homeJudge() { const v = lsGet("judge"); return v ? v === "1" : JUDGE_MODES.includes(normMode(lsGet("mode"))); }
 function watchBtn(t) {       // nút Giám sát: giám khảo chấm, sửa tới khi đạt (Pro/Balanced tự bật khi đổi chế độ)
   const on = t ? !!t.judge : T && $("taskComp") ? !!T.judge : homeJudge();
-  return `<button class="wbtn ${on ? "on" : ""}" id="wBtn" data-watch="1" aria-pressed="${on}" data-tip="Giám sát: Lâu hơn, check lại và fix đến khi hoàn thiện">${WHISTLE}Giám sát</button>`;
+  return `<button class="wbtn ${on ? "on" : ""}" id="wBtn" data-watch="1" aria-pressed="${on}" data-tip="Giám sát: Lâu hơn, check lại và fix đến khi hoàn thiện">${WHISTLE}<span class="bl">Giám sát</span></button>`;
 }
 function repaintWatch() { const b = $("wBtn"); if (b) b.outerHTML = watchBtn(); }
-function projBtn(t) { const p = S.projects.find((x) => x.id === curProj(t)); return `<button class="pbtn" id="pBtn" aria-haspopup="true" title="Dự án và bộ nhớ dự án">${I.proj}${p ? esc(p.name) : "Project"}${I.down}</button>`; }
+function projBtn(t) { const p = S.projects.find((x) => x.id === curProj(t)); return `<button class="pbtn" id="pBtn" aria-haspopup="true" title="Dự án và bộ nhớ dự án" aria-label="Dự án">${I.proj}<span class="bl">${p ? esc(p.name) : "Project"}</span>${I.down}</button>`; }
 function bindProj() { const b = $("pBtn"); if (b) b.onclick = (e) => { e.stopPropagation(); const m = $("pMenu"); if (m.classList.contains("show")) return m.classList.remove("show"); pEdit = curProj(); openProj(b); }; }
 async function openProj(b) {
   const m = $("pMenu"), r = b.getBoundingClientRect();
@@ -2030,7 +2059,7 @@ function renderHome() {
     ${freeBar()}${composer("homeComp", PH_NEW)}
     ${rec.length ? `<div class="recent"><div class="k">Task gần đây</div>${rec.map((t) => `<button data-sel="${t.id}"><span>${esc(t.title)}</span><small>${esc(whenTxt(t.last || t.created))}</small></button>`).join("")}</div>` : ""}</div></div>`;
   bindComposer(sendNew); bindProj(); bindTpl(); paintTpl();
-  $("txt").focus();
+  if (!matchMedia("(pointer:coarse)").matches) $("txt").focus();     // điện thoại: không tự bật bàn phím
 }
 async function sendNew() {
   const text = ($("txt").value.trim() + annMeta()).trim(); if (!text) return $("txt").focus();
@@ -2156,7 +2185,7 @@ function renderTask() {
   acts.push(`<button class="ghost icon ${actOpen ? "on" : ""}" id="bAct" title="Activity — toàn bộ tiến trình" aria-label="Activity" aria-pressed="${actOpen}">${lu("activity")}</button>`);
   acts.push(`<button class="ghost icon" id="bMore" title="Thêm" aria-label="Thêm" aria-haspopup="true">${lu("ellipsis")}</button>`);
   const lastC = t.messages.map((m) => m.role).lastIndexOf("claude");
-  const body = t.messages.map((m, i) => {
+  const parts = t.messages.map((m, i) => {
     if (m.role === "user") {        // ảnh/file đính kèm nằm ngoài bong bóng; ẩn dòng toạ độ đánh dấu (chỉ dành cho AI)
       const tx = (m.text || "").replace(/\n*\[Đánh dấu trên [^\n]*/g, "").trim(), at = attHtml(m.files || []);
       return `<div class="mwrap u">${at ? `<div class="uatts">${at}</div>` : ""}${tx ? `<div class="msg user">${esc(tx)}</div>` : ""}${mActs(m, i, "user")}</div>`;
@@ -2173,7 +2202,7 @@ function renderTask() {
     const qo = m.kind === "question" && i === lastC && t.status === "waiting" ? qOpts(m.text) : null;   // câu hỏi: lựa chọn A/B bấm được
     const qbox = qo && qo.opts.length ? `<div class="qopts">${qo.opts.map(([k, v]) => `<button class="qopt ${/\(đề xuất\)/i.test(v) ? "rec" : ""}" data-qopt="${esc(k + " - " + v.replace(/\s*\(đề xuất\)/i, ""))}"><b>${k}</b><span>${esc(v.replace(/\s*\(đề xuất\)/i, ""))}${/\(đề xuất\)/i.test(v) ? "<small>đề xuất</small>" : ""}</span></button>`).join("")}<div class="qother">Hoặc gõ câu trả lời khác ở ô bên dưới</div></div>` : "";
     return `<div class="mwrap c"><div class="claude ${m.kind === "install" ? "question" : m.kind || ""}"><div class="txt">${md(qbox ? qo.text : m.text)}</div>${qbox}${inst}${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>${mActs(m, i, "claude")}</div>`;
-  }).join("");
+  });
   const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Chưa có AI quản lý (Claude gói trả phí hoặc ChatGPT). Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>${esc(t.wait || "Đang chuẩn bị…")}</span></div>` : "";
   const comp = $("taskComp"), fresh = !comp || comp.dataset.t !== t.id;
   if (fresh) {          // chỉ tạo ô nhập 1 lần cho mỗi task
@@ -2191,11 +2220,11 @@ function renderTask() {
       <span class="grow"></span>${acts.join("")}`;
   $("decbar").innerHTML = decHtml(t);
   sendIcon(); if (curMode !== normMode(t.mode) && !$("modeMenu").classList.contains("show")) { curMode = normMode(t.mode); paintMode(); }
-  $("thread").innerHTML = body + queued + watchHint(t);
+  patchThread($("thread"), [...parts, queued, watchHint(t)]);
   $("tTitle").onclick = startRename; $("tTitle").onkeydown = (e) => { if (e.key === "Enter") startRename(); }; bindProj();
   $("bMore").onclick = (e) => { e.stopPropagation(); moreMenu($("bMore"), t, live); };
   $("bAct").onclick = () => { actOpen = !actOpen; localStorage.setItem("act", actOpen ? "1" : ""); renderTask(); };
-  $("main").classList.toggle("withact", actOpen); $("actp").innerHTML = actOpen ? actHtml(t) : "";
+  $("main").classList.toggle("withact", actOpen); setHtml($("actp"), actOpen ? actHtml(t) : "");
   const sc = document.querySelector(".scroll"); if (wasBottom || fresh) sc.scrollTop = sc.scrollHeight;
   if (fresh) {          // mở đoạn chat: luôn xuống cuối, ảnh tải xong sau vẫn giữ ở cuối (tới khi người dùng tự cuộn)
     let stick = true; const off = () => { stick = false; };
@@ -2318,7 +2347,7 @@ document.addEventListener("click", async (e) => {
 $("btnLib").onclick = () => openLib();
 $("btnNew").onclick = () => { view = ""; sel = ""; sessionStorage.removeItem("sel"); files = []; renderSide(); renderHome(); };
 $("btnSet").onclick = () => openSettings();
-function sbSet(hide) { document.querySelector(".app").classList.toggle("nosb", hide); if (!MOBILE.matches) lsSet("sb", hide ? "0" : ""); if (T && $("taskComp")) { lastSnap = ""; renderTask(); } else if ($("homeComp")) renderHome(); }
+function sbSet(hide) { document.querySelector(".app").classList.toggle("nosb", hide); if (MOBILE.matches) document.activeElement?.blur?.(); if (!MOBILE.matches) lsSet("sb", hide ? "0" : ""); if (T && $("taskComp")) { lastSnap = ""; renderTask(); } else if ($("homeComp")) renderHome(); }
 $("sbHide").onclick = () => sbSet(true);
 document.addEventListener("click", (e) => { if (e.target.closest("#sbShow")) sbSet(false); });
 const SBSHOW = `<button class="ghost icon sbshow" id="sbShow" title="Mở thanh bên" aria-label="Mở thanh bên">${lu("panel-left")}</button>`;
@@ -2414,8 +2443,21 @@ function phonePop() {      // biểu tượng điện thoại (đầu Cài đặ
   if (!phoneOpen) return "";
   const r = S.remote || {};
   const st = r.state === "on" ? `<span class="ok">Máy tính đang sẵn sàng</span>` : r.state === "error" ? `<span class="bad">${esc(r.msg || "Chưa kết nối được")}</span> · <button class="lnk" id="rRetry">Thử lại</button>` : `<span class="spin"></span> ${esc(r.msg || "Đang kết nối…")}`;
-  return `<div class="ppop" id="ppop"><div class="qr">${qrSvg(r.link || "")}</div><div class="pl">Quét QR để mở trên trình duyệt điện thoại</div>
-    <div class="ps">${st}</div><div class="pa"><button class="lnk" id="rCopy">Copy link</button><button class="lnk" id="rRot" title="Điện thoại đã vào sẽ phải quét lại">Đổi mã</button><button class="lnk" id="rOff">Tắt</button></div></div>`;
+  return `<div class="ppop" id="ppop"><div class="qr">${qrSvg(r.link || "")}</div><div class="pl">Quét QR trên điện thoại, hoặc dùng mã / link trên máy khác</div>
+    <div class="ps">${st}</div>
+    <div class="pcode"><input id="rCode" readonly value="${esc(remoteCode(r.link))}" aria-label="Mã truy cập" onfocus="this.select()"><button class="sm" id="rCopyC">Copy mã</button></div>
+    <div class="pa"><button class="lnk" id="rCopy">Copy link</button><button class="lnk" id="rRot" title="Máy khác / điện thoại đã vào sẽ phải nhập mã mới">Đổi mã</button><button class="lnk" id="rOff">Tắt</button></div>
+    <div class="pjoin"><div class="pl2">Mở Maestro của máy khác</div><div class="pcode"><input id="code_rjoin" placeholder="Dán mã hoặc link" value="${esc(joinVal)}" aria-label="Mã hoặc link của máy khác"><button class="sm pri" id="rGo">Mở</button></div></div></div>`;
+}
+let joinVal = "";
+function remoteCode(link) {        // mã ngắn = <kênh>.<khoá> lấy từ link (#t=maestro-<kênh>&k=<khoá>)
+  const m = /#t=maestro-([\w-]+)&k=([\w-]+)/.exec(link || ""); return m ? m[1] + "." + m[2] : "";
+}
+function joinUrl(v) {              // mã hoặc link của máy khác -> link mở trang Maestro của máy đó
+  v = (v || "").trim(); const base = ((S.remote || {}).link || "").split("#")[0];
+  let m = /#t=(maestro-[\w-]+)&k=([\w-]+)/.exec(v); if (m) return base + "#t=" + m[1] + "&k=" + m[2];
+  m = /^([\w-]{8,})\.([\w-]{16,})$/.exec(v); if (m) return base + "#t=maestro-" + m[1] + "&k=" + m[2];
+  return /^https:\/\/[\w.-]+\.trycloudflare\.com\/?/.test(v) ? v : "";
 }
 function renderSettings() {      // vẽ lại định kỳ: giữ nguyên vị trí cuộn (bảng Cài đặt + ô Memory)
   const keepScroll = [["mbody", $("mbody")?.scrollTop || 0], ["memTxt", $("memTxt")?.scrollTop || 0]];
@@ -2455,6 +2497,9 @@ function renderSettings() {      // vẽ lại định kỳ: giữ nguyên vị 
     if (phoneOpen && !(S.remote || {}).on) { await api("/api/remote", { on: true }); await refresh(); renderSettings(); }
   };
   if ($("ppop")) $("ppop").onclick = (e) => e.stopPropagation();
+  if ($("rCopyC")) $("rCopyC").onclick = async () => { const c = remoteCode(S.remote.link); try { await navigator.clipboard.writeText(c); toast("Đã copy mã"); } catch (e) { prompt("Copy mã:", c); } };
+  if ($("code_rjoin")) { $("code_rjoin").oninput = (e) => { joinVal = e.target.value; }; $("code_rjoin").onkeydown = (e) => { if (e.key === "Enter") $("rGo").click(); }; }
+  if ($("rGo")) $("rGo").onclick = () => { const u = joinUrl(joinVal); if (!u) return toast("Mã hoặc link không đúng"); if (u.split("#")[1] === (S.remote.link || "").split("#")[1]) return toast("Đây là mã của chính máy này"); window.open(u, "_blank", "noopener"); };
   if ($("rCopy")) $("rCopy").onclick = async () => { try { await navigator.clipboard.writeText(S.remote.link); toast("Đã copy link"); } catch (e) { prompt("Copy link:", S.remote.link); } };
   if ($("rRot")) $("rRot").onclick = async () => { if (!confirm("Đổi mã? Điện thoại đã vào sẽ phải quét lại mã mới.")) return; const r = await api("/api/remote", { rotate: true }); toast(r.error || r.msg); await refresh(); renderSettings(); };
   if ($("rOff")) $("rOff").onclick = async () => { if (!confirm(REMOTE_VIEW ? "Tắt sẽ ngắt kết nối điện thoại này. Tắt?" : "Tắt truy cập từ điện thoại?")) return; await api("/api/remote", { on: false }); phoneOpen = false; await refresh(); renderSettings(); toast("Đã tắt truy cập từ điện thoại"); };

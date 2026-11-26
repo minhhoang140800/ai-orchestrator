@@ -4,11 +4,11 @@
 
 MODE_RULES = {
     "code": "",          # Code mode có quy trình riêng (CODE_MD)
-    "pro": """- Ưu tiên chất lượng và thời gian. Song song tối đa {n} worker cho phần độc lập.
+    "pro": """- Ưu tiên chất lượng và thời gian. Song song nhiều worker cho phần độc lập (số lượng: mục "Số worker song song").
 - Giám khảo (khi Giám sát bật) được dùng model mạnh.""",
-    "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song tối đa {n} worker cho phần độc lập; tuần tự khi phụ thuộc.
+    "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song cho phần độc lập (số lượng: mục "Số worker song song"); tuần tự khi phụ thuộc.
 - Model nhỏ/nhanh cho việc đơn giản, mạnh cho việc khó.""",
-    "turbo": """- TỐC ĐỘ TỐI ĐA: bắt tay làm ngay, kế hoạch vài dòng, không hỏi lại trừ khi thiếu dữ kiện bắt buộc. Song song tối đa {n} worker.
+    "turbo": """- TỐC ĐỘ TỐI ĐA: bắt tay làm ngay, kế hoạch vài dòng, không hỏi lại trừ khi thiếu dữ kiện bắt buộc. Song song tối đa theo mục "Số worker song song" (nghiêng về nhiều).
 - Không mẫu thử trước lô; Giám sát tắt thì không vòng sửa: chỉ check kỹ thuật, sai thì sửa đúng chỗ; tự xem sản phẩm tối đa 1 lần.
 - Không làm thêm ngoài yêu cầu (không preview/ghép so sánh). Trả kết quả ngay khi đủ dùng; ghi rõ phần chưa kiểm tra kỹ.""",
     "eco": """- TIẾT KIỆM HẠN MỨC: tuần tự, 1 worker một lúc; việc tự làm được bằng lệnh/script thì không gọi AI.
@@ -109,6 +109,27 @@ MD_TITLES = {"image": "tạo ảnh, storyboard", "markup": "ảnh có đánh d�
 BRAIN_INLINE = 1000           # ký tự bộ nhớ dự án nhúng thẳng vào hướng dẫn
 
 
+def workers_md(t, py, app, on):
+    """Số worker song song: Claude tự quyết theo độ nặng việc, hạn mức còn lại và giờ reset (app chỉ đặt trần + cung cấp số liệu)."""
+    if not on:
+        return ""
+    if LOW_SPEC or norm_mode(t.get("mode")) == "eco":
+        return "## Số worker song song" + chr(10) + "- 1 worker một lúc (" + ("máy cấu hình thấp" if LOW_SPEC else "chế độ Eco") + ")."
+    try:
+        q = quota_md()
+    except Exception as e:
+        q = f"chưa đọc được ({e})"
+    return f"""## Số worker song song (BẠN tự quyết, trần {MAX_PER_TASK}/task; app tự xếp hàng khi cả máy hết chỗ)
+- Hạn mức lúc bắt đầu lượt: {q}
+  Lô dài / trước đợt giao mới: xem lại bằng "{py}" "{app}" quota
+- Chọn theo: số việc độc lập, độ nặng (vẽ/xử lý ảnh, file lớn, research dài = nặng), hạn mức còn lại và giờ reset của
+  BÊN sẽ làm (vẽ ảnh: xem cả dòng "vẽ ảnh hết lượt"):
+  - Còn nhiều (trên ~40%) hoặc sắp reset (dưới ~45 phút): song song nhiều, tới trần, để xong nhanh.
+  - Còn vừa (~15-40%), reset còn xa: 2-4 worker, việc quan trọng trước.
+  - Gần hết (dưới ~15%), reset còn xa: 1-2 worker, chia bớt sang bên còn lượt; không đủ cho cả lô thì báo người dùng giờ reset.
+- Lô cùng phong cách: (nếu cần mẫu) chạy 1 mẫu, đạt rồi mới bung song song. Việc nhẹ/ngắn: gộp vào ít worker, không chia vụn."""
+
+
 def write_claude_md(t):
     py, app = py_console(), str(APP)
     mode = norm_mode(t.get("mode"))
@@ -168,7 +189,7 @@ Tiêu chí đã dùng:
   }
 {f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1
   Có criteria.md: app TỰ chấm từng việc vẽ NGAY khi việc đó xong và tự giao sửa file trượt (tối đa 2 vòng; bản sửa ra thư
-  mục ..._v2) -> status.json có "judge" (overall, summary, issues, fixed). KHÔNG chấm lại file đã đạt; cuối lô chỉ chấm nhanh
+  mục nhóm, bản trước vào _ban_cu/) -> status.json có "judge" (overall, summary, issues, fixed). KHÔNG chấm lại file đã đạt; cuối lô chỉ chấm nhanh
   tính đồng bộ cả bộ (--rounds 0) khi nhiều file cùng loại; bạn chỉ xử lý phần app không tự sửa được.
 """ if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial."""
     nghiem_thu_off = (f"""## Nghiệm thu (Giám sát TẮT — chỉ giao việc)
@@ -188,18 +209,20 @@ research web dài) ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật. Ta
 ## Đường dẫn
 - Thư mục hiện tại: nháp/brief/log, bị XÓA khi task xong -> không để sản phẩm ở đây. File người dùng gửi: {tdir(t) / "input"}
 - OUTPUT (sản phẩm giao người dùng): {out_dir(t)} — người dùng chỉ định nơi khác thì lưu đúng nơi đó, ghi đường dẫn đầy đủ.
-  Mỗi lần xuất sản phẩm: đặt trong thư mục con YYYYMMDD-<tên ngắn> của OUTPUT (vd {datetime.date.today():%Y%m%d}-concept_boards);
-  lần sửa sau tạo thư mục mới cùng quy tắc (vd ...-concept_boards_v2), không ghi đè bản trước.
-  File worker làm ra được app chuyển THẲNG vào OUTPUT/<YYYYMMDD>-<tên việc> ngay khi việc xong (status.json: export_dir +
-  files) -> đặt --out work/<tên ngắn có nghĩa> (vd work/icon_final), KHÔNG chép lại; kiểm/chấm/sửa ngay trên file ở đó.
-  File tự làm (không qua worker): ghi thẳng vào OUTPUT/<YYYYMMDD>-<tên>. Xong task: xoá file nháp/thử lẫn trong OUTPUT.
+  Sản phẩm GOM THEO NHÓM, ít thư mục: OUTPUT/<YYYYMMDD>-<nhóm> (vd {datetime.date.today():%Y%m%d}-icons, ...-screenshots,
+  ...-concept_boards); mọi việc cùng loại chung 1 thư mục, KHÔNG mỗi việc / mỗi lần sửa 1 thư mục.
+  File worker làm ra được app chuyển THẲNG vào thư mục nhóm ngay khi việc xong: thêm --group <nhóm> khi giao (vd --group icons;
+  không có thì app đoán theo tên --out), --out work/<tên việc> (vd work/SS1_blur). status.json: export_dir + files.
+  KHÔNG chép lại; kiểm/chấm/sửa ngay trên file ở đó. Giao lại cùng --out để sửa: bản mới giữ tên file, bản trước app tự
+  chuyển vào <nhóm>/_ban_cu/. File tự làm (không qua worker): ghi thẳng vào OUTPUT/<YYYYMMDD>-<nhóm> theo cùng quy tắc.
+  Xong task: xoá file nháp/thử lẫn trong OUTPUT.
 - Được ĐỌC mọi ổ: {', '.join(drives())}. Chỉ sửa file có sẵn khi người dùng yêu cầu sửa chính file đó; không xóa/di chuyển
   file ngoài thư mục hiện tại và OUTPUT. Sản phẩm task trước (dùng lại, tránh làm lại): {STORE / "registry.json"}
 
 ## Worker
 {chr(10).join('- ' + desc[w] for w in on) or '- (không có — tự làm)'}
 Giao việc: ghi yêu cầu đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy cuộc trò chuyện), rồi chạy:
-  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--edit <thư mục>] [--drive] [--timeout 900]
+  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--group <nhóm>] [--edit <thư mục>] [--drive] [--timeout 900]
   "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>] [--hard]
   --write: Gemini được tạo file/ảnh. --hard: việc khó. --edit / --drive: xem mục sửa file / Google Drive.
 Nhiều việc: giao cả lô bằng --bg (trả về ngay), rồi chờ MỘT lần: "{py}" "{app}" wait work/S1 work/S2 work/S3
@@ -212,6 +235,8 @@ Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở expor
   giao lại khi lỗi / hết lượt / không ra ảnh / chậm bất thường.
 {stats_md(on)}
 {bm}- Việc độc lập: chạy song song (mỗi worker --out riêng; không 2 worker --edit cùng thư mục).
+
+{workers_md(t, py, app, on)}
 
 ## Tốc độ (quan trọng)
 - Cuối tin nhắn có "Đường xử lý" (HỎI ĐÁP / VIỆC NHỎ) do app phân loại: làm đúng theo đó (không criteria, không giám khảo).

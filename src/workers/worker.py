@@ -278,10 +278,22 @@ EXPORT_SKIP_NAMES = {"TASK.md", "worker.log", "status.json", "result.md", "revie
 EXPORT_SKIP_DIRS = {"_backup", CODE_DRAWN, "gpt_out", "gemini_out"}
 
 
-def export_products(st, v, out, proj):
-    """File sản phẩm của việc vừa xong -> chuyển THẲNG ra thư mục kết quả: <OUTPUT>/<YYYYMMDD>-<tên việc>[_vN]
-    (người dùng xem được ngay, Claude không phải chép lại). Sổ sách (TASK.md, log, status.json, result.md) ở lại nháp .work,
-    tự dọn khi task xong. Chỉ khi chạy trong task (thư mục .work), không áp dụng --edit."""
+def export_group(out, group=""):
+    """Tên nhóm thư mục kết quả: Claude đặt bằng --group (vd icons, screenshots); không có thì đoán theo tên việc."""
+    g = (group or "").strip()
+    if not g:
+        n = out.name.lower()
+        g = ("icons" if re.search(r"icon", n) else "screenshots" if re.search(r"(^|[_-])ss\d|screenshot|banner", n)
+             else re.sub(r"([_-]?v\d+|[_-]?\d+)+$", "", out.name) or out.name)
+    return safe_name(g, 40)
+
+
+def export_products(st, v, out, proj, group=""):
+    """File sản phẩm của việc vừa xong -> chuyển THẲNG ra thư mục kết quả của task, gom theo nhóm: <OUTPUT>/<YYYYMMDD>-<nhóm>
+    (vd icons, screenshots; mọi việc cùng nhóm chung 1 thư mục, không mỗi việc/mỗi lần sửa 1 thư mục).
+    Lần sửa (vN>1) của cùng việc: bản mới giữ tên file, bản trước chuyển vào <nhóm>/_ban_cu/ (không ghi đè, không mất).
+    Sổ sách (TASK.md, log, status.json, result.md) ở lại nháp .work, tự dọn khi task xong. Chỉ khi chạy trong task (.work),
+    không áp dụng --edit."""
     if proj.name != ".work" or st.get("status") != "completed" or st.get("edit_dir"):
         return
     files = [f for f in v.rglob("*") if f.is_file() and f.name not in EXPORT_SKIP_NAMES and not f.name.startswith("TASK")
@@ -289,16 +301,39 @@ def export_products(st, v, out, proj):
     if not files:
         return
     n = int(v.name[1:]) if re.fullmatch(r"v\d+", v.name) else 1
-    dst = proj.parent / (datetime.date.today().strftime("%Y%m%d") + "-" + safe_name(out.name, 60) + (f"_v{n}" if n > 1 else ""))
+    g = export_group(out, group)
+    old = sorted((d for d in proj.parent.glob("*-" + g) if d.is_dir() and re.fullmatch(r"\d{8}-" + re.escape(g), d.name)), reverse=True)
+    dst = old[0] if old else proj.parent / (datetime.date.today().strftime("%Y%m%d") + "-" + g)   # nhóm đã có (hôm trước) -> dùng lại
     dst.mkdir(parents=True, exist_ok=True)
+    mine = set()                                       # file của chính việc này ở các lần trước (được thay bằng bản sửa)
+    for pv in out.glob("v*/status.json"):
+        ps = rjson(pv, {}) or {}
+        if pv.parent != v and ps.get("export_dir") and Path(ps["export_dir"]) == dst:
+            mine |= set(ps.get("files") or [])
     moved = []
     for f in files:
         rel = f.relative_to(v)
         if rel.parts[0] in ("gpt", "gemini"):          # ảnh bên làm thay: đưa ra cùng cấp (không để thư mục gpt/ gemini/)
             rel = Path(*rel.parts[1:])
+        rp = lambda p: str(p.relative_to(dst)).replace("\\", "/")
         t = dst / rel
-        if t.exists():                                  # trùng tên: giữ cả hai, không ghi đè
-            t = t.with_name(f"{t.stem}_{len(moved) + 1}{t.suffix}")
+        if t.exists() and rp(t) not in mine:            # trùng tên với việc khác: thêm tên việc (giữ cả hai)
+            t = t.with_name(f"{safe_name(out.name, 40)}_{t.name}")
+        if t.exists() and rp(t) in mine:                # bản sửa của chính việc này: bản trước vào _ban_cu, bản mới giữ tên
+            k = dst / "_ban_cu" / f"{t.stem}_v{n - 1}{t.suffix}"
+            k.parent.mkdir(parents=True, exist_ok=True)
+            i = 2
+            while k.exists():
+                k = k.with_name(f"{t.stem}_v{n - 1}_{i}{t.suffix}")
+                i += 1
+            try:
+                shutil.move(str(t), str(k))
+            except Exception as e:
+                dlog(f"export_products old {t}: {e}")
+        i, base = 2, t
+        while t.exists():                               # vẫn trùng: đánh số, không ghi đè
+            t = base.with_name(f"{base.stem}_{i}{base.suffix}")
+            i += 1
         t.parent.mkdir(parents=True, exist_ok=True)
         try:
             shutil.move(str(f), str(t))
@@ -319,7 +354,7 @@ def auto_judge(st, v, out, proj, want_img):
         return
     brief = next((x.strip().lstrip("#").strip() for x in (v / "TASK.md").read_text(encoding="utf-8", errors="replace").splitlines()
                   if x.strip()), "(không)") if (v / "TASK.md").is_file() else "(không)"
-    cmd = [sys.executable, str(APP), "judge", "--files", st["export_dir"], "--criteria", str(crit), "--brief", brief[:300],
+    cmd = [sys.executable, str(APP), "judge", "--files", *([str(Path(st["export_dir"]) / x) for x in st.get("files") or []] or [st["export_dir"]]), "--criteria", str(crit), "--brief", brief[:300],
            "--out", str(out.parent / (out.name + "_cham")), "--rounds", "2"]
     try:
         p = subprocess.run(cmd, cwd=str(proj), env=dict(os.environ, AIO_NOJUDGE="1"), stdin=subprocess.DEVNULL,
@@ -413,6 +448,7 @@ def cmd_worker(argv):
     ap.add_argument("--vdir")
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--hard", action="store_true")
+    ap.add_argument("--group", default="", help="nhóm thư mục kết quả (vd icons, screenshots): mọi việc cùng nhóm chung 1 thư mục")
     ap.add_argument("--bg", action="store_true", help="giao xong trả về ngay (worker chạy nền); chờ cả lô bằng lệnh wait")
     ap.add_argument("--drive", action="store_true", help="ChatGPT được tự duyệt lệnh ghi của kết nối Google Drive (sửa thẳng Sheets/Docs/Slides)")
     ap.add_argument("--edit", help="thư mục worker được SỬA TRỰC TIẾP (file của người dùng, thư mục OUTPUT, file Drive đã tải về)")
@@ -628,7 +664,7 @@ def cmd_worker(argv):
     slot = st.pop("_slot", "")
     rs = fail_reason(st, v, want_img)
     if not os.environ.get("AIO_NOFALLBACK"):
-        export_products(st, v, out, proj)          # sau khi đã kiểm ảnh/làm thay xong mới chuyển ra thư mục kết quả
+        export_products(st, v, out, proj, a.group)          # sau khi đã kiểm ảnh/làm thay xong mới chuyển ra thư mục kết quả
     if rs:
         st["reason"] = rs
     judging = not os.environ.get("AIO_NOFALLBACK") and not os.environ.get("AIO_NOJUDGE") and want_img         and st.get("status") == "completed" and bool(st.get("export_dir")) and (proj / "tasks" / "criteria.md").is_file()

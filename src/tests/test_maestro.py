@@ -360,8 +360,8 @@ class Folders(unittest.TestCase):
         t = {"id": "F1", "text": "x", "mode": "balanced", "folder": "01 - Thử", "watch": False}
         NS["write_claude_md"](t)
         md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("YYYYMMDD-<tên ngắn>", md)
-        self.assertIn(time.strftime("%Y%m%d") + "-concept_boards", md)
+        self.assertIn("OUTPUT/<YYYYMMDD>-<nhóm>", md)
+        self.assertIn(time.strftime("%Y%m%d") + "-icons", md)
 
 
 class Accounts(unittest.TestCase):
@@ -505,18 +505,38 @@ class Export(unittest.TestCase):
         (v / "_ve_bang_code" / "bad.png").write_bytes(b"x")
         st = {"status": "completed"}
         NS["export_products"](st, v, v.parent, proj)
-        dst = out_root / (time.strftime("%Y%m%d") + "-icon_final")
+        dst = out_root / (time.strftime("%Y%m%d") + "-icons")              # gom theo nhóm (đoán từ tên việc)
         self.assertEqual(st["export_dir"], str(dst))
         self.assertEqual(st["files"], ["icon_1.png", "icon_2.png"])          # ảnh bên làm thay đưa ra cùng cấp
         self.assertTrue((dst / "icon_2.png").exists() and not (v / "icon_1.png").exists())
         self.assertTrue((v / "result.md").exists() and not (dst / "result.md").exists())   # sổ sách ở lại nháp
         self.assertFalse((dst / "bad.png").exists())                         # ảnh vẽ bằng code không ra thư mục kết quả
+        NS["wjson"](v / "status.json", st)
         v2 = v.parent / "v2"
         v2.mkdir()
         (v2 / "icon_1.png").write_bytes(b"y")
         st2 = {"status": "completed"}
         NS["export_products"](st2, v2, v.parent, proj)
-        self.assertTrue(st2["export_dir"].endswith("-icon_final_v2"))      # lần sửa: thư mục mới, không ghi đè
+        self.assertEqual(st2["export_dir"], str(dst))                        # lần sửa: cùng thư mục nhóm, giữ tên file
+        self.assertEqual(st2["files"], ["icon_1.png"])
+        self.assertEqual((dst / "icon_1.png").read_bytes(), b"y")
+        self.assertEqual((dst / "_ban_cu" / "icon_1_v1.png").read_bytes(), b"x")   # bản trước không mất
+        o = proj / "work" / "icon_menu" / "v1"                               # việc khác cùng nhóm, trùng tên file
+        o.mkdir(parents=True)
+        (o / "icon_1.png").write_bytes(b"z")
+        st4 = {"status": "completed"}
+        NS["export_products"](st4, o, o.parent, proj)
+        self.assertEqual(st4["files"], ["icon_menu_icon_1.png"])             # giữ cả hai, không ghi đè
+        self.assertEqual((dst / "icon_1.png").read_bytes(), b"y")
+        g = proj / "work" / "S7" / "v1"                                      # Claude đặt nhóm bằng --group
+        g.mkdir(parents=True)
+        (g / "a.png").write_bytes(b"x")
+        st5 = {"status": "completed"}
+        NS["export_products"](st5, g, g.parent, proj, "screenshots")
+        self.assertTrue(st5["export_dir"].endswith("-screenshots"))
+        self.assertEqual(NS["export_group"](Path("SS1_blur_v3")), "screenshots")
+        self.assertEqual(NS["export_group"](Path("concept_boards_v2")), "concept_boards")
+        self.assertEqual(len([d for d in out_root.iterdir() if d.name != ".work"]), 2)   # chỉ 2 thư mục: icons + screenshots
         st3 = {"status": "failed"}
         v3 = v.parent / "v3"
         v3.mkdir()
@@ -630,7 +650,15 @@ class AskUser(unittest.TestCase):
         self.assertIn("TRƯỚC khi bắt tay", md)
         self.assertIn("ĐANG làm mà vướng", md)
         self.assertIn('"A - <ngắn gọn>"', md)                     # câu hỏi dạng lựa chọn (nút bấm)
-        self.assertIn("chuyển THẲNG vào OUTPUT/<YYYYMMDD>-<tên việc>", md)
+        self.assertIn("chuyển THẲNG vào thư mục nhóm", md)
+        self.assertIn("--group <nhóm>", md)
+        self.assertIn("Số worker song song (BẠN tự quyết, trần", md)       # Claude tự chọn số worker theo hạn mức/giờ reset
+        self.assertIn("Hạn mức lúc bắt đầu lượt: ChatGPT", md)
+        self.assertNotIn("Song song tối đa 3 worker", md)
+        t2 = {"id": "Q2", "text": "x", "mode": "eco", "folder": "01 - Hỏi", "watch": False}
+        NS["write_claude_md"](t2)
+        self.assertIn("1 worker một lúc", (NS["wdir"](t2) / "CLAUDE.md").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(NS["MAX_PER_TASK"], NS["MAX_WORKERS"])
         self.assertNotIn("rồi chép bản đạt sang OUTPUT", md)
 
 
