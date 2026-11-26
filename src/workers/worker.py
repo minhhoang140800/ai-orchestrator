@@ -115,6 +115,70 @@ def with_criteria(text, proj):
             " chỉ sửa trong phạm vi việc của bạn):\n" + f.read_text(encoding="utf-8", errors="replace")[:6000])
 
 
+IMG_QUICK = (" Ảnh: tạo xong là trả lời ngay; KHÔNG tự đo, so từng chi tiết hay kiểm tra lại kỹ (Maestro và Claude kiểm tra "
+             "sau) — chỉ sửa khi ảnh hỏng rõ ràng.")
+WATCH_IDLE = {"image": 480, "edit": 360, "research": 300, "text": 300}   # GPT không in thêm gì quá lâu -> coi là kẹt (giây)
+
+
+def _ftail(f, n=4000):
+    try:
+        f.flush()
+        size = os.fstat(f.fileno()).st_size
+        f.seek(max(0, size - n))
+        return f.read().decode("utf-8", "replace")
+    except Exception:
+        return ""
+
+
+def run_watched(cmd, cwd, timeout, worker, kind, cap, task_txt):
+    """Chạy worker và THEO DÕI trong lúc chạy (thay vì đợi chạy xong mới biết):
+    - in ra thông báo hết lượt / hết lượt vẽ ảnh -> dừng ngay (app giao bên kia);
+    - GPT (in nhật ký liên tục) im lặng quá WATCH_IDLE -> kẹt -> dừng;
+    - chạy quá cap (4 lần thời gian thường thấy của máy này) -> chậm bất thường -> dừng.
+    Trả (exit code, stdout, stderr, hết giờ?, lý do dừng sớm: ''|'limit'|'idle'|'slow'|'timeout')."""
+    import tempfile
+    fo, fe = tempfile.TemporaryFile(), tempfile.TemporaryFile()
+    p = subprocess.Popen(cmd, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=fo, stderr=fe, creationflags=NO_WINDOW)
+    t0 = last = time.time()
+    size, why = 0, ""
+    own_limit = is_limit(task_txt) or bool(img_quota_until(task_txt))     # đề bài tự nói về "limit" -> không bắt nhầm
+    while p.poll() is None:
+        time.sleep(3)
+        now = time.time()
+        try:
+            n = os.fstat(fo.fileno()).st_size + os.fstat(fe.fileno()).st_size
+        except Exception:
+            n = size
+        if n != size:
+            size, last = n, now
+            tail = _ftail(fe) + "\n" + _ftail(fo)
+            if not own_limit and (is_limit(tail) or (kind == "image" and img_quota_until(tail))):
+                why = "limit"
+        if not why and now - t0 > timeout:
+            why = "timeout"
+        elif not why and now - t0 > cap:
+            why = "slow"
+        elif not why and worker == "codex" and now - last > WATCH_IDLE.get(kind, 300):
+            why = "idle"
+        if why:
+            kill_tree(p)
+            try:
+                p.wait(15)
+            except Exception:
+                pass
+            break
+    code = p.returncode if p.returncode is not None else -1
+    out = []
+    for f in (fo, fe):
+        try:
+            f.seek(0)
+            out.append(f.read().decode("utf-8", "replace"))
+        except Exception:
+            out.append("")
+        f.close()
+    return (code if not why else -1), out[0], out[1], why == "timeout", why
+
+
 def _log_tail(f, n=12):
     """n dòng cuối có nội dung của 1 nhật ký worker (chỉ đọc 64 KB cuối)."""
     try:
@@ -173,6 +237,8 @@ def worker_fallback(st, v, a, edit, want_img):
         return                                   # bên kia không dùng được / cũng vừa không vẽ được -> để Claude quyết
     gv = v / ("gpt" if dst == "codex" else "gemini")
     gv.mkdir(parents=True, exist_ok=True)
+    wjson(v / "status.json", {**{k: x for k, x in st.items() if not k.startswith("_")}, "status": "running", "now_worker": dst,
+                              "pid": os.getpid()})       # giao diện hiện đúng bên đang làm thật
     task_f = v / "TASK.md"
     if partial:                                  # vẽ dở -> bên kia chỉ vẽ NỐT phần còn thiếu, giữ cùng phong cách
         have = [str(f.relative_to(v)).replace("\\", "/") for f in _imgs(v)]
@@ -394,7 +460,9 @@ def cmd_worker(argv):
     exe = find_bin("codex" if a.worker == "codex" else "agy")
     task_txt = task.read_text(encoding="utf-8") if task.exists() else ""
     want_img = (a.worker == "codex" or a.write or bool(edit)) and bool(IMG_MAKE.search(task_txt))
+    kind = task_kind(want_img, edit, a.drive, task_txt)
     skip_gem = want_img and img_failed_recent(a.worker)       # bên này vừa không vẽ được (30 phút) -> giao thẳng bên kia
+    poor = want_img and not skip_gem and stat_poor(a.worker, "image")   # số liệu: bên này gần đây hầu như không vẽ được
     bad_edit = edit_refused(edit) if edit else ""
     cfgd = rjson(CFG_FILE, {}) or {}
     key = cfgd.get("gemini_key", "") if a.worker == "gemini" else ""
@@ -414,10 +482,12 @@ def cmd_worker(argv):
                                                    "dùng lại lúc " + datetime.datetime.fromtimestamp(ub).strftime("%H:%M %d/%m")))
     elif not task.exists():
         st.update(status="failed", error=f"Không thấy {task}")
-    elif skip_gem and not os.environ.get("AIO_NOFALLBACK"):
+    elif (skip_gem or poor) and not os.environ.get("AIO_NOFALLBACK"):
         (v / "TASK.md").write_text(task_txt, encoding="utf-8")
-        bu = img_block_until(a.worker)
+        bu = img_block_until(a.worker) if skip_gem else 0
+        s_ = stat_of(a.worker, "image") if poor else None
         st.update(status="failed", error=("Gemini" if a.worker == "gemini" else "GPT") + (
+            f" gần đây chỉ vẽ được {round(s_['rate'] * s_['n'])}/{s_['n']} lần" if s_ else
             " hết lượt vẽ ảnh tới " + datetime.datetime.fromtimestamp(bu).strftime("%H:%M") if bu else
             " vừa không tạo được ảnh (30 phút qua)") + " — giao thẳng bên kia")
     elif not exe and not use_api:
@@ -441,7 +511,7 @@ def cmd_worker(argv):
             prompt = (drive_note + f"Thực hiện đúng yêu cầu trong {v / 'TASK.md'}. "
                       f"File đầu vào (chỉ đọc): {inp_}. " + (edit_note or "Ghi mọi file kết quả vào thư mục hiện tại. ") +
                       "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung sản phẩm (không chỉ tóm tắt); "
-                      "nếu tạo file thì liệt kê file đã tạo và cách đã kiểm tra.")
+                      "nếu tạo file thì liệt kê file đã tạo và cách đã kiểm tra." + IMG_QUICK * want_img)
             cmd = [exe, "exec", "--skip-git-repo-check", *CODEX_SANDBOX, "-C", str(edit or v),
                    "--output-last-message", str(v / "result.md")]
             mods, eff = pick_model("codex", os.environ.get("AIO_MODE", "balanced"), os.environ.get("AIO_HARD") == "1")
@@ -458,7 +528,7 @@ def cmd_worker(argv):
             inp = inp_
             gtext = (f"{text}\n\n---\nFile đầu vào (chỉ đọc): {inp}. " + (edit_note or
                      f"Lưu mọi file kết quả (ảnh, tài liệu) vào thư mục hiện tại: {v}. ") +
-                     "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung; nếu tạo file thì liệt kê tên file.")
+                     "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung; nếu tạo file thì liệt kê tên file." + IMG_QUICK * want_img)
             cmd = [exe, "-p", gtext, "--output-format", "json", "--add-dir", str(proj)]
             if os.path.isdir(inp):
                 cmd += ["--add-dir", inp]
@@ -473,8 +543,12 @@ def cmd_worker(argv):
             cwd = v
         t0 = time.time()
         st["t0"] = t0
+        cap = stat_cap(a.worker, kind, a.timeout)
+        why = ""
         for i_, cmd in enumerate(cands):
-            code, so, se, to = run_limited(cmd, cwd, a.timeout)
+            code, so, se, to, why = run_watched(cmd, cwd, a.timeout, a.worker, kind, cap, text)
+            if why:                             # dừng sớm (hết lượt / kẹt / chậm bất thường): không thử cờ/model khác
+                break
             low_ = (so + se).lower()
             bad_flag = code != 0 and ("flag provided but not defined" in low_ or "unknown flag" in low_ or "unknown option" in low_)
             bad_model = code != 0 and not bad_flag and "model" in low_ and any(k in low_ for k in (
@@ -509,7 +583,19 @@ def cmd_worker(argv):
                 if qu:
                     st["img_quota_until"] = qu
         res = v / "result.md"
-        if to:
+        if why == "limit":
+            lm = note_limit(a.worker, se + "\n" + so)
+            if want_img and a.worker == "gemini":
+                qu = img_quota_until(so + "\n" + se)
+                if qu:
+                    st["img_quota_until"] = qu
+            st.update(status="limit", reset=lm["until"], error="Dừng sớm: worker báo hết lượt giữa chừng, dùng lại lúc " +
+                      datetime.datetime.fromtimestamp(lm["until"]).strftime("%H:%M") + ("" if lm["known"] else " (ước tính)"))
+        elif why in ("idle", "slow"):
+            st.update(status="timeout", error="Dừng sớm: " + (
+                f"không có tiến triển {WATCH_IDLE.get(kind, 300) // 60} phút" if why == "idle" else
+                f"chạy quá {round(cap / 60)} phút (gấp 4 lần thường thấy ở máy này)"))
+        elif to:
             st.update(status="timeout", error=f"Quá {a.timeout}s")
         elif code != 0 and is_limit(se[-1500:] + "\n" + so[-1500:]):
             lm = note_limit(a.worker, se + "\n" + so)
@@ -522,6 +608,10 @@ def cmd_worker(argv):
             st.update(status="failed", error="Worker không trả kết quả")
         else:
             st["status"] = "completed"
+    if "exit_code" in st:                          # đã thật sự chạy: ghi số liệu để app tự học chọn worker
+        own_img = any(f.is_file() and f.suffix.lower() in IMG_EXT for f in v.iterdir())
+        record_stat(a.worker, kind, st.get("status") == "completed" and (not want_img or own_img) and not st.get("code_drawn"),
+                    st.get("seconds"), why or st.get("status", ""))
     if key and not use_api and not edit and "exit_code" in st and st.get("status") in ("limit", "failed"):   # Antigravity hết lượt/lỗi -> thử API
         st["agy_error"] = st.pop("error", "")[:300]
         api_worker(st, v, key, (v / "TASK.md").read_text(encoding="utf-8") if (v / "TASK.md").exists() else "", a)

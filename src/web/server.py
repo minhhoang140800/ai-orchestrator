@@ -278,7 +278,7 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/usage":
             return usage_state(force=bool(d.get("force")))
         if path == "/api/memory":
-            if "auto" in d:                              # bộ nhớ Maestro tự ghi (người dùng sửa/xoá)
+            if "auto" in d:                              # bộ nhớ Maestro tự ghi (người dùng sửa/xoá phần chung)
                 mem_save(d.get("auto"))
             if "instructions" in d:
                 CFG["instructions"] = str(d.get("instructions") or "")[:20000]

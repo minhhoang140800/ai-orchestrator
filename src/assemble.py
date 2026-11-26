@@ -12,7 +12,7 @@ PARTS = [
     "core/config.py", "core/procs.py", "core/store.py", "core/tasks.py", "core/router.py", "core/prompts.py",
     "core/models.py", "core/usage.py", "core/scheduler.py",
     "providers/accounts.py", "providers/claude.py", "providers/codex.py", "providers/gemini.py",
-    "workers/worker.py", "workers/check.py", "workers/judge.py",
+    "workers/stats.py", "workers/worker.py", "workers/check.py", "workers/judge.py",
     "features/brain.py", "features/codemode.py", "features/updater.py", "features/diagnostics.py", "features/system.py", "features/memory.py",
     "web/server.py", "features/remote.py",
 ]

@@ -50,7 +50,7 @@ def md_image(py, app, pm):
   dùng yêu cầu rõ (keyframe/vẽ/render storyboard).
 - Số ảnh theo đúng yêu cầu: yêu cầu 1 board/bảng/lưới (concept board, moodboard...) -> VẼ CẢ BOARD TRONG 1 ẢNH (1 lần tạo,
   các phương án nằm sẵn trong ảnh, có nhãn); yêu cầu từng ảnh/file riêng -> vẽ riêng. Không tự tách ra rồi ghép, không tự gộp.
-- Tạo ảnh: {"Gemini (--write) trước, lỗi thì codex ($imagegen)" if pm != "codex" else "gemini (--write), lỗi thì tự tạo ($imagegen)"}.
+- Tạo ảnh: {"giao bên được gợi ý ở mục Chia việc (Gemini cần --write; GPT dùng $imagegen); lỗi thì app tự giao bên kia" if pm != "codex" else "gemini (--write), lỗi thì tự tạo ($imagegen)"}.
   Không tạo được (lỗi, hết hạn mức): viết prompt vào OUTPUT/prompts/, hỏi người dùng (question.md) dán vào ChatGPT, lưu ảnh
   vào OUTPUT/images/ rồi trả lời "xong"; sau đó check + chấm như trên.
 - Ảnh PNG: kiểm tra size/nền trong suốt bằng lệnh check png trước khi xem bằng mắt.
@@ -106,6 +106,9 @@ MD_TITLES = {"image": "tạo ảnh, storyboard", "markup": "ảnh có đánh d�
              "drive": "Google Drive/Sheets/Docs/Slides (đọc, sửa trực tiếp)", "edit": "worker sửa file trực tiếp (--edit)"}
 
 
+BRAIN_INLINE = 1000           # ký tự bộ nhớ dự án nhúng thẳng vào hướng dẫn
+
+
 def write_claude_md(t):
     py, app = py_console(), str(APP)
     mode = norm_mode(t.get("mode"))
@@ -122,8 +125,14 @@ def write_claude_md(t):
             if agy_ok else "gemini — Gemini qua API key: CHỈ trả lời bằng chữ (research web, tổng hợp, ý tưởng, viết, đọc ảnh/PDF "
             "gửi kèm: ghi đúng tên file đính kèm trong tasks/<ID>.md); KHÔNG tạo/sửa file -> không dùng --write/--edit"}
     pj = project_of(t)
+    brain = (pj or {}).get("brain", "").strip()
+    if len(brain) > BRAIN_INLINE:                # dài -> nhúng phần đầu, bản đầy đủ để sẵn file, Claude đọc khi task cần
+        (wdir(t) / "rules").mkdir(parents=True, exist_ok=True)
+        (wdir(t) / "rules" / "project.md").write_text(brain, encoding="utf-8")
+        brain = brain[:brain.rfind(chr(10), 0, BRAIN_INLINE) if chr(10) in brain[:BRAIN_INLINE] else BRAIN_INLINE].rstrip() + (
+            chr(10) + "- (còn tiếp — bản đầy đủ: ./rules/project.md; ĐỌC khi task liên quan nhân vật, asset, cơ chế, nguồn, quy cách)")
     brain_md = (f"""## Dự án: {pj['name']} — bộ nhớ dự án (người dùng đã duyệt, áp dụng cho mọi task của dự án)
-{pj.get('brain', '').strip() or '(chưa có)'}
+{brain or '(chưa có)'}
 - Tuân theo bộ nhớ này; giám khảo cũng chấm theo nó (đưa các mục liên quan vào tiêu chí).
 - Thấy quy tắc/quyết định nên áp dụng cho CẢ dự án (style, màu, size chuẩn, đặt tên file, KPI, cách đọc file data...) mà
   bộ nhớ chưa có: ghi đề xuất vào ./brain_suggest.json dạng ["<1 câu ngắn>", ...]. KHÔNG tự sửa bộ nhớ; người dùng duyệt.
@@ -154,7 +163,7 @@ Tiêu chí đã dùng:
 ## Hướng dẫn của người dùng (ưu tiên áp dụng)
 {CFG.get('instructions', '').strip() or '(không)'}
 
-{("## Về người dùng — Maestro tự ghi nhớ từ các task trước (tham khảo; hướng dẫn ở trên và yêu cầu hiện tại ưu tiên hơn)" + chr(10) + mem_text() + chr(10) + chr(10)) if mem_text() else ""}## Vai trò
+{mem_block(t)}## Vai trò
 Bạn là PM: lên kế hoạch, giao việc, kiểm tra, tổng hợp; tự viết/biên tập văn bản và TỰ xử lý phần cần tư duy (phân tích,
 quyết định hướng làm, chốt nội dung, đánh giá chất lượng). Việc thao tác/khối lượng (vẽ/xử lý ảnh, file hàng loạt, code/script,
 research web dài) ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật. Task là cuộc trò chuyện nhiều lượt.
@@ -181,9 +190,10 @@ App TỰ lo: chọn model (không truyền --model), giới hạn số worker ch
 worker lỗi/hết lượt/không vẽ ra ảnh (status via=gpt-fallback/gemini-fallback) — KHÔNG tự kiểm tra rồi giao lại.
 Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở export_dir trong status. Sửa lỗi: giao lại cùng --out. Worker lỗi/không chạy: coi như không có.
 
-## Chia việc (Gemini nhanh, GPT chính xác hơn)
-- Research web: Gemini. Code, script, số liệu, Excel/Word/PowerPoint: GPT. Pro: GPT làm trước việc còn lại;
-  Balanced/Turbo/Eco: Gemini trước (idea, kịch bản, brief, ảnh), lỗi mới giao lại ĐÚNG PHẦN lỗi cho GPT.
+## Chia việc
+- Giao theo số liệu thật của máy này (app tự học sau mỗi việc: làm được không, mất bao lâu). Bên kia là dự phòng: app tự
+  giao lại khi lỗi / hết lượt / không ra ảnh / chậm bất thường.
+{stats_md(on)}
 - Việc độc lập: chạy song song (mỗi worker --out riêng; không 2 worker --edit cùng thư mục).
 
 ## Tốc độ (quan trọng)
@@ -419,7 +429,7 @@ def code_md(txt, t, py="", app=""):
     """Hướng dẫn Code mode: thay mục Vai trò/Chia việc/Nghiệm thu/chế độ bằng quy trình code + chạy thử."""
     code = CODE_MD.format(pdir=t.get("pdir", ""))
     txt = re.sub(r"(?ms)^## Vai trò\n.*?(?=^## )", lambda m: code + "\n", txt, count=1)
-    for sec in ("Chia việc (Gemini nhanh, GPT chính xác hơn)", "Nghiệm thu", "Ảnh có đánh dấu", "Ảnh & storyboard"):
+    for sec in ("Chia việc", "Nghiệm thu", "Ảnh có đánh dấu", "Ảnh & storyboard"):
         txt = re.sub(r"(?ms)^## " + re.escape(sec) + r"\n.*?(?=^## )", "", txt, count=1)
     mode_sec = ("## Chế độ: Code (Opus, suy nghĩ medium)\n- Ưu tiên chạy được và đúng; chạy thử thật trước khi báo xong.\n\n"
                  + (f"""## Giám sát (BẬT)

@@ -2053,7 +2053,7 @@ function workBlock(m, i) {
     const narr = (m.steps || []).filter((s) => !TOOL_STEP.test(s));
     const cur = narr[narr.length - 1];
     if (cur) rows.push([`<span class="spin sm"></span>`, cur, "Claude"]);
-    subs.filter((s) => s.status === "running").forEach((s) => rows.push([`<span class="spin sm"></span>`, s.title || s.id, who(s.worker, s.model)]));
+    subs.filter((s) => s.status === "running").forEach((s) => rows.push([`<span class="spin sm"></span>`, s.title || s.id, (s.now ? who(s.now, "") + " (thay " + who(s.worker, "") + ")" : who(s.worker, s.model))]));
     if (!rows.length) rows.push([`<span class="spin sm"></span>`, (m.steps || []).length ? m.steps[m.steps.length - 1] : "Đang khởi động…", ""]);
   } else {
     subs.forEach((s) => rows.push([`<span class="wic ${s.status === "completed" ? "done" : s.status}">${lu(s.status === "completed" ? "check" : ["failed", "rejected", "timeout"].includes(s.status) ? "x" : "check")}</span>`, s.title || s.id, who(s.worker, s.model)]));
@@ -2119,7 +2119,7 @@ function actHtml(t) {
   return `<div class="ah"><b>Activity</b><button class="ghost icon" data-actx="1" aria-label="Đóng">×</button></div>
     <div class="as"><div class="ak">Trạng thái</div>${costTxt(t.cost)}<div>${ST[t.status] || t.status}${live && ws[0][0].phase ? ` · ${esc(ws[0][0].phase)}` : ""}</div></div>
     ${ws.map(([m], n) => `<div class="as"><div class="ak">${m.status === "running" ? "Đang làm" : "Lượt " + (ws.length - n)} · ${esc(m.started || "")}</div>${costTxt(m.cost, "Lượt này tốn")}
-      ${(m.subtasks || []).map((x) => `<div class="asub"><span>${esc(x.title || x.id)}</span><small>${esc((x.worker === "codex" ? "ChatGPT" : x.worker === "gemini" ? "Gemini" : x.worker) + (x.model ? " · " + x.model : ""))}${x.seconds ? " · " + dur(x.seconds) : ""}</small><span class="pill ${x.status}">${ST[x.status] || x.status}</span>${x.reason ? `<details class="arsn"><summary>Lý do</summary><pre>${esc(x.reason)}</pre></details>` : ""}${x.worker !== "judge" ? `<button class="lnk" data-subdir="${esc(x.id)}" title="Mở thư mục file của việc này (xem trước khi task xong)">Mở thư mục</button>` : ""}</div>`).join("")}
+      ${(m.subtasks || []).map((x) => `<div class="asub"><span>${esc(x.title || x.id)}</span><small>${esc((x.now ? (x.now === "codex" ? "ChatGPT" : "Gemini") + " (làm thay " + (x.worker === "codex" ? "ChatGPT" : "Gemini") + ")" : x.worker === "codex" ? "ChatGPT" : x.worker === "gemini" ? "Gemini" : x.worker) + (x.model ? " · " + x.model : ""))}${x.seconds ? " · " + dur(x.seconds) : ""}</small><span class="pill ${x.status}">${ST[x.status] || x.status}</span>${x.reason ? `<details class="arsn"><summary>Lý do</summary><pre>${esc(x.reason)}</pre></details>` : ""}${x.worker !== "judge" ? `<button class="lnk" data-subdir="${esc(x.id)}" title="Mở thư mục file của việc này (xem trước khi task xong)">Mở thư mục</button>` : ""}</div>`).join("")}
       ${(m.steps || []).length ? `<ol class="asteps">${m.steps.map((x) => `<li title="${esc(x)}">${esc(x)}</li>`).join("")}</ol>` : m.status === "running" ? `<ol class="asteps"><li>Đang khởi động…</li></ol>` : ""}</div>`).join("")}
     ${files.length ? `<div class="as"><div class="ak">File kết quả · ${files.length}</div>${files.slice(0, 40).map((f) => `<div class="afile" title="${esc(f)}">${ficon(f)}<span>${esc(f)}</span></div>`).join("")}</div>` : ""}`;
 }

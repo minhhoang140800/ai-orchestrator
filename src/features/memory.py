@@ -6,11 +6,18 @@
 # Chỉ nằm trên máy người dùng (thư mục _AI-Orchestrator cạnh lịch sử task), được nhúng vào hướng dẫn của mọi task sau.
 # Người dùng xem/sửa/xoá trong Cài đặt > Memory.
 
-MEM_MAX = 2500                       # ký tự tối đa (giữ hướng dẫn gọn -> không chậm)
+MEM_STYLE_MAX = 700                  # cách làm việc chung: ngắn, áp dụng cho MỌI task (không làm dài hướng dẫn)
+MEM_HIST_MAX = 800                   # lịch sử: riêng từng dự án, chỉ nhúng vào task của dự án đó
 _mlock = threading.Lock()
-MEM_PROMPT = """Bạn giữ BỘ NHỚ về người dùng của Maestro (app giao việc cho AI). Bộ nhớ hiện tại:
+MEM_PROMPT = """Bạn giữ BỘ NHỚ về người dùng của Maestro (app giao việc cho AI).
+
+Cách làm việc chung (áp dụng cho MỌI loại task):
 <<<
-{mem}
+{style}
+>>>
+Lịch sử của dự án "{proj}":
+<<<
+{hist}
 >>>
 
 Lượt làm việc vừa xong (task "{title}", chế độ {mode}):
@@ -18,34 +25,60 @@ Lượt làm việc vừa xong (task "{title}", chế độ {mode}):
 {turn}
 >>>
 
-Viết lại TOÀN BỘ bộ nhớ, giữ điều còn đúng, thêm điều mới học được, bỏ điều đã lỗi thời hoặc bị người dùng phủ nhận.
-Đúng 2 mục, gạch đầu dòng ngắn, tiếng Việt, tổng dưới {max} ký tự:
+Viết lại cả 2 mục, giữ điều còn đúng, thêm điều mới học được, bỏ điều lỗi thời hoặc bị người dùng phủ nhận. Tiếng Việt, gạch đầu dòng ngắn.
 ## Cách làm việc
-(sở thích, cách xưng hô, độ dài/kiểu trả lời, quy tắc người dùng đặt ra, điều người dùng hay sửa/không thích — chỉ điều áp dụng chung cho nhiều task)
+(dưới {smax} ký tự. CHỈ điều đúng với MỌI loại task: xưng hô, độ dài/kiểu trả lời, điều người dùng hay sửa/không thích.
+KHÔNG ghi quy trình riêng của 1 loại việc hay 1 dự án — vd phát hành, chạy test, đặt thư mục, cách vẽ asset — những thứ đó ghi ở Lịch sử.)
 ## Lịch sử
-(tối đa 15 dòng, mới nhất ở đầu: dự án/sản phẩm đang làm, quyết định đã chốt, việc dở dang — mỗi dòng 1 ý, có tên dự án nếu có)
-KHÔNG ghi mật khẩu, mã, key, token, số điện thoại, email, số tài khoản hay nội dung bí mật. Không có gì đáng nhớ thì trả lại bộ nhớ cũ.
-Chỉ trả về nội dung bộ nhớ, bắt đầu bằng "## Cách làm việc", không giải thích."""
+(dưới {hmax} ký tự, tối đa 10 dòng, mới nhất ở đầu: việc đã làm/đang dở, quyết định đã chốt, quy trình riêng của dự án này)
+KHÔNG ghi mật khẩu, mã, key, token, số điện thoại, email, số tài khoản hay nội dung bí mật. Không có gì đáng nhớ thì trả lại như cũ.
+Chỉ trả về 2 mục trên, bắt đầu bằng "## Cách làm việc", không giải thích."""
 
 
 def mem_file():
     return STORE / "memory_auto.md"
 
 
-def mem_text():
+def mem_hist_file(pid):
+    return STORE / "memory_projects" / f"{safe_name(pid or '_chung', 60)}.md"
+
+
+def _read(f, n):
     try:
-        return mem_file().read_text(encoding="utf-8").strip()[:MEM_MAX + 500]
+        return f.read_text(encoding="utf-8").strip()[:n]
     except Exception:
         return ""
 
 
-def mem_save(text):
-    text = str(text or "").replace("\r\n", "\n").strip()[:MEM_MAX + 500]
+def mem_text():
+    """Cách làm việc chung (bản cũ có cả mục Lịch sử trong cùng file: chỉ lấy phần trước Lịch sử)."""
+    s = _read(mem_file(), 6000)
+    return s.split("## Lịch sử")[0].strip()[:4000]     # người dùng tự sửa được dài hơn; AI tự ghi thì giới hạn MEM_STYLE_MAX
+
+
+def mem_block(t):
+    """Phần bộ nhớ nhúng vào hướng dẫn của task: cách làm việc chung + lịch sử của đúng dự án của task."""
+    style, hist = mem_text(), _read(mem_hist_file(t.get("project")), MEM_HIST_MAX + 300)
+    if not style and not hist:
+        return ""
+    return ("## Về người dùng — Maestro tự ghi nhớ (tham khảo; hướng dẫn ở trên và yêu cầu hiện tại ưu tiên hơn)\n" + style
+            + (("\n### Lịch sử dự án này\n" + hist.replace("## Lịch sử", "").strip()) if hist else "") + "\n\n")
+
+
+def _atomic(f, text):
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_name(f"{f.stem}.{os.getpid()}.tmp")
+    tmp.write_text(text + ("\n" if text else ""), encoding="utf-8")
+    os.replace(tmp, f)
+
+
+def mem_save(text, pid=None, hist=None):
+    """Lưu cách làm việc chung (text) và/hoặc lịch sử dự án (hist). Người dùng sửa trong Cài đặt: chỉ phần chung."""
     with _mlock:
-        STORE.mkdir(parents=True, exist_ok=True)
-        tmp = mem_file().with_name(f"memory_auto.{os.getpid()}.tmp")
-        tmp.write_text(text + ("\n" if text else ""), encoding="utf-8")
-        os.replace(tmp, mem_file())
+        if text is not None:
+            _atomic(mem_file(), str(text or "").replace("\r\n", "\n").strip()[:4000])
+        if hist is not None:
+            _atomic(mem_hist_file(pid), str(hist or "").replace("\r\n", "\n").strip()[:MEM_HIST_MAX + 300])
 
 
 def mem_turn(t):
@@ -66,8 +99,15 @@ def mem_update(t):
         turn = mem_turn(t)
         if not exe or not turn or not claude_usable():   # không có Claude trả phí: không tốn hạn mức ChatGPT
             return
-        prompt = MEM_PROMPT.format(mem=mem_text() or "(trống)", title=t.get("title", ""), mode=t.get("mode", ""),
-                                   turn=turn, max=MEM_MAX)
+        pid = t.get("project")
+        pj = project_of(t)
+        old_hist = _read(mem_hist_file(pid), 4000)
+        if not old_hist and not pid:                     # bản cũ: lịch sử nằm chung file -> chuyển sang "_chung"
+            old = _read(mem_file(), 6000)
+            old_hist = old.split("## Lịch sử", 1)[1].strip() if "## Lịch sử" in old else ""
+        prompt = MEM_PROMPT.format(style=mem_text() or "(trống)", proj=(pj or {}).get("name") or "chung",
+                                   hist=old_hist.replace("## Lịch sử", "").strip() or "(trống)", title=t.get("title", ""),
+                                   mode=t.get("mode", ""), turn=turn, smax=MEM_STYLE_MAX, hmax=MEM_HIST_MAX)
         p = subprocess.run([exe, "-p", prompt, "--model", "haiku"], cwd=str(STORE), stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
                            creationflags=NO_WINDOW | BELOW_NORMAL)
@@ -75,7 +115,9 @@ def mem_update(t):
         if p.returncode != 0 or "## Cách làm việc" not in out:
             dlog(f"mem_update {t.get('id')}: rc={p.returncode} {(p.stderr or out)[-300:]}")
             return
-        mem_save(out[out.index("## Cách làm việc"):][:MEM_MAX + 500])
+        out = out[out.index("## Cách làm việc"):]
+        style, _, hist = out.partition("## Lịch sử")
+        mem_save(style.strip()[:MEM_STYLE_MAX + 300], pid, ("## Lịch sử\n" + hist.strip()) if hist.strip() else None)
     except Exception as e:
         dlog(f"mem_update {t.get('id')}: {e}")
 

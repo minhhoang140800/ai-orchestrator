@@ -186,13 +186,14 @@ class Prompts(unittest.TestCase):
         self.assertIn(r"C:\Users\Minh Hoang\Documents\proj", txt)
 
     def test_memory_injected(self):
-        NS["mem_save"]("## Cách làm việc\n- Xưng hô tôi – bạn\n## Lịch sử\n- Dự án Alien")
+        NS["mem_save"]("## Cách làm việc\n- Xưng hô tôi – bạn", None, "## Lịch sử\n- Dự án Alien")
         try:
             _, md = self._md("balanced")
             self.assertIn("Maestro tự ghi nhớ", md)
-            self.assertIn("Dự án Alien", md)
+            self.assertIn("Xưng hô tôi – bạn", md)
+            self.assertIn("Dự án Alien", md)              # lịch sử: chỉ của đúng dự án của task (task không dự án -> "_chung")
         finally:
-            NS["mem_save"]("")
+            NS["mem_save"]("", None, "")
         _, md = self._md("balanced")
         self.assertNotIn("Maestro tự ghi nhớ", md)
 
@@ -213,6 +214,58 @@ class Memory(unittest.TestCase):
             NS["mem_update"]({"messages": [{"role": "user", "text": "a"}, {"role": "claude", "text": "b"}]})
         finally:
             NS["find_bin"] = old
+
+
+class WorkerStats(unittest.TestCase):
+    def setUp(self):
+        (Path(NS["DATA"]) / NS["WSTATS_F"]).unlink(missing_ok=True)
+
+    def test_default_without_data(self):
+        self.assertEqual(NS["best_worker"]("image"), "codex")
+        self.assertEqual(NS["best_worker"]("research"), "gemini")
+
+    def test_learns_from_results(self):
+        for _ in range(5):
+            NS["record_stat"]("gemini", "image", False, 200)
+            NS["record_stat"]("codex", "image", True, 240)
+            NS["record_stat"]("gemini", "text", True, 60)
+            NS["record_stat"]("codex", "text", True, 180)
+        self.assertEqual(NS["best_worker"]("image"), "codex")          # GPT vẽ được nhiều hơn rõ
+        self.assertEqual(NS["best_worker"]("text"), "gemini")          # ngang nhau -> bên nhanh hơn
+        self.assertTrue(NS["stat_poor"]("gemini", "image"))            # -> app giao thẳng GPT
+        self.assertFalse(NS["stat_poor"]("codex", "image"))
+        d = json.loads((Path(NS["DATA"]) / NS["WSTATS_F"]).read_text(encoding="utf-8"))
+        for x in d["gemini:image"]:
+            x["t"] -= 25 * 3600                                        # đã hơn 24 giờ -> cho Gemini thử lại
+        (Path(NS["DATA"]) / NS["WSTATS_F"]).write_text(json.dumps(d), encoding="utf-8")
+        self.assertFalse(NS["stat_poor"]("gemini", "image"))
+        self.assertEqual(NS["stat_cap"]("codex", "image", 900), 900)   # 4 x 240s = 960 > giới hạn gốc 900
+        self.assertEqual(NS["stat_cap"]("gemini", "text", 900), 360)   # tối thiểu 6 phút
+        md = NS["stats_md"](["codex", "gemini"])
+        self.assertIn("Ảnh: giao GPT", md)
+        self.assertIn("Viết / idea / phân tích: giao Gemini", md)
+
+
+class Watchdog(unittest.TestCase):
+    def test_stops_on_limit_text(self):
+        code = "import time,sys;print('working',flush=True);time.sleep(1);print('Error: usage limit reached',file=sys.stderr,flush=True);time.sleep(60)"
+        t0 = time.time()
+        r = NS["run_watched"]([sys.executable, "-c", code], _TMP, 120, "gemini", "text", 120, "viết bài")
+        self.assertEqual(r[4], "limit")
+        self.assertLess(time.time() - t0, 20)
+
+    def test_stops_when_slow(self):
+        r = NS["run_watched"]([sys.executable, "-c", "import time;time.sleep(60)"], _TMP, 120, "gemini", "text", 4, "x")
+        self.assertEqual(r[4], "slow")
+
+    def test_normal_run(self):
+        r = NS["run_watched"]([sys.executable, "-c", "print('ok')"], _TMP, 60, "codex", "text", 60, "x")
+        self.assertEqual((r[0], r[4], r[1].strip()), (0, "", "ok"))
+
+    def test_limit_words_in_task_not_misread(self):
+        code = "import time,sys;print('rate limit exceeded la gi',flush=True)"
+        r = NS["run_watched"]([sys.executable, "-c", code], _TMP, 60, "codex", "text", 60, "giải thích rate limit exceeded")
+        self.assertEqual(r[4], "")
 
 
 class FailReason(unittest.TestCase):
