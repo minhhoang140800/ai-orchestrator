@@ -3552,8 +3552,9 @@ def code_md(txt, t, py="", app=""):
     txt = re.sub(r"(?ms)^## Chế độ: .*?(?=^## )",
                  "## Chế độ: Code (Opus, suy nghĩ medium)\n- Ưu tiên chạy được và đúng; chạy thử thật trước khi báo xong.\n\n"
                  + (f"""## Giám sát (BẬT)
-Sau khi chạy thử/test đã qua: gọi giám khảo độc lập soát phần code đã sửa theo đúng yêu cầu (viết yêu cầu + điều phải đạt
-vào tasks/criteria.md trước):
+- Có test tự động chạy được và ĐÃ QUA HẾT (test cũ + test bạn viết cho từng ý của yêu cầu) -> KHÔNG gọi giám khảo, báo xong luôn.
+- Chỉ gọi giám khảo khi không chạy được test tự động (vd giao diện, script khó test) hoặc vẫn còn test fail mà bạn không sửa được:
+  viết yêu cầu + điều phải đạt vào tasks/criteria.md trước, rồi:
   "{py}" "{app}" judge --files <file/thư mục đã sửa> --criteria tasks/criteria.md --brief "<yêu cầu>" --out work/J1
 Fail -> sửa đúng lỗi nêu, chạy test lại, chấm lại; lặp tới khi ĐẠT (tối đa 4 vòng; vẫn fail thì báo rõ còn lỗi gì).
 
