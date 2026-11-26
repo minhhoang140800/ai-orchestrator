@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v11.1 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v11.2 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -124,6 +124,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | Hướng dẫn cho Claude 8,2-9,1k ký tự | Rút gọn còn 6,7-8k; lệnh app chỉ ghi 1 lần (APP); luật số worker/thời gian/quyền do app ép (v10.6) |
 | app.py 1 file 4.800 dòng khó đọc, khó cùng phát triển | v11.0: chia module core/providers/workers/features/web (theo tài liệu kiến trúc mới, bước 0–5); mã nguyên văn, chạy chung 1 không gian tên; build ghép lại 1 file. Đã chứng minh bản tách khớp 100% v10.6 (329/329 câu lệnh). Bộ test tự động src/tests, release.py chặn nếu test lỗi. Chưa làm bước 6 (gộp CSS) |
 | Không biết vì sao Gemini không ra ảnh / GPT lỗi (nhật ký bị xoá cùng nháp) | v11.0: worker lưu lý do (lỗi gốc, "báo xong nhưng không tạo ra file ảnh", 12 dòng cuối nhật ký) vào lịch sử; xem ở Activity (Lý do) và Export log |
+| Concept board: Claude vẽ từng phương án (12 ảnh) rồi ghép, 25 phút; research xem ảnh đối thủ tải ảnh gốc lần lượt (~6 phút) | v11.2: concept board/moodboard mặc định vẽ cả board trong 1 ảnh; research tối đa ~2 phút, xem ảnh: tải bản thu nhỏ (=w320) song song, tối đa 8 app x 5 ảnh, ghép 1 ảnh tổng hợp |
 
 ---
 
@@ -134,7 +135,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 - Gemini ở Balanced chạy medium, lên high khi task khó hoặc làm lại.
 - Giám sát: Pro/Balanced/Code tự bật; Code bỏ giám khảo khi test đã qua hết.
 - "Chỉ dùng trong gói" luôn bật, không có công tắc; không tự mua thêm credit.
-- Ảnh: bên không vẽ được thì thử 1 lần rồi đổi worker, nhớ 30 phút. Turbo không gộp ảnh thành lưới.
+- Ảnh: bên không vẽ được thì thử 1 lần rồi đổi worker, nhớ 30 phút. Turbo không gộp ảnh thành lưới (riêng concept board/moodboard: vẽ cả board trong 1 ảnh — v11.2).
 - Bảng Mức dùng: "% đã dùng" kiểu Claude, không đếm số lượt.
 - Đo mức dùng mỗi lượt (chạy nền) + tổng task.
 - Learning: không có công tắc, tự gửi bài học, không gửi dữ liệu riêng; quy tắc chung chỉ áp dụng khi hợp >90% loại task.
@@ -147,6 +148,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 - Benchmark: `src/bench.py` (logs: đo từ lịch sử, không tốn hạn mức; run: bộ việc mẫu, tốn hạn mức) chỉ chạy trên máy phát triển.
 - Dùng trên điện thoại: icon điện thoại ở đầu Cài đặt, 1 dòng hướng dẫn; QR không đổi cho tới khi bấm Đổi mã; icon thông báo cũng ở đầu Cài đặt.
 - Bộ nhớ người dùng (v11.0): Maestro tự ghi cách làm việc + lịch sử sau MỖI lượt xong (nền, haiku, không làm chậm task), dùng cho mọi task sau; lưu `_AI-Orchestrator/memory_auto.md` trên máy; xem/sửa/xoá trong Cài đặt > Memory. Chỉ chạy khi có Claude trả phí.
+- Research mặc định tối đa ~2 phút (trừ khi yêu cầu nghiên cứu sâu); xem ảnh bằng bản thu nhỏ, không tải ảnh gốc (v11.2).
 
 ---
 
