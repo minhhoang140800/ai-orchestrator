@@ -6,6 +6,7 @@
 - Người dùng không phải dev: báo kết quả bằng lời dễ hiểu (đã đổi gì, bấm gì để có), không dán code dài.
 - Mỗi lần sửa xong: tăng bản +0.1 và phát hành (mục Phát hành). Người dùng cập nhật bằng nút **Cập nhật** trong app.
 - Bảo mật: không lưu secret trong repo; không tự cấp quyền rộng cho AI (vd Gmail/Calendar) khi chưa được yêu cầu.
+- Lịch sử yêu cầu, vấn đề đã gặp, quyết định đã chốt: nhánh `lich-su` (`QUY_TRINH_VA_LICH_SU.md`) — đọc trước khi đổi hành vi app, cập nhật sau mỗi bản.
 
 ## Sản phẩm
 Maestro = web app chạy trên máy người dùng (Windows chính, có bản Mac) tại http://ai-orchestrator.localhost/
