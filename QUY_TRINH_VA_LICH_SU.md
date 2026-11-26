@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v10.6 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v11.0 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -121,6 +121,8 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | Learning tự động tốn 90s Haiku/task, có thể lọt dữ liệu riêng | Tắt (v10.6) |
 | Save Template hiện ở mọi task | Chỉ gợi ý khi đã có từ 2 task cùng loại (so khớp từ khoá tên/yêu cầu), không với Code mode / task dùng template (v10.6) |
 | Hướng dẫn cho Claude 8,2-9,1k ký tự | Rút gọn còn 6,7-8k; lệnh app chỉ ghi 1 lần (APP); luật số worker/thời gian/quyền do app ép (v10.6) |
+| app.py 1 file 4.800 dòng khó đọc, khó cùng phát triển | v11.0: chia module core/providers/workers/features/web (theo tài liệu kiến trúc mới, bước 0–5); mã nguyên văn, chạy chung 1 không gian tên; build ghép lại 1 file. Đã chứng minh bản tách khớp 100% v10.6 (329/329 câu lệnh). Bộ test tự động src/tests, release.py chặn nếu test lỗi. Chưa làm bước 6 (gộp CSS) |
+| Không biết vì sao Gemini không ra ảnh / GPT lỗi (nhật ký bị xoá cùng nháp) | v11.0: worker lưu lý do (lỗi gốc, "báo xong nhưng không tạo ra file ảnh", 12 dòng cuối nhật ký) vào lịch sử; xem ở Activity (Lý do) và Export log |
 
 ---
 
@@ -143,6 +145,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 - Kiến trúc mới (tách module, SQLite...) làm riêng SAU khi v10.6 ổn định.
 - Benchmark: `src/bench.py` (logs: đo từ lịch sử, không tốn hạn mức; run: bộ việc mẫu, tốn hạn mức) chỉ chạy trên máy phát triển.
 - Dùng trên điện thoại: icon điện thoại ở đầu Cài đặt, 1 dòng hướng dẫn; QR không đổi cho tới khi bấm Đổi mã; icon thông báo cũng ở đầu Cài đặt.
+- Bộ nhớ người dùng (v11.0): Maestro tự ghi cách làm việc + lịch sử sau MỖI lượt xong (nền, haiku, không làm chậm task), dùng cho mọi task sau; lưu `_AI-Orchestrator/memory_auto.md` trên máy; xem/sửa/xoá trong Cài đặt > Memory. Chỉ chạy khi có Claude trả phí.
 
 ---
 
