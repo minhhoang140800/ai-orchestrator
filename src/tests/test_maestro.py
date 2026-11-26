@@ -388,6 +388,106 @@ class CodeDrawn(unittest.TestCase):
                     os.environ[k] = val
 
 
+class Export(unittest.TestCase):
+    """File worker làm ra chuyển thẳng vào <OUTPUT>/<YYYYMMDD>-<tên việc>; sổ sách ở lại nháp .work."""
+    def test_move_products(self):
+        out_root = Path(tempfile.mkdtemp()) / "01 - Thử"
+        proj = out_root / ".work"
+        v = proj / "work" / "icon_final" / "v1"
+        (v / "gpt").mkdir(parents=True)
+        (v / "_ve_bang_code").mkdir()
+        for n in ("TASK.md", "worker.log", "result.md", "status.json"):
+            (v / n).write_text("x", encoding="utf-8")
+        (v / "icon_1.png").write_bytes(b"x")
+        (v / "gpt" / "icon_2.png").write_bytes(b"x")
+        (v / "_ve_bang_code" / "bad.png").write_bytes(b"x")
+        st = {"status": "completed"}
+        NS["export_products"](st, v, v.parent, proj)
+        dst = out_root / (time.strftime("%Y%m%d") + "-icon_final")
+        self.assertEqual(st["export_dir"], str(dst))
+        self.assertEqual(st["files"], ["icon_1.png", "icon_2.png"])          # ảnh bên làm thay đưa ra cùng cấp
+        self.assertTrue((dst / "icon_2.png").exists() and not (v / "icon_1.png").exists())
+        self.assertTrue((v / "result.md").exists() and not (dst / "result.md").exists())   # sổ sách ở lại nháp
+        self.assertFalse((dst / "bad.png").exists())                         # ảnh vẽ bằng code không ra thư mục kết quả
+        v2 = v.parent / "v2"
+        v2.mkdir()
+        (v2 / "icon_1.png").write_bytes(b"y")
+        st2 = {"status": "completed"}
+        NS["export_products"](st2, v2, v.parent, proj)
+        self.assertTrue(st2["export_dir"].endswith("-icon_final_v2"))      # lần sửa: thư mục mới, không ghi đè
+        st3 = {"status": "failed"}
+        v3 = v.parent / "v3"
+        v3.mkdir()
+        (v3 / "x.png").write_bytes(b"z")
+        NS["export_products"](st3, v3, v.parent, proj)
+        self.assertNotIn("export_dir", st3)                                  # lỗi: không chuyển
+
+    def test_not_in_task_dir(self):
+        v = Path(tempfile.mkdtemp()) / "work" / "S1" / "v1"
+        v.mkdir(parents=True)
+        (v / "a.png").write_bytes(b"x")
+        st = {"status": "completed"}
+        NS["export_products"](st, v, v.parent, v.parent.parent.parent)   # không phải thư mục .work của task
+        self.assertNotIn("export_dir", st)
+
+
+class AutoJudge(unittest.TestCase):
+    """Giám sát bật (có criteria.md): việc vẽ xong là app chấm ngay việc đó (không đợi cả lô), không lặp vô hạn."""
+    def _setup(self):
+        proj = Path(tempfile.mkdtemp()) / "01 - Thử" / ".work"
+        v = proj / "work" / "icon" / "v1"
+        v.mkdir(parents=True)
+        (v / "TASK.md").write_text("Vẽ 4 icon\n\nchi tiết", encoding="utf-8")
+        exp = proj.parent / "20261126-icon"
+        exp.mkdir()
+        return proj, v, exp
+
+    def test_judge_right_after_worker(self):
+        proj, v, exp = self._setup()
+        (proj / "tasks").mkdir()
+        (proj / "tasks" / "criteria.md").write_text("- BẮT BUỘC: 4 icon", encoding="utf-8")
+        seen = {}
+
+        class P:
+            stdout = json.dumps({"status": "rejected", "out_dir": str(proj / "work" / "icon_cham" / "v1"), "review": {
+                "overall": "fail", "summary": "3/4 file đạt (app đã tự giao sửa 1 vòng)",
+                "images": [{"file": str(exp / "icon_2.png"), "verdict": "fail", "issues": ["mờ"]}],
+                "auto_fix": [{"round": 1, "files": {"a": [str(exp) + "_v2/icon_2.png"]}}]}})
+
+        def fake_run(cmd, **kw):
+            seen["cmd"], seen["env"] = cmd, kw.get("env") or {}
+            return P()
+        old = NS["subprocess"].run
+        NS["subprocess"].run = fake_run
+        try:
+            st = {"status": "completed", "export_dir": str(exp)}
+            NS["auto_judge"](st, v, v.parent, proj, True)
+        finally:
+            NS["subprocess"].run = old
+        self.assertIn("judge", seen["cmd"])
+        self.assertEqual(seen["cmd"][seen["cmd"].index("--files") + 1], str(exp))   # chấm đúng file của việc này
+        self.assertEqual(seen["env"].get("AIO_NOJUDGE"), "1")                    # việc sửa do giám khảo giao không tự chấm lặp
+        self.assertEqual(st["judge"]["overall"], "fail")
+        self.assertEqual(st["judge"]["issues"], {"icon_2.png": ["mờ"]})
+        self.assertTrue(st["judge"]["fixed"][0].endswith("_v2/icon_2.png"))
+
+    def test_skip_without_criteria_or_not_image(self):
+        proj, v, exp = self._setup()
+        called = []
+        old = NS["subprocess"].run
+        NS["subprocess"].run = lambda *a, **k: called.append(1)
+        try:
+            st = {"status": "completed", "export_dir": str(exp)}
+            NS["auto_judge"](st, v, v.parent, proj, True)              # chưa có criteria.md (Giám sát tắt)
+            (proj / "tasks").mkdir()
+            (proj / "tasks" / "criteria.md").write_text("x", encoding="utf-8")
+            NS["auto_judge"](st, v, v.parent, proj, False)             # không phải việc vẽ
+        finally:
+            NS["subprocess"].run = old
+        self.assertEqual(called, [])
+        self.assertNotIn("judge", st)
+
+
 class AskUser(unittest.TestCase):
     """Câu trả lời kết thúc bằng câu hỏi -> task 'Chờ bạn trả lời'; luật hỏi trước khi bắt tay khi đề bài mơ hồ."""
     def test_trailing_question(self):
@@ -421,7 +521,8 @@ class AskUser(unittest.TestCase):
         self.assertIn("TRƯỚC khi bắt tay", md)
         self.assertIn("ĐANG làm mà vướng", md)
         self.assertIn('"A - <ngắn gọn>"', md)                     # câu hỏi dạng lựa chọn (nút bấm)
-        self.assertIn("chép NGAY file của việc đó sang OUTPUT", md)
+        self.assertIn("chuyển THẲNG vào OUTPUT/<YYYYMMDD>-<tên việc>", md)
+        self.assertNotIn("rồi chép bản đạt sang OUTPUT", md)
 
 
 class App(unittest.TestCase):

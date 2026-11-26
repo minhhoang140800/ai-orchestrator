@@ -164,7 +164,9 @@ research web dài) ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật. Ta
 - OUTPUT (sản phẩm giao người dùng): {out_dir(t)} — người dùng chỉ định nơi khác thì lưu đúng nơi đó, ghi đường dẫn đầy đủ.
   Mỗi lần xuất sản phẩm: đặt trong thư mục con YYYYMMDD-<tên ngắn> của OUTPUT (vd {datetime.date.today():%Y%m%d}-concept_boards);
   lần sửa sau tạo thư mục mới cùng quy tắc (vd ...-concept_boards_v2), không ghi đè bản trước.
-  Việc nào đã đạt thì chép NGAY file của việc đó sang OUTPUT (không đợi xong cả lô) để người dùng xem trước được.
+  File worker làm ra được app chuyển THẲNG vào OUTPUT/<YYYYMMDD>-<tên việc> ngay khi việc xong (status.json: export_dir +
+  files) -> đặt --out work/<tên ngắn có nghĩa> (vd work/icon_final), KHÔNG chép lại; kiểm/chấm/sửa ngay trên file ở đó.
+  File tự làm (không qua worker): ghi thẳng vào OUTPUT/<YYYYMMDD>-<tên>. Xong task: xoá file nháp/thử lẫn trong OUTPUT.
 - Được ĐỌC mọi ổ: {', '.join(drives())}. Chỉ sửa file có sẵn khi người dùng yêu cầu sửa chính file đó; không xóa/di chuyển
   file ngoài thư mục hiện tại và OUTPUT. Sản phẩm task trước (dùng lại, tránh làm lại): {STORE / "registry.json"}
 
@@ -177,7 +179,7 @@ Giao việc: ghi yêu cầu đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu 
 Nhiều việc: giao cả lô bằng --bg (trả về ngay), rồi chờ MỘT lần: "{py}" "{app}" wait work/S1 work/S2 work/S3
 App TỰ lo: chọn model (không truyền --model), giới hạn số worker chạy cùng lúc, thời gian chờ, giao bên kia làm lại khi
 worker lỗi/hết lượt/không vẽ ra ảnh (status via=gpt-fallback/gemini-fallback) — KHÔNG tự kiểm tra rồi giao lại.
-Kết quả: work/<ID>/vN/ (result.md, status.json, file). Sửa lỗi: giao lại cùng --out. Worker lỗi/không chạy: coi như không có.
+Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở export_dir trong status. Sửa lỗi: giao lại cùng --out. Worker lỗi/không chạy: coi như không có.
 
 ## Chia việc (Gemini nhanh, GPT chính xác hơn)
 - Research web: Gemini. Code, script, số liệu, Excel/Word/PowerPoint: GPT. Pro: GPT làm trước việc còn lại;
@@ -199,8 +201,9 @@ Kết quả: work/<ID>/vN/ (result.md, status.json, file). Sửa lỗi: giao l�
   ("GIÁM SÁT BẬT — không có giám khảo Claude: giao gemini soát theo criteria.md, sửa và soát lại tới khi đạt (tối đa 4 vòng).")
   if watch_on else "Giám sát TẮT — không gọi giám khảo; tự xem lại theo yêu cầu 1 lần, lỗi nhỏ thẩm mỹ thì ghi chú cho người dùng."}
 {f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1
-  Chấm NGAY trong work/<ID>/vN (trước khi chép sang OUTPUT); file trượt do worker làm thì app TỰ giao lại worker đó sửa rồi
-  chấm lại (review.json: auto_fix) — bạn chỉ xử lý phần app không tự sửa được, rồi chép bản đạt sang OUTPUT.
+  Có criteria.md: app TỰ chấm từng việc vẽ NGAY khi việc đó xong và tự giao sửa file trượt (tối đa 2 vòng; bản sửa ra thư
+  mục ..._v2) -> status.json có "judge" (overall, summary, issues, fixed). KHÔNG chấm lại file đã đạt; cuối lô chỉ chấm nhanh
+  tính đồng bộ cả bộ (--rounds 0) khi nhiều file cùng loại; bạn chỉ xử lý phần app không tự sửa được.
 """ if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial.
 
 {inline}{extra_md}{brain_md}{tpl_md}## Chế độ: {mode_name}

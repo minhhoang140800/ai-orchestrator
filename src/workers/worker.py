@@ -208,6 +208,68 @@ def worker_fallback(st, v, a, edit, want_img):
         st["edited"] = gs["edited"]
 
 
+EXPORT_SKIP_NAMES = {"TASK.md", "worker.log", "status.json", "result.md", "review.json", "prompt.md", "last.txt"}
+EXPORT_SKIP_DIRS = {"_backup", CODE_DRAWN, "gpt_out", "gemini_out"}
+
+
+def export_products(st, v, out, proj):
+    """File sản phẩm của việc vừa xong -> chuyển THẲNG ra thư mục kết quả: <OUTPUT>/<YYYYMMDD>-<tên việc>[_vN]
+    (người dùng xem được ngay, Claude không phải chép lại). Sổ sách (TASK.md, log, status.json, result.md) ở lại nháp .work,
+    tự dọn khi task xong. Chỉ khi chạy trong task (thư mục .work), không áp dụng --edit."""
+    if proj.name != ".work" or st.get("status") != "completed" or st.get("edit_dir"):
+        return
+    files = [f for f in v.rglob("*") if f.is_file() and f.name not in EXPORT_SKIP_NAMES and not f.name.startswith("TASK")
+             and not (set(f.relative_to(v).parts[:-1]) & EXPORT_SKIP_DIRS)]
+    if not files:
+        return
+    n = int(v.name[1:]) if re.fullmatch(r"v\d+", v.name) else 1
+    dst = proj.parent / (datetime.date.today().strftime("%Y%m%d") + "-" + safe_name(out.name, 60) + (f"_v{n}" if n > 1 else ""))
+    dst.mkdir(parents=True, exist_ok=True)
+    moved = []
+    for f in files:
+        rel = f.relative_to(v)
+        if rel.parts[0] in ("gpt", "gemini"):          # ảnh bên làm thay: đưa ra cùng cấp (không để thư mục gpt/ gemini/)
+            rel = Path(*rel.parts[1:])
+        t = dst / rel
+        if t.exists():                                  # trùng tên: giữ cả hai, không ghi đè
+            t = t.with_name(f"{t.stem}_{len(moved) + 1}{t.suffix}")
+        t.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.move(str(f), str(t))
+            moved.append(str(t.relative_to(dst)).replace("\\", "/"))
+        except Exception as e:
+            dlog(f"export_products {f}: {e}")
+    if moved:
+        st["export_dir"] = str(dst)
+        st["files"] = sorted(moved)
+
+
+def auto_judge(st, v, out, proj, want_img):
+    """Giám sát bật (có tasks/criteria.md) + việc vẽ vừa xong: giám khảo chấm NGAY các file của việc này, trượt thì app tự giao
+    lại worker sửa (tối đa 2 vòng) -> các việc khác vẫn chạy song song, không đợi cả lô xong mới chấm rồi làm lại."""
+    crit = proj / "tasks" / "criteria.md"
+    if (os.environ.get("AIO_NOJUDGE") or not want_img or st.get("status") != "completed" or not st.get("export_dir")
+            or not crit.is_file()):
+        return
+    brief = next((x.strip().lstrip("#").strip() for x in (v / "TASK.md").read_text(encoding="utf-8", errors="replace").splitlines()
+                  if x.strip()), "(không)") if (v / "TASK.md").is_file() else "(không)"
+    cmd = [sys.executable, str(APP), "judge", "--files", st["export_dir"], "--criteria", str(crit), "--brief", brief[:300],
+           "--out", str(out.parent / (out.name + "_cham")), "--rounds", "2"]
+    try:
+        p = subprocess.run(cmd, cwd=str(proj), env=dict(os.environ, AIO_NOJUDGE="1"), stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800, creationflags=NO_WINDOW)
+        r = json.loads((p.stdout or "").strip().splitlines()[-1])
+    except Exception as e:
+        dlog(f"auto_judge {v}: {e}")
+        return
+    rv = r.get("review") or {}
+    st["judge"] = {"overall": rv.get("overall") or r.get("status"), "summary": rv.get("summary") or r.get("error", ""),
+                   "review": str(Path(r.get("out_dir", "")) / "review.json"),
+                   "fixed": [x for fx in rv.get("auto_fix") or [] for vv in fx.get("files", {}).values() for x in vv],
+                   "issues": {Path(str(i.get("file", ""))).name: i.get("issues") for i in rv.get("images") or []
+                              if i.get("verdict") != "pass"}}
+
+
 def edit_refused(p):
     """Thư mục quá rộng/nguy hiểm để cho worker sửa thẳng -> lý do từ chối ('' = được phép)."""
     if not p.is_dir():
@@ -325,10 +387,10 @@ def cmd_worker(argv):
         if a.bg:                            # giao nhanh cả lô, chờ 1 lần: wait work/S1 work/S2 ...
             print(json.dumps({**st, "status": "running", "wait": str(out)}, ensure_ascii=False))
             sys.exit(0)
-        return wait_status(v, a.timeout + 180)
+        return wait_status(v, a.timeout + 180 + (1800 if (proj / "tasks" / "criteria.md").is_file() else 0))   # + thời gian tự chấm/sửa
     wjson(v / "status.json", {**st, "status": "running", "pid": os.getpid()})   # Hủy task -> dừng được worker này
     if not os.environ.get("AIO_NOFALLBACK"):   # bên làm thay (gọi lồng từ worker đang giữ chỗ) dùng chung chỗ đó
-        worker_slot()                           # đủ số worker đang chạy trên máy -> chờ tới lượt
+        st["_slot"] = str(worker_slot() or "")  # đủ số worker đang chạy trên máy -> chờ tới lượt
     exe = find_bin("codex" if a.worker == "codex" else "agy")
     task_txt = task.read_text(encoding="utf-8") if task.exists() else ""
     want_img = (a.worker == "codex" or a.write or bool(edit)) and bool(IMG_MAKE.search(task_txt))
@@ -471,10 +533,19 @@ def cmd_worker(argv):
     if edit and st.get("edit_dir"):
         st["edited"] = changed_files(edit, v / "_backup", st.get("t0", 0))
     st.pop("t0", None)
+    slot = st.pop("_slot", "")
     rs = fail_reason(st, v, want_img)
+    if not os.environ.get("AIO_NOFALLBACK"):
+        export_products(st, v, out, proj)          # sau khi đã kiểm ảnh/làm thay xong mới chuyển ra thư mục kết quả
     if rs:
         st["reason"] = rs
-    wjson(v / "status.json", st)
+    judging = not os.environ.get("AIO_NOFALLBACK") and not os.environ.get("AIO_NOJUDGE") and want_img         and st.get("status") == "completed" and bool(st.get("export_dir")) and (proj / "tasks" / "criteria.md").is_file()
+    wjson(v / "status.json", {**st, "status": "running", "phase": "đang chấm"} if judging else st)   # người chờ (wait) đợi chấm xong
+    if not os.environ.get("AIO_NOFALLBACK"):
+        if slot:                                   # nhả chỗ trước khi chấm: việc sửa do giám khảo giao cần chỗ chạy (máy 1 chỗ)
+            Path(slot).unlink(missing_ok=True)
+        auto_judge(st, v, out, proj, want_img)     # chấm ngay việc này (không đợi cả lô), trượt thì app tự giao sửa
+        wjson(v / "status.json", st)
     print(json.dumps(st, ensure_ascii=False))
     sys.exit(0 if st["status"] == "completed" else 1)
 
@@ -497,7 +568,7 @@ def wait_status(v, limit=1200):
 
 def cmd_wait(argv):
     """wait <thư mục> [thư mục ...] [giây]: chờ (cả lô) worker đang chạy xong rồi in kết quả từng cái."""
-    limit = next((int(x) for x in argv if x.isdigit()), 1500)
+    limit = next((int(x) for x in argv if x.isdigit()), 3000 if Path("tasks/criteria.md").is_file() else 1500)   # có tự chấm/sửa: chờ lâu hơn
     dirs = []
     for x in argv:
         if x.isdigit():

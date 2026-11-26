@@ -2018,7 +2018,7 @@ function renderHome() {
   $("main").innerHTML = `<div class="crumb">${document.querySelector(".app").classList.contains("nosb") ? SBSHOW : ""}<span>Workspace / Task mới</span><span class="grow"></span>${projBtn()}${watchBtn()}</div>
     <div class="home"><div class="in"><h2>Hôm nay làm gì?</h2>
     ${freeBar()}${composer("homeComp", PH_NEW)}
-    ${rec.length ? `<div class="recent"><div class="k">Task gần đây</div>${rec.map((t) => `<button data-sel="${t.id}"><span>${esc(t.title)}</span><small>${esc(whenTxt(t.created))}</small></button>`).join("")}</div>` : ""}</div></div>`;
+    ${rec.length ? `<div class="recent"><div class="k">Task gần đây</div>${rec.map((t) => `<button data-sel="${t.id}"><span>${esc(t.title)}</span><small>${esc(whenTxt(t.last || t.created))}</small></button>`).join("")}</div>` : ""}</div></div>`;
   bindComposer(sendNew); bindProj(); bindTpl(); paintTpl();
   $("txt").focus();
 }
@@ -2401,7 +2401,9 @@ function phonePop() {      // biểu tượng điện thoại (đầu Cài đặ
   return `<div class="ppop" id="ppop"><div class="qr">${qrSvg(r.link || "")}</div><div class="pl">Quét QR để mở trên trình duyệt điện thoại</div>
     <div class="ps">${st}</div><div class="pa"><button class="lnk" id="rCopy">Copy link</button><button class="lnk" id="rRot" title="Điện thoại đã vào sẽ phải quét lại">Đổi mã</button><button class="lnk" id="rOff">Tắt</button></div></div>`;
 }
-function renderSettings() {
+function renderSettings() {      // vẽ lại định kỳ: giữ nguyên vị trí cuộn (bảng Cài đặt + ô Memory)
+  const keepScroll = [["mbody", $("mbody")?.scrollTop || 0], ["memTxt", $("memTxt")?.scrollTop || 0]];
+  requestAnimationFrame(() => keepScroll.forEach(([id, y]) => { if ($(id)) $(id).scrollTop = y; }));
   const PH = '<svg class="i" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>';
   $("mhead").innerHTML = `<span>Cài đặt</span><span style="flex:1"></span><span class="hicons"><button class="icon ghost ${phoneOpen ? "on" : ""}" id="mPhone" title="Dùng trên điện thoại" aria-label="Dùng trên điện thoại">${PH}</button><button class="icon ghost" id="mBell" title="Thông báo" aria-label="Thông báo"><svg class="i" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>${phonePop()}</span>`;
   const acc = Object.entries(S.ais).map(([k, a]) => `<div class="accrow"><span class="dot ${aiDot(a)}"></span><span class="n">${AIN[k]}${accState(k, a)}</span>

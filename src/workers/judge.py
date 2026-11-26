@@ -101,6 +101,9 @@ def fix_failed(verdict, files, rnd):
         name = str(it.get("file", ""))
         f = next((x for x in files if name in (str(x), x.name)), None)
         vd = next((p for p in ([f] + list(f.parents) if f else []) if re.fullmatch(r"v\d+", p.name) and p.parent.parent.name == "work"), None)
+        if not vd and f:                                 # file đã được chuyển thẳng ra thư mục kết quả (export_dir)
+            vd = next((s.parent for s in Path.cwd().glob("work/*/v*/status.json")
+                       if (rjson(s, {}) or {}).get("export_dir") and Path(rjson(s, {})["export_dir"]) in f.parents), None)
         if not vd or not (vd / "TASK.md").is_file():
             continue
         groups.setdefault(vd, []).append((f, it))
@@ -125,7 +128,9 @@ def fix_failed(verdict, files, rnd):
         except Exception:
             return
         nv = Path(ns.get("out_dir", ""))
-        if ns.get("via") in ("gpt-fallback", "gemini-fallback"):
+        if ns.get("export_dir"):                         # bản sửa đã nằm ở thư mục kết quả
+            nv = Path(ns["export_dir"])
+        elif ns.get("via") in ("gpt-fallback", "gemini-fallback"):
             nv = nv / ("gpt" if ns["via"].startswith("gpt") else "gemini")
         new = [nv / x for x in ns.get("files") or [] if (nv / x).is_file() and not x.startswith(("gpt/", "gemini/"))]
         for f, _ in items:

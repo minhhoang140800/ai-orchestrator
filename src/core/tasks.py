@@ -54,7 +54,8 @@ def open_sub_dir(tid, sub):
     vs = sorted((v for v in d.iterdir() if v.is_dir() and re.fullmatch(r"v\d+", v.name)), key=lambda v: int(v.name[1:])) if d.is_dir() else []
     if not vs:
         return {"error": "Thư mục việc này đã được dọn (task xong: file nằm trong thư mục kết quả)"}
-    open_path(vs[-1])
+    ex = (rjson(vs[-1] / "status.json", {}) or {}).get("export_dir")
+    open_path(ex if ex and Path(ex).is_dir() else vs[-1])
     return {"ok": True}
 
 

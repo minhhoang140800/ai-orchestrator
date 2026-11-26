@@ -188,12 +188,13 @@ class H(BaseHTTPRequestHandler):
                 threading.Thread(target=scheduler, daemon=True).start()
             with _tlock:
                 ts = [{**{k: t.get(k) for k in ("id", "title", "status", "created", "pinned")},
+                       "last": max([m.get("time") or "" for m in t.get("messages", [])] + [t.get("created") or ""]),
            **({"status": "limit"} if t["status"] == "queued" and (t.get("hold_until", 0) > time.time() or pm_limit(t)) else {})}
                       for t in TASKS.values() if t["status"] != "draft"]
                 for x in ts:
                     if TASKS[x["id"]].get("need_login") and x["status"] == "queued":
                         x["status"] = "login"
-            ts.sort(key=lambda x: x["created"], reverse=True)
+            ts.sort(key=lambda x: x["last"], reverse=True)     # task có tin nhắn mới nhất lên đầu
             upd = CFG.pop("updated_to", "")
             if upd:
                 save_cfg()
