@@ -268,6 +268,55 @@ class Watchdog(unittest.TestCase):
         self.assertEqual(r[4], "")
 
 
+class V119(unittest.TestCase):
+    def test_session_refresh(self):
+        old = time.time() - 2 * 86400
+        t = {"id": "SR1", "text": "làm asset ply36", "mode": "balanced", "session_started": True, "session": "abc",
+             "messages": [{"role": "user", "text": "làm asset ply36"}, {"role": "work", "started_ts": old, "ended_ts": old},
+                          {"role": "claude", "text": "Đã xong 23 asset"}],
+             "decisions": [{"group": "ply36", "items": [{"type": "decision", "text": "chỉ 1 folder", "status": "done"}]}]}
+        self.assertTrue(NS["session_stale"](t))                       # nghỉ hơn 1 ngày
+        h = NS["handover_text"](t)
+        self.assertIn("làm asset ply36", h)
+        self.assertIn("chỉ 1 folder", h)
+        self.assertIn("Đã xong 23 asset", h)
+        t.update(handover=h, session_started=False)
+        p = NS["build_prompt"](t, {"kind": "followup", "text": "làm tiếp ply37"})
+        self.assertIn("Phiên mới cho task đang làm dở", p)
+        self.assertIn("làm tiếp ply37", p)
+        fresh = {"messages": [{"role": "work", "started_ts": time.time(), "ended_ts": time.time()}]}
+        self.assertFalse(NS["session_stale"](fresh))
+        self.assertTrue(NS["session_stale"]({"messages": [{"role": "work", "ended_ts": time.time()}] * 20}))
+
+    def test_watch_off_only_delegates(self):
+        t = {"id": "WO1", "text": "vẽ 3 ảnh banner", "mode": "balanced", "judge": False, "folder": "01 - x"}
+        NS["write_claude_md"](t)
+        md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("Giám sát TẮT — chỉ giao việc", md)
+        self.assertNotIn("viết tasks/criteria.md", md)
+        self.assertNotIn("stages/", md)
+        t2 = {"id": "WO2", "text": "vẽ 3 ảnh banner", "mode": "balanced", "judge": True, "folder": "01 - y"}
+        NS["write_claude_md"](t2)
+        self.assertIn("viết tasks/criteria.md", (NS["wdir"](t2) / "CLAUDE.md").read_text(encoding="utf-8"))
+
+    def test_good_briefs(self):
+        (Path(NS["DATA"]) / NS["BRIEFS_F"]).unlink(missing_ok=True)
+        NS["note_brief"]("codex", "image", 120, "Banner Mini Soccer\nVẽ 1 ảnh 1080x1080, nền trong suốt")
+        md = NS["briefs_md"](["image"])
+        self.assertIn("Mẫu đề bài từng làm tốt", md)
+        self.assertIn("Banner Mini Soccer", md)
+        self.assertEqual(NS["briefs_md"](["text"]), "")
+
+    def test_memory_drops_ab_rule(self):
+        NS["mem_save"]("## Cách làm việc\n- Xưng hô tôi – bạn\n- Hỏi lựa chọn: tối đa 3 câu, trình bày A/B/C.")
+        try:
+            m = NS["mem_text"]()
+            self.assertIn("Xưng hô", m)
+            self.assertNotIn("A/B/C", m)
+        finally:
+            NS["mem_save"]("")
+
+
 class FailReason(unittest.TestCase):
     def test_no_image(self):
         v = Path(tempfile.mkdtemp())

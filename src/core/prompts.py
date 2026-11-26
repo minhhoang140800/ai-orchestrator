@@ -158,6 +158,23 @@ Tiêu chí đã dùng:
         (rd / f"{k}.md").write_text(mods[k], encoding="utf-8")
     extra_md = ("## Hướng dẫn thêm — CHỈ đọc khi task cần tới\n" + "\n".join(
         f"- {MD_TITLES[k]}: ./rules/{k}.md" for k in extra) + "\n\n") if extra else ""
+    bm = briefs_md(["image"] if "image" in need else ["text"])
+    bm = bm + "\n" if bm else ""
+    nghiem_thu_on = f"""- Worker "completed" chưa phải là xong: kiểm tra file thật. Đo được: "{py}" "{app}" check files|png ... (xem --help).
+- Giám sát bật + task có sản phẩm: trước khi làm, viết tasks/criteria.md ngắn, kiểm chứng được (đánh dấu BẮT BUỘC); đổi yêu cầu -> cập nhật.
+- Chấm chất lượng: {("GIÁM SÁT BẬT — giám khảo độc lập chấm CẢ LÔ ở cuối (sau check kỹ thuật); fail -> sửa đúng lỗi nêu, chấm lại "
+  "file đã sửa, lặp tới khi ĐẠT (tối đa 4 vòng; vẫn fail thì báo rõ còn lỗi gì):") if judge else
+  ("GIÁM SÁT BẬT — không có giám khảo Claude: giao gemini soát theo criteria.md, sửa và soát lại tới khi đạt (tối đa 4 vòng).")
+  }
+{f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1
+  Có criteria.md: app TỰ chấm từng việc vẽ NGAY khi việc đó xong và tự giao sửa file trượt (tối đa 2 vòng; bản sửa ra thư
+  mục ..._v2) -> status.json có "judge" (overall, summary, issues, fixed). KHÔNG chấm lại file đã đạt; cuối lô chỉ chấm nhanh
+  tính đồng bộ cả bộ (--rounds 0) khi nhiều file cùng loại; bạn chỉ xử lý phần app không tự sửa được.
+""" if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial."""
+    nghiem_thu_off = (f"""## Nghiệm thu (Giám sát TẮT — chỉ giao việc)
+- KHÔNG viết criteria.md, KHÔNG giám khảo, KHÔNG tự xem lại/so từng chi tiết. Nhận file xong là báo kết quả.
+- Chỉ kiểm tra kỹ thuật nhanh (đủ file, mở được, đúng kích thước): "{py}" "{app}" check files|png ... Lỗi rõ ràng (thiếu
+  file, ảnh hỏng) mới giao lại đúng phần lỗi.""")
     txt = f"""# Task {t['id']}
 
 ## Hướng dẫn của người dùng (ưu tiên áp dụng)
@@ -194,7 +211,7 @@ Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở expor
 - Giao theo số liệu thật của máy này (app tự học sau mỗi việc: làm được không, mất bao lâu). Bên kia là dự phòng: app tự
   giao lại khi lỗi / hết lượt / không ra ảnh / chậm bất thường.
 {stats_md(on)}
-- Việc độc lập: chạy song song (mỗi worker --out riêng; không 2 worker --edit cùng thư mục).
+{bm}- Việc độc lập: chạy song song (mỗi worker --out riêng; không 2 worker --edit cùng thư mục).
 
 ## Tốc độ (quan trọng)
 - Cuối tin nhắn có "Đường xử lý" (HỎI ĐÁP / VIỆC NHỎ) do app phân loại: làm đúng theo đó (không criteria, không giám khảo).
@@ -204,17 +221,7 @@ Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở expor
   thay đuôi "=..." của link ảnh play-lh.googleusercontent.com bằng "=w320") SONG SONG trong 1 script (timeout 15 giây/ảnh,
   lỗi thì bỏ qua), ghép thành 1 ảnh tổng hợp (contact sheet, có nhãn tên app) rồi xem 1 lần.
 
-## Nghiệm thu
-- Worker "completed" chưa phải là xong: kiểm tra file thật. Đo được: "{py}" "{app}" check files|png ... (xem --help).
-{"- Giám sát bật + task có sản phẩm: trước khi làm, viết tasks/criteria.md ngắn, kiểm chứng được (đánh dấu BẮT BUỘC); đổi yêu cầu -> cập nhật." + chr(10) if watch_on else "- Giám sát tắt: không viết criteria.md; tự đối chiếu sản phẩm với đúng yêu cầu gốc." + chr(10)}- Chấm chất lượng: {("GIÁM SÁT BẬT — giám khảo độc lập chấm CẢ LÔ ở cuối (sau check kỹ thuật); fail -> sửa đúng lỗi nêu, chấm lại "
-  "file đã sửa, lặp tới khi ĐẠT (tối đa 4 vòng; vẫn fail thì báo rõ còn lỗi gì):") if judge else
-  ("GIÁM SÁT BẬT — không có giám khảo Claude: giao gemini soát theo criteria.md, sửa và soát lại tới khi đạt (tối đa 4 vòng).")
-  if watch_on else "Giám sát TẮT — không gọi giám khảo; tự xem lại theo yêu cầu 1 lần, lỗi nhỏ thẩm mỹ thì ghi chú cho người dùng."}
-{f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1
-  Có criteria.md: app TỰ chấm từng việc vẽ NGAY khi việc đó xong và tự giao sửa file trượt (tối đa 2 vòng; bản sửa ra thư
-  mục ..._v2) -> status.json có "judge" (overall, summary, issues, fixed). KHÔNG chấm lại file đã đạt; cuối lô chỉ chấm nhanh
-  tính đồng bộ cả bộ (--rounds 0) khi nhiều file cùng loại; bạn chỉ xử lý phần app không tự sửa được.
-""" if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial.
+{("## Nghiệm thu" + chr(10) + nghiem_thu_on) if watch_on else nghiem_thu_off}
 
 {inline}{extra_md}{brain_md}{tpl_md}## Chế độ: {mode_name}
 {mode_rules}
@@ -224,22 +231,19 @@ Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở expor
 - Người dùng góp ý hoặc chốt điều gì (chỉ khi đó): cập nhật tasks/decisions.json, gom theo phần việc, sửa/gộp mục cũ:
   [{{"group": "<phần việc>", "items": [{{"type": "feedback"|"decision", "text": "<1 câu>", "status": "open"|"done"}}]}}]
   Có file này thì đọc đầu mỗi lượt, theo đúng các quyết định đã chốt, không hỏi lại.
-- Task nhiều phần: xong phần nào hữu ích thì ghi ngay vào ./stages/<số>.md (giao diện hiện cho người dùng đọc trong lúc làm).
-
+{"- Task nhiều phần: xong phần nào hữu ích thì ghi ngay vào ./stages/<số>.md (giao diện hiện cho người dùng đọc trong lúc làm)." + chr(10) if watch_on else ""}
 ## Hỏi / nghiên cứu / đề xuất ≠ làm
 Tin nhắn là CÂU HỎI ("có thể … không", "làm thế nào", "có cách nào", "nên … không", "tại sao") hoặc nhờ research/phân tích/
 đề xuất/so sánh -> CHỈ trả lời (kết luận, phương án, ưu nhược, công sức); không sửa file, không tạo sản phẩm, không chạy việc dài.
 Cuối câu trả lời hỏi: có làm không / làm phương án nào. Chỉ làm khi người dùng bảo làm. Không chắc -> coi là hỏi.
 
 ## Khi cần người dùng quyết định
-- TRƯỚC khi bắt tay (yêu cầu mới / tin nhắn mới): yêu cầu hiểu được 2 cách ra sản phẩm khác hẳn nhau, thiếu dữ kiện bắt buộc
-  (file, link, game nào, số lượng, kích thước, thị trường...), hoặc có nghi vấn mà đoán sai sẽ phải research lâu / làm sai hướng
-  -> hỏi NGAY, chưa research, chưa làm: ghi tối đa 3 câu ngắn vào ./question.md, mỗi câu kèm phương án mặc định, rồi DỪNG.
-- ĐANG làm mà vướng: mọi AI đều không làm được; kết quả chắc chắn không đạt yêu cầu; phải đổi phương án đã chốt; sắp tốn nhiều
-  hạn mức hoặc làm việc không hoàn tác được -> ghi câu hỏi + phương án vào ./question.md rồi DỪNG (giữ phần đã làm).
-- Cách viết câu hỏi (cả trong question.md lẫn cuối câu trả lời): mỗi câu hỏi 1 dòng, ngay dưới là các lựa chọn, mỗi lựa chọn 1 dòng
-  "A - <ngắn gọn>", "B - <ngắn gọn>"...; thêm " (đề xuất)" vào lựa chọn nên chọn. Giao diện hiện thành nút bấm + ô "câu trả lời khác".
-- Còn lại tự quyết, ghi giả định. Yêu cầu rõ thì làm luôn, không hỏi cho có.
+- TRƯỚC khi bắt tay: chỉ hỏi khi thiếu dữ kiện bắt buộc (file, link, số lượng, kích thước...) hoặc đoán sai sẽ làm sai hướng.
+  ĐANG làm mà vướng: không AI nào làm được, phải đổi phương án đã chốt, sắp tốn nhiều hạn mức / không hoàn tác được.
+  -> ghi câu hỏi ngắn (kèm phương án mặc định) vào ./question.md rồi DỪNG. Còn lại tự quyết, ghi giả định; yêu cầu rõ thì
+  làm luôn, không hỏi cho có, không kết thúc mọi câu trả lời bằng câu hỏi.
+- Lựa chọn dạng nút bấm là TUỲ CHỌN, chỉ khi có các phương án rõ ràng: mỗi lựa chọn 1 dòng "A - <ngắn gọn>", "B - <ngắn gọn>"
+  (thêm " (đề xuất)").
 
 ## Kết thúc mỗi lượt
 Báo cáo, research, so sánh: viết thẳng trong câu trả lời, KHÔNG tạo file .md/.txt; chỉ tạo file khi sản phẩm vốn là file hoặc
@@ -351,6 +355,10 @@ def build_prompt(t, nxt):
                "(ảnh lớn đã thu nhỏ; toạ độ đánh dấu vẫn tính theo kích thước gốc): " +
                "; ".join(r + (f" (gốc {n}, {w}×{h}px)" if r != n else "") for n, r, w, h in sm) + ".")
     text = nxt.get("text", "")
+    if t.get("handover") and not t.get("session_started") and kind != "start":
+        return (f"Phiên mới cho task đang làm dở (phiên cũ quá dài nên app mở phiên mới cho nhanh; tóm tắt dưới đây thay cho lịch sử "
+                f"trò chuyện — cần chi tiết thì xem file trong OUTPUT).\n\n{t['handover']}\n\nTin nhắn mới của người dùng:\n{text}\n"
+                + fl + ROUTE_NOTE[route(t, nxt)] + f"\nLàm theo {md_name(t)}.")
     if kind == "start" or not t.get("session_started"):
         base = f"Task mới. Yêu cầu của người dùng:\n\n{t['text']}\n"
         if kind != "start" and text:

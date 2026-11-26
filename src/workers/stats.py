@@ -76,6 +76,35 @@ def stat_cap(worker, kind, timeout):
     return min(timeout, max(360, 4 * s["med"])) if s and s["med"] else timeout
 
 
+BRIEFS_F = "good_briefs.json"
+
+
+def note_brief(worker, kind, seconds, brief):
+    """Việc làm được và nhanh hơn (hoặc bằng) mức thường thấy -> giữ đề bài làm mẫu (mỗi loại 2 mẫu mới nhất)."""
+    try:
+        s = stat_of(worker, kind)
+        if s and s["med"] and seconds > s["med"]:
+            return
+        d = rjson(DATA / BRIEFS_F, {}) or {}
+        d[kind] = ([x for x in d.get(kind) or [] if x.get("b") != brief[:900]] + [
+            {"w": worker, "s": int(seconds or 0), "t": int(time.time()), "b": brief.strip()[:900]}])[-2:]
+        wjson(DATA / BRIEFS_F, d)
+    except Exception as e:
+        dlog(f"note_brief: {e}")
+
+
+def briefs_md(kinds):
+    """Mẫu đề bài đã làm tốt trên máy này cho các loại việc của task (Claude viết đề bài mới theo cách tương tự)."""
+    d = rjson(DATA / BRIEFS_F, {}) or {}
+    out = []
+    for k in kinds:
+        x = (d.get(k) or [])[-1:]
+        if x:
+            out.append(f"- {KIND_NAMES[k]} ({WN_.get(x[0]['w'], x[0]['w'])}, xong trong {round(x[0]['s'] / 60, 1)} phút):\n"
+                       + "\n".join("    " + ln for ln in x[0]["b"][:600].splitlines()[:12]))
+    return ("Mẫu đề bài từng làm tốt ở máy này (viết đề bài mới theo cách tương tự: rõ, ngắn, đủ ngữ cảnh):\n" + "\n".join(out)) if out else ""
+
+
 def stats_md(on):
     """Mục 'Chọn worker' cho hướng dẫn: số liệu thật của máy này (app tự cập nhật sau mỗi việc)."""
     d = rjson(DATA / WSTATS_F, {}) or {}

@@ -49,7 +49,41 @@ def next_folder(parent, title):
         n += 1
 
 
+SESSION_TURNS = 20               # phiên Claude đã qua 20 lượt làm ...
+SESSION_IDLE = 24 * 3600         # ... hoặc nghỉ hơn 1 ngày -> tin nhắn mới mở phiên mới kèm tóm tắt (nhanh, sạch hơn)
+
+
+def session_stale(t):
+    works = [m for m in (t.get("messages") or [])[t.get("session_from", 0):] if m.get("role") == "work"]
+    last = max((m.get("ended_ts") or m.get("started_ts") or 0 for m in works), default=0)
+    return len(works) >= SESSION_TURNS or bool(last and time.time() - last > SESSION_IDLE)
+
+
+def handover_text(t):
+    """Tóm tắt task cho phiên mới (app tự tạo, không tốn lần gọi AI): yêu cầu gốc, quyết định đã chốt, trao đổi gần nhất."""
+    ms = [m for m in (t.get("messages") or []) if m.get("role") in ("user", "claude") and m.get("kind") != "error"]
+    dec = rjson(wdir(t) / "tasks" / "decisions.json", None) or t.get("decisions") or []
+    dl = [f"- [{g.get('group', '')}] {i.get('text', '')}" for g in dec if isinstance(g, dict)
+          for i in (g.get("items") or []) if isinstance(i, dict) and i.get("text")][:20]
+    lines = ["## Tóm tắt task (app tạo khi mở phiên mới)", "Yêu cầu ban đầu: " + t.get("text", "")[:1200].replace("\n", " ")]
+    if dl:
+        lines += ["Quyết định / góp ý đã chốt:"] + dl
+    lines += [f"Sản phẩm đã làm: trong OUTPUT {out_dir(t)} (và {STORE / 'registry.json'}) — xem file thật khi cần.",
+              "Trao đổi gần nhất (cũ -> mới):"]
+    for m in ms[-8:]:
+        u = m["role"] == "user"
+        lines.append(("NGƯỜI DÙNG: " if u else "AI: ") + (m.get("text") or "")[:500 if u else 700].replace("\n", " "))
+    return "\n".join(lines)[:6000]
+
+
 def start_run(t):
+    nx = t.get("next") or {}
+    if t.get("session_started") and nx.get("kind") == "followup" and session_stale(t):
+        t["handover"] = handover_text(t)            # phiên cũ quá dài / nghỉ lâu -> phiên mới + tóm tắt
+        t["session_started"] = False
+        t["session_from"] = len(t.get("messages") or [])
+        t.pop("session", None)
+        dlog(f"session refresh {t['id']}")
     if not t.get("session_started"):
         t["pm"] = pick_pm() or "claude"         # chọn khi bắt đầu; phiên đã mở thì giữ AI quản lý cũ để nối tiếp được
     t.setdefault("pm", "claude")                # task của bản cũ: phiên Claude
@@ -223,6 +257,7 @@ def codex_event(t, ev, cx):
     typ, it = ev.get("type"), ev.get("item") or {}
     if typ == "thread.started" and ev.get("thread_id") and not t.get("session_started"):
         t["session_started"], t["session"] = True, ev["thread_id"]
+        t.pop("handover", None)
         tsave(t)
     elif typ == "item.started" and it.get("type") == "command_execution":
         step(t, summarize_tool({"name": "Bash", "input": {"command": str(it.get("command") or "")}}))
@@ -284,6 +319,7 @@ def watch(t, p, nxt):
         if ev.get("session_id") and not t.get("session_started"):
             t["session_started"] = True
             t["session"] = ev["session_id"]
+            t.pop("handover", None)
             tsave(t)
         if typ == "assistant":
             for b in (ev.get("message") or {}).get("content") or []:

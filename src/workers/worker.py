@@ -610,8 +610,10 @@ def cmd_worker(argv):
             st["status"] = "completed"
     if "exit_code" in st:                          # đã thật sự chạy: ghi số liệu để app tự học chọn worker
         own_img = any(f.is_file() and f.suffix.lower() in IMG_EXT for f in v.iterdir())
-        record_stat(a.worker, kind, st.get("status") == "completed" and (not want_img or own_img) and not st.get("code_drawn"),
-                    st.get("seconds"), why or st.get("status", ""))
+        ok_ = st.get("status") == "completed" and (not want_img or own_img) and not st.get("code_drawn")
+        if ok_:
+            note_brief(a.worker, kind, st.get("seconds") or 0, task_txt)      # trước khi ghi số liệu: so với mức cũ
+        record_stat(a.worker, kind, ok_, st.get("seconds"), why or st.get("status", ""))
     if key and not use_api and not edit and "exit_code" in st and st.get("status") in ("limit", "failed"):   # Antigravity hết lượt/lỗi -> thử API
         st["agy_error"] = st.pop("error", "")[:300]
         api_worker(st, v, key, (v / "TASK.md").read_text(encoding="utf-8") if (v / "TASK.md").exists() else "", a)
