@@ -16,7 +16,7 @@ MODE_RULES = {
 }
 
 
-IMG_RE = re.compile(r"ảnh|hình|image|png|jpe?g|webp|keyframe|storyboard|asset|banner|icon|thumbnail|poster|sprite|"
+IMG_RE = re.compile(r"ảnh|hình|image|png|jpe?g|webp|keyframe|storyboard|moodboard|concept ?board|asset|banner|icon|thumbnail|poster|sprite|"
                     r"art\b|artwork|vẽ|render|minh hoạ|minh họa|background|\bbg\b|logo|gif", re.I)
 EDIT_RE = re.compile(r"sửa|chỉnh|edit|cập nhật|thay|đổi tên|xóa|xoá|clear|\.xlsx|\.docx|\.pptx|\.csv|[A-Za-z]:\\|\\\\|/Users/", re.I)
 
@@ -48,6 +48,8 @@ def md_image(py, app, pm):
     return f"""## Ảnh & storyboard
 - Storyboard: mặc định viết BẢNG CHỮ (cảnh, thời lượng, hình ảnh, chữ trên màn hình, âm thanh, CTA). Chỉ vẽ khung hình khi người
   dùng yêu cầu rõ (keyframe/vẽ/render storyboard).
+- Concept board / moodboard / bảng tổng hợp phương án: mặc định VẼ CẢ BOARD TRONG 1 ẢNH (1 lần tạo ảnh cho mỗi board,
+  các phương án nằm sẵn trong ảnh, có nhãn). Chỉ tạo từng ảnh riêng rồi ghép khi người dùng yêu cầu file riêng từng phương án.
 - Tạo ảnh: {"Gemini (--write) trước, lỗi thì codex ($imagegen)" if pm != "codex" else "gemini (--write), lỗi thì tự tạo ($imagegen)"}.
   Không tạo được (lỗi, hết hạn mức): viết prompt vào OUTPUT/prompts/, hỏi người dùng (question.md) dán vào ChatGPT, lưu ảnh
   vào OUTPUT/images/ rồi trả lời "xong"; sau đó check + chấm như trên.
@@ -184,6 +186,10 @@ Kết quả: work/<ID>/vN/ (result.md, status.json, file). Sửa lỗi: giao l�
 ## Tốc độ (quan trọng)
 - Cuối tin nhắn có "Đường xử lý" (HỎI ĐÁP / VIỆC NHỎ) do app phân loại: làm đúng theo đó (không criteria, không giám khảo).
 - Văn bản worker viết: dặn ghi TOÀN BỘ vào câu trả lời cuối; không chép/viết lại phần đã đạt. Gộp nhiều lệnh đọc/kiểm tra.
+- Research: tối đa ~2 phút (trừ khi người dùng yêu cầu nghiên cứu sâu); hết giờ thì dùng phần đã có, ghi rõ phạm vi đã xem.
+  Cần xem ảnh (icon, screenshot, banner đối thủ...): KHÔNG tải ảnh gốc. Tối đa 8 app x 5 ảnh, tải BẢN THU NHỎ (Google Play:
+  thay đuôi "=..." của link ảnh play-lh.googleusercontent.com bằng "=w320") SONG SONG trong 1 script (timeout 15 giây/ảnh,
+  lỗi thì bỏ qua), ghép thành 1 ảnh tổng hợp (contact sheet, có nhãn tên app) rồi xem 1 lần.
 
 ## Nghiệm thu
 - Worker "completed" chưa phải là xong: kiểm tra file thật. Đo được: "{py}" "{app}" check files|png ... (xem --help).

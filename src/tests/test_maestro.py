@@ -170,6 +170,13 @@ class Prompts(unittest.TestCase):
             self.assertIn("## Hỏi / nghiên cứu / đề xuất ≠ làm", md, m)
             self.assertLess(len(md), 14000, m)
 
+    def test_research_and_board_rules(self):
+        _, md = self._md("balanced")
+        self.assertIn("Research: tối đa ~2 phút", md)
+        self.assertIn("=w320", md)
+        _, md = self._md("balanced", text="Cho tôi idea, mỗi loại vào 1 Concept Board")
+        self.assertIn("VẼ CẢ BOARD TRONG 1 ẢNH", md)
+
     def test_windows_paths_in_code_mode(self):          # lỗi cũ: bad escape \\U khi đường dẫn Windows lọt vào re.sub
         r = NS["new_task"]("sửa code", mode="code")
         t = NS["TASKS"][r["id"]]
