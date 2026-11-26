@@ -48,8 +48,8 @@ def md_image(py, app, pm):
     return f"""## Ảnh & storyboard
 - Storyboard: mặc định viết BẢNG CHỮ (cảnh, thời lượng, hình ảnh, chữ trên màn hình, âm thanh, CTA). Chỉ vẽ khung hình khi người
   dùng yêu cầu rõ (keyframe/vẽ/render storyboard).
-- Concept board / moodboard / bảng tổng hợp phương án: mặc định VẼ CẢ BOARD TRONG 1 ẢNH (1 lần tạo ảnh cho mỗi board,
-  các phương án nằm sẵn trong ảnh, có nhãn). Chỉ tạo từng ảnh riêng rồi ghép khi người dùng yêu cầu file riêng từng phương án.
+- Số ảnh theo đúng yêu cầu: yêu cầu 1 board/bảng/lưới (concept board, moodboard...) -> VẼ CẢ BOARD TRONG 1 ẢNH (1 lần tạo,
+  các phương án nằm sẵn trong ảnh, có nhãn); yêu cầu từng ảnh/file riêng -> vẽ riêng. Không tự tách ra rồi ghép, không tự gộp.
 - Tạo ảnh: {"Gemini (--write) trước, lỗi thì codex ($imagegen)" if pm != "codex" else "gemini (--write), lỗi thì tự tạo ($imagegen)"}.
   Không tạo được (lỗi, hết hạn mức): viết prompt vào OUTPUT/prompts/, hỏi người dùng (question.md) dán vào ChatGPT, lưu ảnh
   vào OUTPUT/images/ rồi trả lời "xong"; sau đó check + chấm như trên.
