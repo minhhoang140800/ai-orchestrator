@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Maestro</title>
+<style>body{font:16px system-ui,-apple-system,"Segoe UI",sans-serif;color:#202020;margin:0;display:grid;place-items:center;min-height:100vh;text-align:center;padding:24px;box-sizing:border-box}b{font-size:20px;display:block;margin-bottom:8px}p{color:#666;margin:0;line-height:1.5}button{margin-top:16px;font:inherit;padding:8px 18px;border:1px solid #ddd;border-radius:8px;background:#fff}</style></head>
+<body><div><b>Maestro</b><p id="m">Đang mở…</p><button id="r" hidden onclick="location.reload()">Thử lại</button></div>
+<script>
+// Trang chuyển tiếp cố định cho "Dùng trên điện thoại": mã QR trỏ về đây (#t=<kênh>&k=<mã>), trang đọc link hiện tại
+// của máy tính từ kênh ntfy.sh rồi chuyển sang. Mã (k) nằm sau dấu # nên không gửi lên máy chủ nào ngoài máy tính của bạn.
+const p = new URLSearchParams(location.hash.slice(1)), t = p.get("t") || "", k = p.get("k") || "", m = document.getElementById("m");
+function fail(s) { m.innerHTML = s; document.getElementById("r").hidden = false; }
+(async () => {
+  if (!/^[A-Za-z0-9_-]{10,64}$/.test(t) || !k) return fail("Link không đúng. Quét lại mã QR trong Maestro trên máy tính.");
+  try {
+    const r = await fetch("https://ntfy.sh/" + t + "/json?poll=1&since=latest", { cache: "no-store" });
+    const last = (await r.text()).trim().split("\n").filter(Boolean).pop();
+    const u = last ? (JSON.parse(last).message || "").trim() : "";
+    if (!/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(u)) throw 0;
+    location.replace(u + "/?k=" + encodeURIComponent(k));
+  } catch (e) { fail("Chưa kết nối được máy tính.<br>Kiểm tra máy tính đang bật và Maestro đang mở."); }
+})();
+</script></body></html>
