@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v10.2 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v10.4 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -104,6 +104,10 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | Mở task lần đầu, nút Giám sát/Project hiện theo trang chủ | Truyền đúng task khi vẽ đầu trang (v9.9) |
 | Kết quả 2 lần vẫn chưa đúng | Gợi ý bật Giám sát, nút ngay cuối đoạn chat (v9.9) |
 | Phong cách | Porcelain 2.0: font Geist, icon Lucide, chat 820px (v8.6) |
+| Muốn dùng Maestro trên điện thoại, mọi mạng, không cài app | Cloudflare Quick Tunnel (cloudflared tự tải, chạy tách khỏi app) + mã bí mật (cookie). QR cố định: trang GitHub Pages (nhánh `gh-pages`) đọc link hiện tại từ kênh ntfy.sh rồi chuyển sang; mã nằm sau `#` (v10.4) |
+| Giao diện điện thoại tràn ngang, composer lơ lửng | Thanh bên thành ngăn kéo, composer sát đáy trang chủ (v10.4) |
+| Dòng toạ độ đánh dấu hiện trong bong bóng chat; ảnh nằm trong bong bóng | Ẩn dòng toạ độ khi hiển thị (vẫn gửi cho AI); ảnh/file đưa ra ngoài bong bóng (v10.4) |
+| Bấm thông báo không mở đúng task | Thông báo gắn id task, bấm là mở đoạn chat đó (v10.4) |
 
 ---
 
@@ -120,6 +124,8 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 - Learning: không có công tắc, tự gửi bài học, không gửi dữ liệu riêng; quy tắc chung chỉ áp dụng khi hợp >90% loại task.
 - Code mode: Opus; tự tạo thư mục dự án (không chọn thư mục); thiếu phần mềm → nút cài, bấm là tự chạy.
 - Mức ưu tiên tiến trình: Bình thường, trừ máy ≤8 GB RAM.
+- Không phát hành/push lên `main` khi Hoàng chưa duyệt.
+- Dùng trên điện thoại: icon điện thoại ở đầu Cài đặt, 1 dòng hướng dẫn; QR không đổi cho tới khi bấm Đổi mã; icon thông báo cũng ở đầu Cài đặt.
 
 ---
 
