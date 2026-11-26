@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v10.4 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v10.5 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -108,6 +108,9 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | Giao diện điện thoại tràn ngang, composer lơ lửng | Thanh bên thành ngăn kéo, composer sát đáy trang chủ (v10.4) |
 | Dòng toạ độ đánh dấu hiện trong bong bóng chat; ảnh nằm trong bong bóng | Ẩn dòng toạ độ khi hiển thị (vẫn gửi cho AI); ảnh/file đưa ra ngoài bong bóng (v10.4) |
 | Bấm thông báo không mở đúng task | Thông báo gắn id task, bấm là mở đoạn chat đó (v10.4) |
+| Gemini API key kiểu mới (auth key, có `.` và `-`, dài hơn) bị báo "không giống API key" | Nhận 20-300 ký tự chữ/số/`-_.`; key đúng hay sai do bước thử gọi Google quyết định (v10.5) |
+| Đọc ảnh đính kèm chậm | App tạo sẵn bản thu nhỏ (cạnh dài ≤1568px) cho ảnh lớn, dặn Claude đọc tất cả ảnh song song trong 1 lần (v10.5) |
+| Code mode dùng Opus cả cho câu hỏi đơn giản | Tin nhắn là câu hỏi/tra cứu (không bảo làm, không kèm file) -> Sonnet; câu hỏi cần nhiều nguồn web -> giao Gemini research (v10.5) |
 
 ---
 
