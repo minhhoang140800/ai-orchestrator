@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v11.3 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v11.4 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -63,6 +63,8 @@ Nguyên tắc: không lưu secret trong repo; không tự cấp quyền rộng c
 | Antigravity ẩn lỗi khi đường dẫn có dấu cách | Sửa cách gọi (v2.11), ghi lý do khi lỗi (v2.10) |
 | Đăng nhập ChatGPT lỗi do biến BROWSER | Bỏ BROWSER, mở cửa sổ nhỏ (v3.4, v5.6) |
 | Người dùng không rành công nghệ | Đăng nhập Claude không cần dán mã (v7.8); tự nhận gói trả phí/miễn phí |
+| Claude Pro bị coi là chưa rõ gói / không làm quản lý được (có máy `claude auth status --json` không trả `subscriptionType`) | Dự phòng: `planTier` (vd max_5x), rồi `oauthAccount.organizationType` trong ~/.claude.json (chỉ nhận khi email khớp); không đọc được thì ghi debug.log (v11.4) |
+| Gemini không hiện email (gọi `agy status` - lệnh không tồn tại) | Đọc email từ dòng 'authenticated successfully as' trong log Antigravity mới nhất; làm mới trạng thái cả Gemini (v11.4) |
 
 ### 3.3 Tốc độ
 Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và giám khảo chấm trượt gây làm lại.
