@@ -1833,8 +1833,18 @@ document.addEventListener("keydown", (e) => {      // menu chế độ: Esc đó
 const STOP = '<svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></svg>';
 function stopMode() { return !!(T && $("taskComp") && T.status === "running" && !$("txt").value.trim() && !files.length); }
 function sendIcon() { const b = $("bSend"); if (!b || b.disabled) return; const st = stopMode(); b.innerHTML = st ? STOP : I.send; b.classList.add("sq"); b.title = st ? "Dừng và hủy task đang làm" : "Gửi (Enter · Shift+Enter xuống dòng)"; }
+const DRAFT = {};          // bản nháp ô nhập riêng cho từng đoạn chat (chữ + file đính kèm); chữ giữ cả khi tải lại trang
+let dKey = "";
+function saveDraft() {
+  const ta = $("txt"); if (!ta || !dKey) return;
+  DRAFT[dKey] = { text: ta.value, files: files.slice() };
+  try { ta.value ? sessionStorage.setItem("draft:" + dKey, ta.value) : sessionStorage.removeItem("draft:" + dKey); } catch (e) {}
+}
 function bindComposer(onSend) {
   const c = document.querySelector(".comp"), ta = $("txt");
+  dKey = c.id === "homeComp" ? "home" : (T && T.id) || "";
+  const dr = DRAFT[dKey];
+  ta.value = dr ? dr.text : (sessionStorage.getItem("draft:" + dKey) || ""); files = dr ? dr.files.slice() : [];
   $("bFile").onclick = () => $("fileIn").click();
   $("bSend").onclick = () => { if (!stopMode()) return onSend(); if (confirm("Hủy task đang làm?")) api("/api/task/act", { id: T.id, action: "cancel" }).then(kick); };
   ta.addEventListener("keydown", (e) => {
@@ -1878,8 +1888,8 @@ function bindComposer(onSend) {
   ta.addEventListener("input", sendIcon);
   let lastChk = 0;      // kiểm tra đăng nhập chỉ khi đang soạn prompt (tối đa 1 lần/phút)
   const chk = () => { if (Date.now() - lastChk > 60000) { lastChk = Date.now(); api("/api/ai/refresh", {}).then(() => setTimeout(kick, 2500)); } };
-  ta.addEventListener("focus", chk); ta.addEventListener("input", chk);
-  renderAtts();
+  ta.addEventListener("focus", chk); ta.addEventListener("input", chk); ta.addEventListener("input", saveDraft);
+  renderAtts(); if (ta.value) { fit(ta); sendIcon(); }
 }
 document.addEventListener("paste", (e) => {
   const ae = document.activeElement, ta = $("txt");
@@ -1907,7 +1917,7 @@ function renderAtts() {
     ? `<span class="pv" title="${esc(f.name)}"><img src="${purl(f)}" data-lbsrc="1" data-fi="${i}" style="cursor:zoom-in" alt="${esc(f.name)}"><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`
     : `<span class="a">${lu("paperclip")}<span>${esc(f.name)}</span><button data-rmf="${i}" aria-label="Bỏ">×</button></span>`).join("");
   a.style.display = files.length ? "flex" : "none";
-  paintTpl(); sendIcon();
+  paintTpl(); sendIcon(); saveDraft();
 }
 $("fileIn").onchange = (e) => { files.push(...e.target.files); e.target.value = ""; renderAtts(); };
 function busy(on, label) { const b = $("bSend"); if (!b) return; b.disabled = on; b.innerHTML = on ? `<span class="spin"></span>` : I.send; $("cHint").textContent = label || ""; if (!on) sendIcon(); }
@@ -2031,7 +2041,7 @@ async function sendNew() {
     const names = [];
     for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(r.id, f)); }
     const s = await api("/api/task/submit", { id: r.id, files: names }); if (s.error) throw new Error(s.error);
-    $("txt").value = ""; files = []; curTpl = ""; sel = r.id; sessionStorage.setItem("sel", sel); T = null; lastSnap = ""; await refresh();
+    $("txt").value = ""; files = []; saveDraft(); curTpl = ""; sel = r.id; sessionStorage.setItem("sel", sel); T = null; lastSnap = ""; await refresh();
   } catch (e) { toast(e.message); busy(false); }
 }
 
@@ -2165,8 +2175,8 @@ function renderTask() {
     return `<div class="mwrap c"><div class="claude ${m.kind === "install" ? "question" : m.kind || ""}"><div class="txt">${md(qbox ? qo.text : m.text)}</div>${qbox}${inst}${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>${mActs(m, i, "claude")}</div>`;
   }).join("");
   const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Chưa có AI quản lý (Claude gói trả phí hoặc ChatGPT). Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>${esc(t.wait || "Đang chuẩn bị…")}</span></div>` : "";
-  const comp = $("taskComp");
-  if (!comp || comp.dataset.t !== t.id) {          // chỉ tạo ô nhập 1 lần cho mỗi task
+  const comp = $("taskComp"), fresh = !comp || comp.dataset.t !== t.id;
+  if (fresh) {          // chỉ tạo ô nhập 1 lần cho mỗi task
     $("main").innerHTML = `<div class="thead" id="thead"></div><div id="decbar"></div><div class="scroll"><div class="thread" id="thread"></div></div>
       <div class="compwrap"><button class="tobot" id="toBot" type="button" title="Cuộn xuống cuối" aria-label="Cuộn xuống cuối" hidden><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg></button>${composer("taskComp", PH_MORE)}</div><aside class="actp" id="actp"></aside>`;
     const sc1 = document.querySelector(".scroll");      // nút cuộn xuống: hiện khi đang xem phần trên của đoạn chat
@@ -2186,7 +2196,13 @@ function renderTask() {
   $("bMore").onclick = (e) => { e.stopPropagation(); moreMenu($("bMore"), t, live); };
   $("bAct").onclick = () => { actOpen = !actOpen; localStorage.setItem("act", actOpen ? "1" : ""); renderTask(); };
   $("main").classList.toggle("withact", actOpen); $("actp").innerHTML = actOpen ? actHtml(t) : "";
-  const sc = document.querySelector(".scroll"); if (wasBottom) sc.scrollTop = sc.scrollHeight;
+  const sc = document.querySelector(".scroll"); if (wasBottom || fresh) sc.scrollTop = sc.scrollHeight;
+  if (fresh) {          // mở đoạn chat: luôn xuống cuối, ảnh tải xong sau vẫn giữ ở cuối (tới khi người dùng tự cuộn)
+    let stick = true; const off = () => { stick = false; };
+    ["wheel", "touchstart", "keydown", "mousedown"].forEach((ev) => sc.addEventListener(ev, off, { once: true, passive: true }));
+    sc.querySelectorAll("img").forEach((im) => { if (!im.complete) im.addEventListener("load", () => { if (stick) sc.scrollTop = sc.scrollHeight; }, { once: true }); });
+    setTimeout(off, 5000);
+  }
   botBtn();
 }
 function botBtn() {
@@ -2269,7 +2285,7 @@ document.addEventListener("click", async (e) => {
   }
   else if (d.actx) { actOpen = false; localStorage.setItem("act", ""); renderTask(); }
   else if (d.mcopy) { const m = T.messages[+d.mcopy]; try { await navigator.clipboard.writeText(m.text || ""); toast("Đã copy"); } catch { toast("Không copy được"); } }
-  else if (d.medit) { const m = T.messages[+d.medit]; $("txt").value = m.text || ""; fit($("txt")); $("txt").focus(); sendIcon(); toast("Sửa rồi bấm gửi"); }
+  else if (d.medit) { const m = T.messages[+d.medit]; $("txt").value = m.text || ""; fit($("txt")); $("txt").focus(); sendIcon(); saveDraft(); toast("Sửa rồi bấm gửi"); }
   else if (d.mretry) {
     const k = +d.mretry, m = T.messages[k];
     const text = m.role === "user" ? m.text : "Làm lại câu trả lời trước theo cách tốt hơn (giữ đúng yêu cầu ban đầu).";
