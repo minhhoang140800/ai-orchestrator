@@ -887,10 +887,63 @@ def md_name(t):
     return "AGENTS.md" if t.get("pm") == "codex" else "CLAUDE.md"
 
 
+IMG_IN = re.compile(r"\.(png|jpe?g|webp|bmp|gif)$", re.I)
+
+
+def small_imgs(t, files):
+    """Ảnh đính kèm: tạo sẵn bản thu nhỏ (cạnh dài <=1568px, JPEG) để Claude đọc nhanh hơn.
+    Ảnh đã nhỏ / không có Pillow -> đọc bản gốc."""
+    out = []
+    try:
+        from PIL import Image
+    except Exception:
+        return out
+    src = tdir(t) / "input"
+    for n in files:
+        f = src / n
+        if not IMG_IN.search(n) or not f.exists():
+            continue
+        try:
+            with Image.open(f) as im:
+                w, h = im.size
+                if max(w, h) <= 1568 and f.stat().st_size <= 1_500_000:
+                    out.append((n, n, w, h))
+                    continue
+                dst = src / ".small" / (Path(n).stem + ".jpg")
+                if not dst.exists() or dst.stat().st_mtime < f.stat().st_mtime:
+                    dst.parent.mkdir(exist_ok=True)
+                    im2 = im.convert("RGB")
+                    im2.thumbnail((1568, 1568))
+                    im2.save(dst, "JPEG", quality=85)
+                out.append((n, f".small/{dst.name}", w, h))
+        except Exception:
+            pass
+    return out
+
+
+ASK_RE = re.compile(r"\?\s*$|có thể\b.{0,80}\bkhông\b|làm (?:thế|sao) nào|có cách nào|tại sao|vì sao|là gì|ở đâu|bao nhiêu|"
+                    r"nên\b.{0,60}\bkhông\b|so sánh|tìm hiểu|tra cứu|research|giải thích|nghĩa là", re.I | re.M)
+DO_RE = re.compile(r"\b(?:làm đi|làm luôn|fix|sửa|tạo|viết|triển khai|áp dụng|update|cập nhật|thêm|xoá|xóa|đổi|build|chạy|"
+                   r"cài|deploy|push|commit|refactor|implement)\b", re.I)
+
+
+def is_ask(t, nxt):
+    """Tin nhắn là câu hỏi / tra cứu đơn giản (không bảo làm, không kèm file) -> Code mode dùng model nhẹ hơn."""
+    if nxt.get("files") or nxt.get("kind") not in ("start", "followup", None):
+        return False
+    text = nxt.get("text") or (t.get("text", "") if nxt.get("kind") == "start" or not t.get("session_started") else "")
+    return 0 < len(text) <= 600 and bool(ASK_RE.search(text)) and not DO_RE.search(text)
+
+
 def build_prompt(t, nxt):
     kind = nxt.get("kind")
     files = nxt.get("files") or []
     fl = f"\nFile mới trong {tdir(t) / 'input'}: {', '.join(files)}." if files else ""
+    sm = small_imgs(t, files)
+    if sm:
+        fl += ("\nẢnh đính kèm: đọc TẤT CẢ trong 1 lần (nhiều lệnh Read song song), dùng các file sau trong thư mục trên "
+               "(ảnh lớn đã thu nhỏ; toạ độ đánh dấu vẫn tính theo kích thước gốc): " +
+               "; ".join(r + (f" (gốc {n}, {w}×{h}px)" if r != n else "") for n, r, w, h in sm) + ".")
     text = nxt.get("text", "")
     if kind == "start" or not t.get("session_started"):
         base = f"Task mới. Yêu cầu của người dùng:\n\n{t['text']}\n"
@@ -966,6 +1019,8 @@ def start_run(t):
     hard = t.get("mode") == "pro" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh"
     code = t.get("kind") == "code"
     cm, ce = pick_model(pm, "code" if code else t.get("mode", "balanced"), hard)   # Pro + bước quá khó: mức cao nhất
+    if code and pm == "claude" and not hard and is_ask(t, nxt):
+        cm = "sonnet"                          # Code mode: câu hỏi / tra cứu đơn giản -> model nhẹ hơn, nhanh, đỡ hạn mức
     if code:
         code_checkpoint(t)                      # điểm khôi phục trước khi sửa code (nút Khôi phục)
     t["_effort"], t["_hard"] = ce, hard
@@ -1879,8 +1934,8 @@ def set_gemini_key(key):
         CFG.pop("gemini_api_models", None)
         save_cfg()
         return {"ok": True, "msg": "Đã xoá Gemini API key"}
-    if not re.fullmatch(r"[A-Za-z0-9_\-]{30,80}", key):
-        return {"error": "Không giống API key của Google (thường bắt đầu bằng AIza…)"}
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]{20,300}", key):      # key cũ AIza…; key mới (auth key) dài hơn, có dấu . và -
+        return {"error": "Key không hợp lệ: chỉ gồm chữ, số và dấu - _ . (bấm Copy key trong Google AI Studio rồi dán lại)"}
     try:
         models = gemini_api_models(key)
     except Exception as e:
@@ -3783,7 +3838,8 @@ Task này là một cuộc trò chuyện nhiều lượt.
 ## GPT/Gemini hỗ trợ (chỉ khi có lợi rõ; việc chính bạn tự làm)
 - codex: ý kiến thứ hai — soát lỗi/thiết kế (giao danh sách file + điều cần soát, dặn không sửa), hoặc viết 1 phần độc lập
   với --edit <thư mục con của dự án>.
-- gemini: tra tài liệu, thư viện, thông báo lỗi lạ trên web.
+- gemini: tra tài liệu, thư viện, thông báo lỗi lạ trên web. Câu hỏi cần tìm nhiều nguồn trên web (so sánh công cụ,
+  thư viện, tài liệu mới) -> giao gemini research rồi tổng hợp, thay vì tự WebSearch nhiều lần; câu hỏi đơn giản -> trả lời luôn.
 
 ## Thiếu phần mềm
 Cần cài thêm (Node.js, Git, thư viện Python/npm...) mà máy chưa có: KHÔNG tự cài. Ghi ./install_request.json rồi DỪNG lượt:
