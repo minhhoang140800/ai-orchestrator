@@ -1,3 +1,4 @@
 src/dist/
 src/__pycache__/
 __pycache__/
+bench_results/

@@ -24,7 +24,7 @@ if r.returncode != 0:
 dist = SRC / "dist"
 for old in ROOT.glob("Maestro_v*.bat"):
     old.unlink()
-for name in ("app.py", "latest.json", f"Maestro_v{new}.bat", "Maestro_mac.zip"):
+for name in ("app.py", "latest.json", "Maestro_mac.zip"):        # không lưu thêm Maestro_vX.Y.bat (trùng Maestro_setup_latest.bat, +1 MB/bản)
     shutil.copy2(dist / name, ROOT / name)
 shutil.copy2(dist / f"Maestro_v{new}.bat", ROOT / "Maestro_setup_latest.bat")   # Maestro_m_setup.bat tải file này từ GitHub
 for name, dst in (("m_setup.bat", "Maestro_m_setup.bat"), ("m_uninstall.bat", "Maestro_m_uninstall.bat")):

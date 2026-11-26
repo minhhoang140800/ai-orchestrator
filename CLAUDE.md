@@ -29,7 +29,7 @@ tác vụ hẹn giờ Chủ nhật làm theo `learning/WEEKLY.md`, gộp vào `s
   task kiểu Linear; icon Lucide; lớp CSS "Porcelain 2.0" ở cuối thẻ style). `fonts/` — Geist + Geist Mono (OFL), nhúng khi build, phục vụ ở /fonts/.
 - `install.tpl.ps1` — bộ cài Windows (nhúng trong .bat tự giải nén; thông báo ASCII không dấu).
 - `install_mac.tpl.sh` — bộ cài Mac (`Maestro_setup.command`, đóng zip để giữ quyền chạy).
-- `uninstall.bat`, `build.py`, `release.py`, icon (`icon.ico`, `icon96.png`, `icon1024.png`), `RELEASE` (số bản).
+- `build.py`, `release.py`, `bench.py` (benchmark trên máy phát triển), icon (`icon.ico`, `icon1024.png`), `RELEASE` (số bản).
 
 ## Dữ liệu trên máy người dùng (không nằm trong repo)
 - App: `%LOCALAPPDATA%\AIOrchestrator` (Mac: `~/Library/Application Support/Maestro`): `app.py` (bộ khởi động),
@@ -52,7 +52,7 @@ git add -A && git commit -m "vX.Y: <tóm tắt>" && git push
 ```
 `build.py` tự chặn nếu thiếu địa chỉ cập nhật, lỗi cú pháp hoặc app không khởi động được. File gửi người dùng khi cần cài
 lại: `src/dist/Maestro_setup.bat` (Windows), `Maestro_mac.zip` (Mac). Gốc repo giữ: `app.py`, `latest.json`,
-`Maestro_vX.Y.bat`, `Maestro_setup_latest.bat` (bản cài mới nhất, `Maestro_m_setup.bat` tải từ GitHub), `Maestro_mac.zip`,
+`Maestro_setup_latest.bat` (bản cài mới nhất, `Maestro_m_setup.bat` tải từ GitHub), `Maestro_mac.zip`,
 `Maestro_m_setup.bat` (src/m_setup.bat), `Maestro_m_uninstall.bat` (src/m_uninstall.bat: [1] giữ data, [2] xoá data).
 
 ## Đọc log người dùng gửi

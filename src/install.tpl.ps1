@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Continue'
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
 $ProgressPreference = 'SilentlyContinue'
+try { [Net.WebRequest]::DefaultWebProxy.Credentials = [Net.CredentialCache]::DefaultNetworkCredentials } catch {}   # proxy cong ty can xac thuc
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 $M = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__MSG_B64__')) | ConvertFrom-Json
 $Version = '__VER__'
@@ -36,7 +37,12 @@ function Step($label, [scriptblock]$check, [scriptblock]$install) {
   Line $label $M.installing 'Yellow'
   try { & $install *>> $Log } catch { Add-Content -Path $Log -Value $_.Exception.Message -Encoding UTF8 }
   RefreshPath
-  if (& $check) { Line $label $M.done 'Green'; return $true }
+  if (& $check) {
+    Line $label $M.done 'Green'
+    # ghi lai phan mem do Maestro cai (file go cai chi go nhung muc nay, khong dong vao ban nguoi dung tu cai truoc do)
+    try { New-Item -ItemType Directory -Force -Path $AppHome | Out-Null; Add-Content -Path (Join-Path $AppHome 'installed_by_maestro.txt') -Value $label -Encoding ASCII } catch {}
+    return $true
+  }
   Line $label $M.failed 'Red'
   return $false
 }
@@ -124,6 +130,19 @@ function InstallNodeDirect {
   $f = Download "https://nodejs.org/dist/$v/node-$v-x64.msi" 'node-setup.msi'
   Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i', ('"' + $f + '"'), '/passive', '/norestart' -Wait
 }
+function InstallNodePortable {
+  # Khong co quyen admin (msiexec/winget that bai): giai nen ban zip vao thu muc nguoi dung, them vao PATH cua nguoi dung
+  $idx = Invoke-RestMethod -UseBasicParsing 'https://nodejs.org/dist/index.json'
+  $v = ($idx | Where-Object { $_.lts } | Select-Object -First 1).version
+  $f = Download "https://nodejs.org/dist/$v/node-$v-win-x64.zip" 'node.zip'
+  $base = Join-Path $env:LOCALAPPDATA 'Programs'
+  New-Item -ItemType Directory -Force -Path $base | Out-Null
+  Expand-Archive -Path $f -DestinationPath $base -Force
+  $dir = Join-Path $base "node-$v-win-x64"
+  $up = [Environment]::GetEnvironmentVariable('Path', 'User')
+  if (-not $up -or $up -notlike "*$dir*") { $np = @($up, $dir) | Where-Object { $_ }; [Environment]::SetEnvironmentVariable('Path', ($np -join ';'), 'User') }
+  $env:Path += ';' + $dir
+}
 
 # Dừng bản đang chạy (cả bản cũ) để cập nhật
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
@@ -134,7 +153,7 @@ $wg = @('install', '-e', '--silent', '--accept-source-agreements', '--accept-pac
 $null = Step 'Git' { Has git } { if ($UseWinget) { & winget @wg 'Git.Git' }; if (-not (Has git)) { InstallGitDirect } }
 $ok = Step 'Python' { [bool](FindPy) } { if ($UseWinget) { & winget @wg 'Python.Python.3.12' '--scope' 'user' }; RefreshPath; if (-not (FindPy)) { InstallPythonDirect } }
 if (-not $ok) { Fail $M.no_python }
-$null = Step 'Node.js' { Has node } { if ($UseWinget) { & winget @wg 'OpenJS.NodeJS.LTS' }; RefreshPath; if (-not (Has node)) { InstallNodeDirect } }
+$null = Step 'Node.js' { Has node } { if ($UseWinget) { & winget @wg 'OpenJS.NodeJS.LTS' }; RefreshPath; if (-not (Has node)) { InstallNodeDirect }; RefreshPath; if (-not (Has node)) { InstallNodePortable } }
 try { $nd = Split-Path -Parent (Get-Command node -ErrorAction Stop).Source; New-Item -ItemType Directory -Force -Path $AppHome | Out-Null; Set-Content -Path (Join-Path $AppHome 'node_dir.txt') -Value $nd -Encoding UTF8 } catch {}
 # O C con it cho trong: chuyen thu muc cai Claude Code / npm (Codex) sang o con trong nhieu nhat bang junction
 function FreeGB($d) { try { return [math]::Round((Get-PSDrive ($d.TrimEnd(':')) -ErrorAction Stop).Free / 1GB, 1) } catch { return 0 } }

@@ -126,15 +126,18 @@ def rjson(p, default=None):
 def wjson(p, obj):
     p = Path(p)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
+    # file tạm riêng cho từng tiến trình/luồng: nhiều tiến trình cùng ghi không giẫm lên file tạm của nhau
+    tmp = p.with_name(f"{p.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, p)
-
-
-def slug(s, n=40):
-    s = s.replace("đ", "d").replace("Đ", "D")
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-    return re.sub(r"[^A-Za-z0-9]+", "-", s).strip("-")[:n].lower() or "x"
+    for i in range(5):
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:              # Windows: file đích đang được tiến trình khác mở -> thử lại
+            if i == 4:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.1)
 
 
 def safe_name(s, n=60):
@@ -166,13 +169,85 @@ def py_console():
     return str(exe)
 
 
+def kill_pid_tree(pid):
+    """Dừng tiến trình + mọi tiến trình con của nó."""
+    if not pid:
+        return
+    try:
+        if IS_WIN:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, creationflags=NO_WINDOW)
+            return
+        kids = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True, timeout=10).stdout.split()
+        for k in kids:
+            kill_pid_tree(int(k))
+        os.kill(pid, 9)
+    except Exception:
+        pass
+
+
 def kill_tree(p):
     if p and p.poll() is None:
-        if IS_WIN:
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True,
-                           creationflags=NO_WINDOW)
-        else:
-            p.kill()
+        kill_pid_tree(p.pid)
+
+
+def pid_alive(pid):
+    if not pid:
+        return False
+    try:
+        if IS_WIN:      # không dùng os.kill(pid, 0) trên Windows (sẽ dừng luôn tiến trình)
+            r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True,
+                               text=True, creationflags=NO_WINDOW, timeout=15)
+            return f'"{pid}"' in (r.stdout or "")
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def worker_slot():
+    """Giới hạn CỨNG số worker chạy cùng lúc trên máy (app tự ép, không dựa vào hướng dẫn cho AI).
+    Mỗi worker giữ 1 file khoá data/slots/<i>.lock; hết chỗ thì chờ; worker bị tắt ngang -> khoá cũ tự được thu hồi."""
+    import atexit
+    d = DATA / "slots"
+    d.mkdir(parents=True, exist_ok=True)
+    n = max(1, MAX_RUNNING * MAX_WORKERS)
+    checked = {}                                # kiểm tra khoá cũ tối đa 20 giây/lần (tasklist chậm)
+    while True:
+        for i in range(n):
+            f = d / f"{i}.lock"
+            try:
+                fd = os.open(str(f), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                atexit.register(lambda f=f: f.unlink(missing_ok=True))
+                return f
+            except FileExistsError:
+                try:
+                    pid = int(f.read_text() or 0)
+                except Exception:
+                    pid = 0
+                if time.time() - checked.get(i, 0) > 20:
+                    checked[i] = time.time()
+                    if pid != os.getpid() and not pid_alive(pid):
+                        f.unlink(missing_ok=True)
+            except OSError:
+                return None                     # không tạo được khoá (quyền/ổ đĩa): không chặn worker
+        time.sleep(3)
+
+
+def kill_workers(t):
+    """Hủy task: dừng cả worker ChatGPT/Gemini đang chạy tách rời (ghi pid trong work/<ID>/vN/status.json)."""
+    w = wdir(t) / "work"
+    if not w.exists():
+        return
+    for f in w.glob("*/v*/status.json"):
+        st = rjson(f, {}) or {}
+        if st.get("status") == "running" and st.get("pid"):
+            kill_pid_tree(int(st["pid"]))
+            try:
+                wjson(f, {**st, "status": "stopped", "error": "Đã hủy task"})
+            except Exception:
+                pass
 
 
 def kill_orphan(pid):
@@ -432,9 +507,9 @@ def wdir(t):
     return out_dir(t) / ".work"
 
 
-def finish_clean(t):
-    """Task xong: lưu lại bảng sub-task + feedback/quyết định vào lịch sử, rồi xóa toàn bộ nháp/hướng dẫn/bản trùng."""
-    learn_queue(t)                         # bài học chung (đã lọc dữ liệu riêng) -> hàng đợi gửi về team
+def finish_clean(t, wi=None):
+    """Task xong: lưu lại bảng sub-task + feedback/quyết định vào lịch sử, rồi xóa toàn bộ nháp/hướng dẫn/bản trùng.
+    wi = lượt vừa xong: người dùng đã nhắn tiếp (lượt mới bắt đầu) -> không xoá nháp của lượt mới."""
     try:
         subs = subtasks(t)
         works = [m for m in t.get("messages", []) if m["role"] == "work"]
@@ -454,6 +529,10 @@ def finish_clean(t):
         t["brain_suggest"] = brain_suggest(t)
         tsave(t)
         w = wdir(t)
+        with _tlock:
+            if wi is not None and (t.get("status") != "done" or t.get("wi") != wi):
+                return                          # lượt mới đã bắt đầu: giữ nguyên nháp
+            t["_cleaning"] = True
         tl = w / "timeline.log"                 # nhật ký giờ từng bước: giữ lại trong lịch sử để đo chỗ chậm (Export log)
         if w != tdir(t) and tl.is_file():
             with open(tdir(t) / "timeline.log", "a", encoding="utf-8") as fo:
@@ -467,6 +546,23 @@ def finish_clean(t):
                 (w / x).unlink(missing_ok=True)
     except Exception as e:
         dlog(f"finish_clean {t.get('id')}: {e}")
+    finally:
+        t.pop("_cleaning", None)
+
+
+def restore_notes(t):
+    """Lượt mới sau khi nháp đã dọn: ghi lại tasks/decisions.json + tasks/criteria.md từ lịch sử task."""
+    d = wdir(t) / "tasks"
+    try:
+        if t.get("decisions") and not (d / "decisions.json").exists():
+            d.mkdir(parents=True, exist_ok=True)
+            wjson(d / "decisions.json", t["decisions"])
+        crit = (t.get("recipe") or {}).get("criteria")
+        if crit and not (d / "criteria.md").exists():
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "criteria.md").write_text(crit, encoding="utf-8")
+    except Exception as e:
+        dlog(f"restore_notes {t.get('id')}: {e}")
 
 
 def tsave(t):
@@ -756,10 +852,9 @@ Tiêu chí đã dùng:
 {CFG.get('instructions', '').strip() or '(không)'}
 
 ## Vai trò
-Bạn là PM: lên kế hoạch, giao việc, kiểm tra, tổng hợp; tự viết/biên tập văn bản (ý tưởng, kịch bản, báo cáo, câu chữ).
-Phần quan trọng hoặc cần tư duy (phân tích, quyết định hướng làm, chốt nội dung chính, đánh giá chất lượng): TỰ xử lý để
-đảm bảo kết quả. Việc làm thuần thao tác/khối lượng — vẽ/xử lý ảnh, xử lý file/bảng tính hàng loạt, code/script, research web
-dài — ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật, sửa đúng phần lỗi. Task là cuộc trò chuyện nhiều lượt.
+Bạn là PM: lên kế hoạch, giao việc, kiểm tra, tổng hợp; tự viết/biên tập văn bản và TỰ xử lý phần cần tư duy (phân tích,
+quyết định hướng làm, chốt nội dung, đánh giá chất lượng). Việc thao tác/khối lượng (vẽ/xử lý ảnh, file hàng loạt, code/script,
+research web dài) ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật. Task là cuộc trò chuyện nhiều lượt.
 
 ## Đường dẫn
 - Thư mục hiện tại: nháp/brief/log, bị XÓA khi task xong -> không để sản phẩm ở đây. File người dùng gửi: {tdir(t) / "input"}
@@ -769,29 +864,23 @@ dài — ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật, sửa đúng
 
 ## Worker
 {chr(10).join('- ' + desc[w] for w in on) or '- (không có — tự làm)'}
-Worker lỗi/không chạy: coi như không có. Giao việc: viết yêu cầu đủ ngữ cảnh vào
-tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy cuộc trò chuyện), rồi chạy:
+Giao việc: ghi yêu cầu đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy cuộc trò chuyện), rồi chạy:
   "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--edit <thư mục>] [--drive] [--timeout 900]
   "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>] [--hard]
-  --write: Gemini được tạo file/ảnh. --hard: việc khó (Balanced: Gemini lên mức high; giao lại vì lỗi cũng tự lên high).
-  --edit / --drive: xem mục sửa file / Google Drive.
-NHIỀU VIỆC: giao hết cả lô liền một lượt bằng --bg (trả về ngay, worker chạy nền), rồi chờ MỘT lần cho cả lô:
-  "{py}" "{app}" wait work/S1 work/S2 work/S3      (in kết quả từng việc; không chờ/kiểm tra từng cái một)
-Worker lỗi / hết lượt / không vẽ ra ảnh: app TỰ giao bên kia làm lại ngay trong cùng lệnh (Gemini→GPT mọi việc; GPT→Gemini việc
-vẽ; status via=gpt-fallback/gemini-fallback) — KHÔNG tự kiểm tra rồi giao lại. Bên nào không vẽ được: 30 phút tới app giao thẳng
-bên kia. Kết quả: work/<ID>/vN/ (result.md, status.json, file worker tạo; bên làm thay ở vN/gpt/ hoặc vN/gemini/).
-Sửa lỗi: giao lại cùng --out. App tự chọn model — không truyền --model.
+  --write: Gemini được tạo file/ảnh. --hard: việc khó. --edit / --drive: xem mục sửa file / Google Drive.
+Nhiều việc: giao cả lô bằng --bg (trả về ngay), rồi chờ MỘT lần: "{py}" "{app}" wait work/S1 work/S2 work/S3
+App TỰ lo: chọn model (không truyền --model), giới hạn số worker chạy cùng lúc, thời gian chờ, giao bên kia làm lại khi
+worker lỗi/hết lượt/không vẽ ra ảnh (status via=gpt-fallback/gemini-fallback) — KHÔNG tự kiểm tra rồi giao lại.
+Kết quả: work/<ID>/vN/ (result.md, status.json, file). Sửa lỗi: giao lại cùng --out. Worker lỗi/không chạy: coi như không có.
 
 ## Chia việc (Gemini nhanh, GPT chính xác hơn)
-- Research web, đối thủ, xu hướng: Gemini. Code, script, số liệu, Excel/Word/PowerPoint: GPT.
-- Pro: GPT làm trước mọi việc còn lại. Balanced/Turbo/Eco: Gemini trước (idea, kịch bản, brief, ảnh), lỗi mới giao lại
-  ĐÚNG PHẦN lỗi cho GPT; Balanced: idea/câu chữ chia Gemini phần cần nhanh/rộng, GPT phần cần sắc (idea chính, hook).
-- Việc phụ thuộc: làm trước; việc độc lập: chạy song song (mỗi worker --out riêng; không 2 worker --edit cùng thư mục).
+- Research web: Gemini. Code, script, số liệu, Excel/Word/PowerPoint: GPT. Pro: GPT làm trước việc còn lại;
+  Balanced/Turbo/Eco: Gemini trước (idea, kịch bản, brief, ảnh), lỗi mới giao lại ĐÚNG PHẦN lỗi cho GPT.
+- Việc độc lập: chạy song song (mỗi worker --out riêng; không 2 worker --edit cùng thư mục).
 
 ## Tốc độ (quan trọng)
-- VIỆC ĐƠN GIẢN (hỏi đáp, 1 thao tác, sửa nhỏ): làm NGAY — không criteria/plan/decisions, không giám khảo, không bước "kiểm tra" riêng.
-- Văn bản do worker viết: dặn ghi TOÀN BỘ nội dung vào câu trả lời cuối. Không chép/viết lại phần đã đạt; viết nội dung cuối 1 lần.
-- Gộp nhiều lệnh đọc/kiểm tra vào một lần chạy.
+- Cuối tin nhắn có "Đường xử lý" (HỎI ĐÁP / VIỆC NHỎ) do app phân loại: làm đúng theo đó (không criteria, không giám khảo).
+- Văn bản worker viết: dặn ghi TOÀN BỘ vào câu trả lời cuối; không chép/viết lại phần đã đạt. Gộp nhiều lệnh đọc/kiểm tra.
 
 ## Nghiệm thu
 - Worker "completed" chưa phải là xong: kiểm tra file thật. Đo được: "{py}" "{app}" check files|png ... (xem --help).
@@ -800,9 +889,8 @@ Sửa lỗi: giao lại cùng --out. App tự chọn model — không truyền -
   ("GIÁM SÁT BẬT — không có giám khảo Claude: giao gemini soát theo criteria.md, sửa và soát lại tới khi đạt (tối đa 4 vòng).")
   if watch_on else "Giám sát TẮT — không gọi giám khảo; tự xem lại theo yêu cầu 1 lần, lỗi nhỏ thẩm mỹ thì ghi chú cho người dùng."}
 {f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1
-  App tự chọn model giám khảo (nhanh) — không truyền --model. Chấm file NGAY trong work/<ID>/vN (trước khi chép sang OUTPUT):
-  file trượt do worker làm thì app TỰ giao lại đúng worker đó sửa đúng lỗi rồi chấm lại (review.json: auto_fix + đường dẫn
-  file mới) — bạn chỉ xử lý phần app không tự sửa được, rồi chép bản đạt sang OUTPUT. Tiêu chí được app gửi kèm cho worker.
+  Chấm NGAY trong work/<ID>/vN (trước khi chép sang OUTPUT); file trượt do worker làm thì app TỰ giao lại worker đó sửa rồi
+  chấm lại (review.json: auto_fix) — bạn chỉ xử lý phần app không tự sửa được, rồi chép bản đạt sang OUTPUT.
 """ if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial.
 
 {inline}{extra_md}{brain_md}{tpl_md}## Chế độ: {mode_name}
@@ -810,28 +898,24 @@ Sửa lỗi: giao lại cùng --out. App tự chọn model — không truyền -
 - Worker báo "limit": chuyển worker khác hoặc tự làm; không đảm bảo chất lượng thì hỏi người dùng.{" Bước QUÁ khó (đã thử không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if mode == 'pro' else ""}
 
 ## Ghi lại (để giao diện hiển thị)
-- Tiến độ: app tự tính từ các bước và worker — KHÔNG cần viết plan.json.
 - Người dùng góp ý hoặc chốt điều gì (chỉ khi đó): cập nhật tasks/decisions.json, gom theo phần việc, sửa/gộp mục cũ:
   [{{"group": "<phần việc>", "items": [{{"type": "feedback"|"decision", "text": "<1 câu>", "status": "open"|"done"}}]}}]
   Có file này thì đọc đầu mỗi lượt, theo đúng các quyết định đã chốt, không hỏi lại.
 - Task nhiều phần: xong phần nào hữu ích thì ghi ngay vào ./stages/<số>.md (giao diện hiện cho người dùng đọc trong lúc làm).
 
 ## Hỏi / nghiên cứu / đề xuất ≠ làm
-Tin nhắn là CÂU HỎI ("có thể … (được) không", "làm thế nào", "có cách nào", "nên … không", "tại sao") hoặc nhờ research,
-phân tích, đề xuất, giải pháp, so sánh -> CHỈ trả lời: kết luận, cách làm/phương án, ưu nhược, ước lượng công sức.
-KHÔNG sửa file/code, không tạo sản phẩm, không dựng bản thử, không chạy việc dài; tra cứu vừa đủ để trả lời.
-Cuối câu trả lời hỏi 1 câu: có làm không / làm phương án nào. Chỉ bắt tay làm khi người dùng bảo làm
-("làm đi", "áp dụng", "triển khai", "sửa", "tạo", "viết"...). Không chắc là hỏi hay nhờ làm -> coi là hỏi.
+Tin nhắn là CÂU HỎI ("có thể … không", "làm thế nào", "có cách nào", "nên … không", "tại sao") hoặc nhờ research/phân tích/
+đề xuất/so sánh -> CHỈ trả lời (kết luận, phương án, ưu nhược, công sức); không sửa file, không tạo sản phẩm, không chạy việc dài.
+Cuối câu trả lời hỏi: có làm không / làm phương án nào. Chỉ làm khi người dùng bảo làm. Không chắc -> coi là hỏi.
 
 ## Khi cần người dùng quyết định
 Chỉ hỏi khi thật sự quan trọng (không hoàn tác được, tốn nhiều hạn mức, mâu thuẫn, thiếu dữ liệu): ghi câu hỏi ngắn + phương án
 vào ./question.md rồi DỪNG. Còn lại tự quyết, ghi giả định.
 
 ## Kết thúc mỗi lượt
-Báo cáo, research, concept, so sánh: viết thẳng trong câu trả lời, KHÔNG tạo file .md/.txt. Chỉ tạo file khi sản phẩm vốn là file
-hoặc người dùng yêu cầu; lưu vào OUTPUT. Câu trả lời cuối ngắn: đạt/chưa đạt, điểm cần biết, việc người dùng cần làm.
-Không liệt kê lại từng file (giao diện có nút mở thư mục). KHÔNG kể quá trình/worker (ai làm, hết hạn mức, chuyển worker,
-số vòng) trừ khi ảnh hưởng tới kết quả người dùng nhận. Tập trung vào sản phẩm của task. Dùng được **đậm**, `code`, gạch đầu dòng.
+Báo cáo, research, so sánh: viết thẳng trong câu trả lời, KHÔNG tạo file .md/.txt; chỉ tạo file khi sản phẩm vốn là file hoặc
+người dùng yêu cầu (lưu vào OUTPUT). Trả lời ngắn: đạt/chưa đạt, điểm cần biết, việc người dùng cần làm. Không liệt kê lại file,
+KHÔNG kể quá trình/worker trừ khi ảnh hưởng kết quả. Dùng được **đậm**, `code`, gạch đầu dòng.
 
 ## Cấm
 Không dùng API key. Không ghi mật khẩu/token vào file.
@@ -849,6 +933,11 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
         txt = code_md(txt, t, py, app)
     if pm == "codex":
         txt = pm_codex_md(txt)
+    full = f'"{py}" "{app}"'                     # lệnh gọi app (đường dẫn dài) chỉ ghi 1 lần, các chỗ khác viết tắt APP
+    if "\n## Worker\n" in txt:
+        txt = txt.replace("\n## Worker\n", f"\n## Worker\nLệnh app (bên dưới viết tắt APP; khi chạy thay APP bằng nguyên lệnh này): {full}\n", 1)
+        j = txt.index("\n", txt.index("Lệnh app (bên dưới"))
+        txt = txt[:j] + txt[j:].replace(full, "APP")
     if free_setup():
         txt = txt.replace("\n## Cấm\n", "\n" + FREE_RULES + "\n## Cấm\n", 1)
     f = wdir(t) / ("AGENTS.md" if pm == "codex" else "CLAUDE.md")
@@ -868,19 +957,48 @@ FREE_RULES = """## Chế độ Free (người dùng không có tài khoản AI t
 """
 
 
-def _section(txt, title, body):
-    """Thay nội dung 1 mục '## <title>' (tới mục kế tiếp) trong hướng dẫn."""
-    return re.sub(r"(?ms)^## " + re.escape(title) + r"\n.*?(?=^## )", lambda m: f"## {title}\n{body.strip()}\n\n", txt, count=1)
-
-
 def pm_codex_md(txt):
     """Hướng dẫn khi ChatGPT (Codex) làm quản lý thay Claude: không có giám khảo Claude, không có công cụ Drive của Claude."""
     txt = txt.replace("## Vai trò\n", "## Vai trò\nBạn là ChatGPT (Codex) làm quản lý thay Claude; không có sub-agent — việc code/file nhỏ tự làm bằng lệnh.\n", 1)
     if IS_WIN:      # Codex chạy lệnh bằng PowerShell: chương trình có đường dẫn trong ngoặc kép phải gọi bằng "&"
         cmd = f'"{py_console()}" "{APP}"'
-        txt = txt.replace(cmd, "& " + cmd).replace("## Worker sẵn có trên máy\n",
-                          "## Worker sẵn có trên máy\n(Lệnh chạy trong PowerShell: giữ dấu & ở đầu mỗi lệnh gọi app.)\n", 1)
+        txt = txt.replace(cmd, "& " + cmd).replace("\n## Worker\n",
+                          "\n## Worker\n(Lệnh chạy trong PowerShell: giữ dấu & ở đầu mỗi lệnh gọi app.)\n", 1)
     return txt
+
+
+BIG_RE = re.compile(r"storyboard|concept|ý tưởng|hàng loạt|\bbatch\b|audit|research|nghiên cứu|so sánh|báo cáo|kế hoạch|"
+                    r"chiến lược|toàn bộ|tất cả|nhiều (?:ảnh|file|bản|phương án|option)|\b\d{2,}\s*(?:ảnh|file|banner|bản|cái|slide)|"
+                    r"slide|powerpoint|excel|bảng tính|website|landing|app\b", re.I)
+
+
+def route(t, nxt):
+    """Lễ tân: 'ask' (hỏi đáp: trả lời thẳng) / 'small' (việc nhỏ: làm 1 mạch) / 'full' (quy trình đầy đủ).
+    Chỉ dựa trên quy tắc (không tốn thêm lần gọi AI); không chắc -> 'full'."""
+    text = nxt.get("text") or (t.get("text", "") if nxt.get("kind") == "start" or not t.get("session_started") else "")
+    if is_ask(t, nxt):
+        return "full" if BIG_RE.search(text) else "ask"     # hỏi nhưng việc lớn (research, so sánh, báo cáo) -> đủ quy trình
+    if nxt.get("kind") not in ("start", "followup", None) or len(nxt.get("files") or []) > 2:
+        return "full"
+    if 0 < len(text) <= 250 and not BIG_RE.search(text):
+        return "small"
+    return "full"
+
+
+ROUTE_NOTE = {
+    "ask": "\nĐường xử lý (app tự phân loại): HỎI ĐÁP - trả lời thẳng, ngắn gọn; không giao worker, không tạo file, không giám khảo "
+           "(cần tra web nhiều nguồn mới giao gemini). Nếu thật ra người dùng bảo làm thì làm như bình thường.",
+    "small": "\nĐường xử lý (app tự phân loại): VIỆC NHỎ - tự làm 1 mạch hoặc giao đúng 1 worker; bỏ giám khảo và bước kiểm tra riêng. "
+             "Nếu thấy việc lớn hơn dự kiến thì làm theo quy trình đầy đủ.",
+    "full": "",
+}
+
+
+def pm_prompt_file(d, prompt):
+    """ChatGPT làm quản lý: đề bài ghi ra file, dòng lệnh chỉ trỏ tới file. Trên Windows codex.cmd chạy qua cmd.exe:
+    đề bài dài (>8.000 ký tự) bị cắt, dấu " & | % có thể bị hiểu thành lệnh."""
+    (d / ".pm_prompt.md").write_text(prompt, encoding="utf-8")
+    return "Đọc toàn bộ yêu cầu của lượt này trong file ./.pm_prompt.md (UTF-8) rồi làm đúng theo đó."
 
 
 def md_name(t):
@@ -949,7 +1067,7 @@ def build_prompt(t, nxt):
         base = f"Task mới. Yêu cầu của người dùng:\n\n{t['text']}\n"
         if kind != "start" and text:
             base += f"\nBổ sung của người dùng:\n{text}\n"
-        return base + fl + f"\nLàm theo {md_name(t)}."
+        return base + fl + ROUTE_NOTE[route(t, nxt)] + f"\nLàm theo {md_name(t)}."
     if t.get("session_started") and t.get("md_changed"):   # hướng dẫn vừa đổi (app cập nhật / đổi chế độ...) -> đọc lại
         fl += f"\n{md_name(t)} vừa được cập nhật: đọc lại ./{md_name(t)} và áp dụng bản mới nhất (thay cho quy tắc cũ trong phiên)."
     if kind == "answer":
@@ -960,7 +1078,7 @@ def build_prompt(t, nxt):
         return (f"Người dùng vừa gửi tin nhắn trong lúc bạn đang làm (bạn đã bị ngắt):\n\n{text}\n{fl}\n"
                 f"Xem lại phần đã làm (work/*/status.json, file đã tạo), điều chỉnh theo tin nhắn này rồi tiếp tục. Làm theo {md_name(t)}.{wait}")
     if kind == "followup":
-        return f"Tin nhắn mới của người dùng:\n\n{text}\n{fl}\nLàm theo {md_name(t)}."
+        return f"Tin nhắn mới của người dùng:\n\n{text}\n{fl}{ROUTE_NOTE[route(t, nxt)]}\nLàm theo {md_name(t)}."
     return f"Task bị dừng giữa chừng. Xem lại phần đã làm (work/*/status.json, file đã tạo) và làm tiếp phần còn dở. Làm theo {md_name(t)}.{wait}"
 
 
@@ -974,6 +1092,7 @@ def gen_title(t):
                                 "--model", "haiku"], cwd=str(tdir(t)), stdin=subprocess.DEVNULL, capture_output=True,
                                text=True, encoding="utf-8", errors="replace", timeout=40, creationflags=NO_WINDOW)
             title = (p.stdout or "").strip().splitlines()[0].strip(" \"'*#`.") if p.returncode == 0 and p.stdout.strip() else ""
+            title = re.sub(r"^(?:tiêu đề|tên|title)\s*:\s*", "", title, flags=re.I).strip(" \"'*#`.")
             if 2 <= len(title) <= 80 and not t.get("renamed"):
                 t["title"] = title
     except Exception:
@@ -1011,6 +1130,7 @@ def start_run(t):
         t["pdir"] = str(out_dir(t) / "code")
         Path(t["pdir"]).mkdir(parents=True, exist_ok=True)
     write_claude_md(t)
+    restore_notes(t)
     d = wdir(t)
     q = d / "question.md"
     if q.exists():
@@ -1019,8 +1139,8 @@ def start_run(t):
     hard = t.get("mode") == "pro" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh"
     code = t.get("kind") == "code"
     cm, ce = pick_model(pm, "code" if code else t.get("mode", "balanced"), hard)   # Pro + bước quá khó: mức cao nhất
-    if code and pm == "claude" and not hard and is_ask(t, nxt):
-        cm = "sonnet"                          # Code mode: câu hỏi / tra cứu đơn giản -> model nhẹ hơn, nhanh, đỡ hạn mức
+    if pm == "claude" and not hard and route(t, nxt) == "ask":
+        ce = "low"                             # câu hỏi / tra cứu đơn giản: Opus mức suy nghĩ low (nhanh, đỡ hạn mức)
     if code:
         code_checkpoint(t)                      # điểm khôi phục trước khi sửa code (nút Khôi phục)
     t["_effort"], t["_hard"] = ce, hard
@@ -1032,7 +1152,7 @@ def start_run(t):
         args = [exe, "exec"] + (["resume", t["session"]] if t.get("session_started") else []) + [
             "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", str(last),
             "-c", f'model_reasoning_effort="{ce}"'] + (DRIVE_APPROVE if GOOGLE_LINK.search(t.get("text", "") + nxt.get("text", "")) else []) + (
-            [] if t.get("session_started") else ["-C", str(d)]) + [build_prompt(t, nxt)]
+            [] if t.get("session_started") else ["-C", str(d)]) + [pm_prompt_file(d, build_prompt(t, nxt))]
     else:
         args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
                 "--permission-mode", "acceptEdits",
@@ -1220,6 +1340,10 @@ def codex_event(t, ev, cx):
     return None
 
 
+PM_IDLE_MAX = int(os.environ.get("AIO_PM_IDLE") or 3600)        # không có hoạt động quá 60 phút -> coi là treo
+PM_TOTAL_MAX = int(os.environ.get("AIO_PM_TOTAL") or 4 * 3600)  # 1 lượt tối đa 4 giờ
+
+
 def watch(t, p, nxt):
     raw = open(wdir(t) / "run.log", "a", encoding="utf-8")
     raw.write(f"\n===== {now()} {nxt.get('kind')} =====\n")
@@ -1228,7 +1352,22 @@ def watch(t, p, nxt):
     since = (w or {}).get("started_ts", time.time())
     pm = t.get("pm") or "claude"
     cx = {"last": "", "err": ""}               # ChatGPT làm quản lý: câu trả lời/lỗi gần nhất
+    errbuf = []
+    th_err = threading.Thread(target=lambda: errbuf.extend(p.stderr), daemon=True)   # đọc song song: stderr đầy không làm treo
+    th_err.start()
+    act = {"at": time.time(), "t0": time.time(), "done": False}
+
+    def watchdog():                            # không có hoạt động 60 phút / chạy quá 4 giờ -> dừng, báo lỗi rõ
+        while not act["done"]:
+            time.sleep(min(30, PM_IDLE_MAX / 2))
+            now_ = time.time()
+            if p.poll() is None and (now_ - act["at"] > PM_IDLE_MAX or now_ - act["t0"] > PM_TOTAL_MAX):
+                t["_timeout"] = True
+                kill_tree(p)
+                return
+    threading.Thread(target=watchdog, daemon=True).start()
     for line in p.stdout:
+        act["at"] = time.time()
         raw.write(line)
         raw.flush()
         try:
@@ -1256,7 +1395,12 @@ def watch(t, p, nxt):
             tl_mark(t, "(Claude suy nghĩ)")
         elif typ == "result":
             result = ev
-    err = p.stderr.read()
+    act["done"] = True
+    th_err.join(timeout=10)
+    err = "".join(errbuf)
+    if t.pop("_timeout", None):
+        err += ("\nQuá thời gian: AI không phản hồi " + str(PM_IDLE_MAX // 60) + " phút (hoặc chạy quá "
+                + str(PM_TOTAL_MAX // 3600) + " giờ). Bấm Tiếp tục để chạy lại.")
     tl_mark(t, "(xong lượt)")
     if err.strip():
         raw.write("--- stderr ---\n" + err)
@@ -1303,7 +1447,7 @@ def watch(t, p, nxt):
             rt = (result.get("result") or "Xong.").strip()
             fs, fd = new_files(t, since, rt)
             tmsg(t, "claude", rt, files=fs, dir=fd)
-            threading.Thread(target=finish_clean, args=(t,), daemon=True).start()
+            threading.Thread(target=finish_clean, args=(t, t.get("wi")), daemon=True).start()
         else:
             msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {p.returncode}"
             if is_limit(msg[-1500:]) or is_limit(err):          # AI quản lý hết hạn mức: chờ tới giờ reset rồi tự chạy tiếp
@@ -1397,8 +1541,8 @@ def sched_tick():
                 tsave(t)
             if not pm_ready(t):
                 continue          # chờ đăng nhập (đã tự mở trang đăng nhập Claude)
-            if t.get("titling") and time.time() - t.get("created_ts", 0) < 30:
-                continue          # chờ đặt tên xong để thư mục kết quả có tên đẹp
+            if t.get("_cleaning"):
+                continue          # đang dọn nháp lượt trước (vài giây) -> chạy ngay sau đó
             try:
                 start_run(t)
             except Exception as e:
@@ -1432,6 +1576,7 @@ def act(tid, action, text="", files=None, template=""):
                 kill_tree(PROCS.get(tid))
             else:
                 t["status"] = "cancelled"
+            threading.Thread(target=kill_workers, args=(t,), daemon=True).start()
         elif action == "resume" and s in ("paused", "failed"):
             t["status"] = "queued"
             t.setdefault("next", {"kind": "resume"})
@@ -1508,8 +1653,8 @@ def open_task_file(tid, rel):
 
 
 # ---------------------------------------------------------------- Learning: bài học chung của mọi người dùng
-# Mỗi task xong: Claude ghi bài học chung vào lessons.json -> app lọc dữ liệu riêng, ghi hàng đợi learn_queue.jsonl ->
-# gửi về Google Form (Sheet của team). Hàng tuần tác vụ hẹn giờ lọc, gộp vào src/learnings.md -> phát hành bản mới.
+# Bài học chung đã duyệt (src/learnings.md, mục "Đang áp dụng") nhúng sẵn vào app khi build.
+# (Tự rút bài học sau mỗi task + gửi Google Form: đã tắt ở v10.6.)
 def learn_src(name, embedded):
     if embedded or VERSION != "dev":
         return embedded
@@ -1524,116 +1669,6 @@ def learn_rules():
     return [x.strip()[2:].strip() for x in (m.group(1) if m else "").splitlines() if x.strip().startswith("- ")]
 
 
-PRIVATE_RE = [
-    (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "<email>"),
-    (re.compile(r"https?://\S+|www\.\S+"), "<link>"),
-    (re.compile(r"\\\\[^\s\\]+(?:\\[^\s\\]+)*|[A-Za-z]:[\\/][^\s,;\"']*|(?:/Users|/Volumes|/home|~)/[^\s,;\"']*"), "<đường dẫn>"),
-    (re.compile(r"\b(?:AIza[\w-]{20,}|sk-[\w-]{20,}|gh[pousr]_[\w]{20,})\b"), "<key>"),
-    (re.compile(r"\b\d{6,}\b"), "<số>"),
-]
-
-
-def scrub(text, n=300):
-    """Bỏ dữ liệu riêng khỏi bài học trước khi gửi: email, link, đường dẫn, key, dãy số dài."""
-    text = str(text or "")
-    for rx, rep in PRIVATE_RE:
-        text = rx.sub(rep, text)
-    return re.sub(r"\s+", " ", text).strip()[:n]
-
-
-def learn_extract(t):
-    """Rút bài học chung của 1 task xong bằng Claude Haiku (rẻ, nhanh, chạy ngầm) — Claude quản lý không phải tự ghi."""
-    exe = find_bin("claude")
-    if not exe or not claude_usable():
-        return {}
-    asks = [m.get("text", "")[:1200] for m in t.get("messages", []) if m.get("role") == "user"][:3]
-    ans = next((m.get("text", "") for m in reversed(t.get("messages", [])) if m.get("role") == "claude"), "")[:2000]
-    subs = "; ".join(f"{s_['worker']} {s_['status']} {s_.get('seconds') or '?'}s lần {s_['attempt']}" for s_ in subtasks(t))[:800]
-    prompt = (f"Task của một công cụ AI (Claude quản lý, giao việc cho ChatGPT/Gemini). Chế độ: {t.get('mode')}.\n"
-              f"Yêu cầu: {' | '.join(asks)}\nKết quả cuối: {ans}\nWorker: {subs or '(không)'}\n\n"
-              f"Trả về DUY NHẤT 1 JSON: {{\"category\": \"<1 trong: {', '.join(CATEGORIES)}>\", \"lessons\": [\"<tối đa 3 câu>\"]}}. "
-              "Bài học = điều giúp MỌI task sau nhanh/đúng hơn (chia việc, worker hợp việc gì, lỗi hay gặp, bước thừa). "
-              "Không có gì thật sự mới -> []. KHÔNG ghi tên dự án/game/người, link, đường dẫn, nội dung, số liệu riêng.")
-    try:
-        p = subprocess.run([exe, "-p", prompt, "--model", "haiku"], cwd=str(tdir(t)), stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, creationflags=NO_WINDOW)
-        out = p.stdout or ""
-        d = json.loads(out[out.index("{"):out.rindex("}") + 1])
-        return d if isinstance(d, dict) else {}
-    except Exception as e:
-        dlog(f"learn_extract {t.get('id')}: {e}")
-        return {}
-
-
-def learn_report(t):
-    """Báo cáo ẩn danh của 1 task: loại việc, bài học (đã lọc), AI nào làm/bao lâu/đạt không. Không có nội dung task."""
-    w = wdir(t)
-    les = rjson(w / "lessons.json", None) or learn_extract(t)
-    les = les if isinstance(les, dict) else {"lessons": les if isinstance(les, list) else []}
-    cat = str(les.get("category") or "khác").strip().lower()[:40]
-    works = [m for m in t.get("messages", []) if m.get("role") == "work"]
-    subs = [{"worker": s_.get("worker", ""), "model": s_.get("model", ""), "status": s_.get("status", ""),
-             "seconds": s_.get("seconds"), "attempt": s_.get("attempt")} for s_ in subtasks(t)][:30]
-    return {"v": 1, "release": RELEASE, "os": "mac" if IS_MAC else "win" if IS_WIN else "other", "at": int(time.time()),
-            "kind": t.get("kind") or "task", "mode": t.get("mode", ""), "pm": t.get("pm", "claude"), "category": cat,
-            "lessons": [scrub(x) for x in (les.get("lessons") or []) if str(x).strip()][:5],
-            "turns": len(works), "seconds": round(sum((m.get("ended_ts") or m.get("started_ts", 0)) - m.get("started_ts", 0) for m in works)),
-            "status": t.get("status"), "subtasks": subs,
-            "plans": {k: CFG["ais"].get(k, {}).get("plan", "") for k in ("claude", "codex")},
-            "models": {"gemini": (CFG.get("gemini_list") or [])[:30], "gemini_api": (CFG.get("gemini_api_models") or [])[:30]}}
-
-
-def learn_queue(t):
-    try:
-        if t.get("learned"):
-            return
-        ends = [m.get("ended_ts") or 0 for m in t.get("messages", []) if m.get("role") == "work"]
-        if time.time() - max(ends or [0]) > 3600:
-            t["learned"] = True                # task cũ (trước khi có learning): không gửi lại
-            return
-        rep = learn_report(t)
-        with open(DATA / "learn_queue.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps(rep, ensure_ascii=False) + "\n")
-        t["learned"] = True
-    except Exception as e:
-        dlog(f"learn_queue {t.get('id')}: {e}")
-
-
-def learn_form():
-    raw = learn_src("learn_form.json", LEARN_FORM)
-    try:
-        d = json.loads(raw) if raw else {}
-    except Exception:
-        d = {}
-    return (d.get("url") or "").strip(), (d.get("entry") or "").strip()
-
-
-def learn_send():
-    """Gửi hàng đợi bài học về Google Form của team (mỗi báo cáo 1 lần gửi). Chưa có Form -> giữ lại gửi sau."""
-    import urllib.parse
-    import urllib.request
-    url, entry = learn_form()
-    f = DATA / "learn_queue.jsonl"
-    if not url or not entry or not f.is_file():
-        return 0
-    lines = [x for x in f.read_text("utf-8", "replace").splitlines() if x.strip()][-500:]
-    left, sent = [], 0
-    for i, line in enumerate(lines):
-        try:
-            body = urllib.parse.urlencode({entry: line}).encode()
-            urllib.request.urlopen(urllib.request.Request(url, data=body, headers={"User-Agent": "maestro"}), timeout=20).read(200)
-            sent += 1
-        except Exception as e:
-            dlog(f"learn_send: {e}")
-            left = lines[i:]
-            break
-    f.write_text("".join(x + "\n" for x in left), encoding="utf-8")
-    if sent:
-        CFG["learn_sent"] = int(CFG.get("learn_sent") or 0) + sent
-        save_cfg()
-    return sent
-
-
 def usage_loop():
     while True:
         time.sleep(120)
@@ -1644,20 +1679,8 @@ def usage_loop():
             dlog(f"usage_loop: {e}")
 
 
-def learn_loop():
-    while True:
-        time.sleep(600)
-        try:
-            learn_send()
-        except Exception as e:
-            dlog(f"learn_loop: {e}")
-
-
 def learn_state():
-    f = DATA / "learn_queue.jsonl"
-    pending = sum(1 for x in f.read_text("utf-8", "replace").splitlines() if x.strip()) if f.is_file() else 0
-    return {"rules": learn_rules(), "pending": pending, "sent": int(CFG.get("learn_sent") or 0),
-            "on": bool(learn_form()[0])}
+    return {"rules": learn_rules()}
 
 
 # ---------------------------------------------------------------- Project Brain + Workflow Templates
@@ -2349,27 +2372,36 @@ def ui_html():
     return (APP.parent / "ui.html").read_bytes()
 
 
-_prog = {}
-_exp = {"t": 0, "v": {}}
-
-
-def expected_secs(mode):
-    """Thời gian 1 lượt làm thường mất (trung vị các lượt đã xong cùng chế độ) để ước % tiến độ."""
-    if time.time() - _exp["t"] > 120:
-        by = {}
-        for x in TASKS.values():
-            for m in x.get("messages", []):
-                if m.get("role") == "work" and m.get("status") == "done" and m.get("ended_ts") and m.get("started_ts"):
-                    d = m["ended_ts"] - m["started_ts"]
-                    if 20 < d < 4 * 3600:
-                        by.setdefault(x.get("mode", "balanced"), []).append(d)
-        _exp.update(t=time.time(), v={k: sorted(v)[len(v) // 2] for k, v in by.items() if len(v) >= 2})
-    return max(60, _exp["v"].get(mode) or {"turbo": 240, "balanced": 420, "pro": 600, "eco": 600, "code": 600}.get(mode, 420))
-
-
 def pm_limit(t):
     """Hạn mức của AI đang làm quản lý cho task ({} = còn dùng được)."""
     return limits().get(t.get("pm") or pick_pm() or "claude") or {}
+
+
+TPL_STOP = {"cho", "toi", "tao", "lam", "giup", "voi", "cua", "va", "cac", "nhung", "mot", "nay", "theo", "trong", "the",
+            "and", "for", "with", "this", "that", "ban", "lai", "duoc", "khong", "can", "file", "task"}
+
+
+def tpl_words(t):
+    txt = unicodedata.normalize("NFD", (t.get("title", "") + " " + (t.get("text") or "")[:200]).lower())
+    txt = "".join(c for c in txt if unicodedata.category(c) != "Mn").replace("đ", "d")
+    return {w for w in re.findall(r"[a-z]{2,}", txt) if w not in TPL_STOP}
+
+
+def tpl_suggest(t):
+    """Gợi ý Save Template: task Xong, không phải Code mode, chưa dùng template, và đã có ít nhất 1 task khác CÙNG LOẠI
+    đã xong (tức là từ 2 task cùng loại trở lên) -> việc này hay lặp lại."""
+    if t.get("status") != "done" or t.get("kind") == "code" or t.get("template") or t.get("tpl_saved"):
+        return False
+    me = tpl_words(t)
+    if len(me) < 2:
+        return False
+    for x in list(TASKS.values()):
+        if x is t or x.get("status") != "done" or x.get("kind") == "code":
+            continue
+        o = tpl_words(x)
+        if o and len(me & o) / len(me | o) >= 0.4:
+            return True
+    return False
 
 
 def task_detail(t):
@@ -2394,27 +2426,9 @@ def task_detail(t):
                 break
     if t["status"] == "running" and works and works[-1].get("status") == "running":
         cur = works[-1]
-        pl = rjson(wdir(t) / "tasks" / "plan.json", {}) or {}
-        pl = pl if isinstance(pl, dict) else {}
-        if pl and wdir(t).joinpath("tasks", "plan.json").stat().st_mtime < cur.get("started_ts", 0) - 5:
-            pl = {}                                          # kế hoạch của lượt trước -> bỏ qua
-        st = [str(x.get("status", "")).lower().strip() for x in (pl.get("subtasks") or []) if isinstance(x, dict)]
-        tot = len(st)
-        timep = min(0.95, (time.time() - cur.get("started_ts", time.time())) / expected_secs(t.get("mode", "balanced")))
-        ws = cur.get("subtasks") or []                       # app tự tính: worker đã xong / (worker + 1 bước tổng hợp)
-        if tot:                                              # task cũ còn plan.json
-            est = sum(x in ("done", "completed", "failed", "skipped", "partial") for x in st) / tot
-        elif ws:
-            wfin = sum(x.get("status") != "running" for x in ws)
-            est = max(0.9 * wfin / (len(ws) + 1), timep * 0.85)
-            tot = len(ws) + 1
-        else:
-            est = timep
-        key = (t["id"], cur.get("started_ts"))
-        est = max(est, _prog.get(key, 0))                     # không lùi
-        _prog[key] = est
-        cur["progress"] = max(1, min(99, round(100 * est)))
-        cur["nsteps"] = tot
+        ws = cur.get("subtasks") or []                       # trạng thái thật (không đoán phần trăm): việc đã giao xong / đang chạy
+        n_run = sum(x.get("status") == "running" for x in ws)
+        cur["phase"] = (f"{len(ws) - n_run}/{len(ws)} việc xong" + (f" · {n_run} đang chạy" if n_run else "")) if ws else ""
         sd = wdir(t) / "stages"
         if sd.is_dir():
             cur["stages"] = [f.read_text("utf-8", "replace")[:6000] for f in sorted(sd.glob("*.md"),
@@ -2436,6 +2450,7 @@ def task_detail(t):
         d["wait"] = f"Chờ {nrun} task đang chạy (máy này chạy tối đa {MAX_RUNNING} task cùng lúc)" if nrun >= MAX_RUNNING else ""
     d["project"] = t.get("project", "")
     d["tpl_saved"] = t.get("tpl_saved", "")
+    d["tpl_suggest"] = tpl_suggest(t)
     d["brain_suggest"] = brain_suggest(t) if t.get("project") else []
     d["decisions"] = [{"group": str(g.get("group", ""))[:120],
                        "items": [{"type": i.get("type", "feedback"), "text": str(i.get("text", ""))[:400], "status": i.get("status", "")}
@@ -3390,7 +3405,6 @@ def serve(background=False):
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=check_startup, daemon=True).start()
     threading.Thread(target=ensure_libs, daemon=True).start()
-    threading.Thread(target=learn_loop, daemon=True).start()
     threading.Thread(target=usage_loop, daemon=True).start()
     threading.Thread(target=check_update, daemon=True).start()
     threading.Thread(target=remote_watch, daemon=True).start()
@@ -3921,6 +3935,9 @@ def cmd_worker(argv):
             print(json.dumps({**st, "status": "running", "wait": str(out)}, ensure_ascii=False))
             sys.exit(0)
         return wait_status(v, a.timeout + 180)
+    wjson(v / "status.json", {**st, "status": "running", "pid": os.getpid()})   # Hủy task -> dừng được worker này
+    if not os.environ.get("AIO_NOFALLBACK"):   # bên làm thay (gọi lồng từ worker đang giữ chỗ) dùng chung chỗ đó
+        worker_slot()                           # đủ số worker đang chạy trên máy -> chờ tới lượt
     exe = find_bin("codex" if a.worker == "codex" else "agy")
     task_txt = task.read_text(encoding="utf-8") if task.exists() else ""
     want_img = (a.worker == "codex" or a.write or bool(edit)) and bool(IMG_MAKE.search(task_txt))
@@ -3993,8 +4010,8 @@ def cmd_worker(argv):
                 cmd += ["--add-dir", str(edit)]
             write_ = a.write or bool(edit)  # cho Gemini tự ghi file không cần hỏi (chỉ khi task cần tạo/sửa file)
             if write_:
-                cmd += ["--dangerously-skip-permissions"]
-            plain = [exe, "-p", gtext, "--output-format", "json"] + (["--dangerously-skip-permissions"] if write_ else [])
+                cmd += ["--dangerously-skip-permissions", "--sandbox"]
+            plain = [exe, "-p", gtext, "--output-format", "json"] + (["--dangerously-skip-permissions", "--sandbox"] if write_ else [])
             cands = ([cmd + ["--model", a.model or gm]] if (a.model or gm) else []) + [cmd, plain]   # cờ không hỗ trợ -> bản đơn giản
             cmd = cands[0]
             cwd = v
@@ -4760,6 +4777,11 @@ def cmd_judge(argv):
     sys.exit(0 if st["status"] == "completed" else 1)
 
 if __name__ == "__main__":
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     if len(sys.argv) > 1 and sys.argv[1] == "wait":
         cmd_wait(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == "worker":
