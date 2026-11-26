@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v11.4 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v11.5 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -73,6 +73,8 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | Hướng dẫn CLAUDE.md của task quá dài (12.5k ký tự) | Chia mô-đun, chỉ nạp phần cần (~5.8k) (v8.2) |
 | Claude viết lại kết quả worker | Worker trả đủ nội dung, Claude không viết lại (v7.1) |
 | Gemini không ra ảnh → kẹt | Tự chuyển GPT trong cùng lệnh; chuyển 2 chiều, thử 1 lần, nhớ 30 phút (v9.3, v9.4) |
+| Gemini CLI (Antigravity) hết lượt vẽ ảnh (HTTP 429 "exhausted your capacity", mở lại sau 3-5h; tách khỏi Gemini web/app) nhưng vẫn báo SUCCESS; có khi tự vẽ bằng code Python/PIL mà không nói | Đọc log CLI: lấy giờ mở lại, nhớ tới giờ đó (thay vì 30 phút), ảnh tạo sau lúc lỗi chuyển vào `_ve_bang_code`; vẽ dở thì GPT vẽ nốt phần thiếu (kèm danh sách ảnh đã có); Cài đặt hiện "Gemini CLI vẽ ảnh: hết lượt, mở lại lúc HH:MM" (v11.5) |
+| Claude gần như không bao giờ hỏi lại (luật quá chặt; hỏi ở cuối câu trả lời nên app báo Xong) | Câu trả lời kết thúc bằng câu hỏi -> task "Chờ bạn trả lời" + thông báo; luật mới: hỏi NGAY trước khi làm khi đề bài mơ hồ/thiếu dữ kiện/có nghi vấn dễ làm sai hướng (tối đa 3 câu, kèm phương án mặc định); hỏi giữa chừng khi vướng (v11.5) |
 | Chờ từng worker một | Giao cả lô `--bg`, chờ 1 lần bằng `wait` (v9.3) |
 | Turbo vẫn tự xem/làm thêm (vd gen keyframe trước storyboard) | Bớt bước tự kiểm ở Turbo; Turbo không gộp ảnh thành lưới |
 | Giám khảo chậm | Model nhỏ cho việc không phải code, thu nhỏ ảnh, timeout 5 phút; app tự giao lại file trượt (v9.9) |
