@@ -7,19 +7,35 @@ def gen_title(t):
     exe = find_bin("claude")
     try:
         if exe and claude_usable():          # không có Claude trả phí: giữ tên tạm (không tốn hạn mức ChatGPT)
-            p = subprocess.run([exe, "-p", "Đặt tiêu đề 3-7 từ, cùng ngôn ngữ, cho yêu cầu dưới đây. "
-                                "Chỉ trả về tiêu đề, không dấu ngoặc, không giải thích.\n\n" + t["text"][:2000],
+            p = subprocess.run([exe, "-p", "Đặt tên ngắn 2-4 từ, cùng ngôn ngữ, cho yêu cầu dưới đây. Giữ nguyên tên riêng (tên dự án, "
+                                "app, game, sản phẩm) nếu có và đặt nó lên đầu; bỏ từ chung chung như nâng cấp, kiểm tra, hướng, "
+                                "yêu cầu, task. Chỉ trả về tên, không dấu ngoặc, không giải thích.\n\n" + t["text"][:2000],
                                 "--model", "haiku"], cwd=str(tdir(t)), stdin=subprocess.DEVNULL, capture_output=True,
                                text=True, encoding="utf-8", errors="replace", timeout=40, creationflags=NO_WINDOW)
             title = (p.stdout or "").strip().splitlines()[0].strip(" \"'*#`.") if p.returncode == 0 and p.stdout.strip() else ""
             title = re.sub(r"^(?:tiêu đề|tên|title)\s*:\s*", "", title, flags=re.I).strip(" \"'*#`.")
-            if 2 <= len(title) <= 80 and not t.get("renamed"):
+            if 2 <= len(title) <= 60 and not t.get("renamed"):
                 t["title"] = title
     except Exception:
         pass
     with _tlock:
         t["titling"] = False
         tsave(t)
+
+
+TITLE_MAX = 40
+
+
+def first_line_title(text):
+    """Người dùng tự đặt tên: dòng đầu ngắn (<= 40 ký tự) đứng riêng một dòng (có nội dung bên dưới) -> dùng nguyên làm tên task.
+    Bỏ qua dòng giống câu chào / câu dẫn (kết thúc bằng : , ? hoặc chỉ là lời chào)."""
+    lines = [x.strip() for x in (text or "").strip().splitlines()]
+    if len(lines) < 2 or not lines[0] or not any(lines[1:]):
+        return ""
+    s = re.sub(r"^[#*\s]+|[*\s]+$", "", lines[0])
+    if not (2 <= len(s) <= TITLE_MAX) or s[-1] in ":,?;" or re.match(r"(?i)(chào|hi|hello|xin chào|alo)\b", s):
+        return ""
+    return s
 
 
 ASK_END = re.compile(r"\?\s*$")
@@ -106,10 +122,86 @@ def handover_text(t):
         lines += ["Quyết định / góp ý đã chốt:"] + dl
     lines += [f"Sản phẩm đã làm: trong OUTPUT {out_dir(t)} (và {STORE / 'registry.json'}) — xem file thật khi cần.",
               "Trao đổi gần nhất (cũ -> mới):"]
-    for m in ms[-8:]:
+    last_ai = max((i for i, m in enumerate(ms) if m["role"] != "user"), default=-1)
+    for i, m in enumerate(ms[-8:], len(ms) - len(ms[-8:])):
         u = m["role"] == "user"
-        lines.append(("NGƯỜI DÙNG: " if u else "AI: ") + (m.get("text") or "")[:500 if u else 700].replace("\n", " "))
-    return "\n".join(lines)[:6000]
+        lines.append(("NGƯỜI DÙNG: " if u else "AI: ") + (m.get("text") or "")[:500 if u else 3000 if i == last_ai else 700].replace("\n", " "))
+    k = lines.index("Trao đổi gần nhất (cũ -> mới):") + 1   # câu trả lời AI gần nhất giữ dài hơn (thường là kế hoạch đang bàn);
+    while len("\n".join(lines)) > 9000 and len(lines) > k + 2:    # quá dài thì bỏ trao đổi cũ nhất, không cắt mất tin mới nhất
+        lines.pop(k)
+    return "\n".join(lines)[:9000]
+
+
+GUARD_PY = r'''# Maestro: chặn lệnh xoá / di chuyển file NGOÀI thư mục được phép (hook PreToolUse của Claude Code; app tự tạo mỗi lượt).
+import json, os, re, sys, tempfile
+ALLOW = __ALLOW__
+DEL = re.compile(r"(?<![\w.-])(?:rm|rmdir|del|erase|rd|mv|move|Remove-Item|Move-Item|ri)(?![\w.-])|shutil\.(?:rmtree|move)|os\.(?:remove|unlink|rmdir)|\.unlink\(", re.I)
+WIN = os.name == "nt"
+try:
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+
+def norm(p):
+    p = p.strip().strip("\"'")
+    if p.startswith("~"):
+        p = os.path.expanduser(p)
+    m = re.match(r"^/([a-zA-Z])(/|$)(.*)", p) if WIN else None
+    if m:
+        p = m.group(1) + ":/" + m.group(3)
+    if WIN and re.match(r"^/tmp(/|$)", p):
+        p = tempfile.gettempdir() + p[4:]
+    p = os.path.normpath(p)
+    try:
+        p = os.path.realpath(p)               # tên rút gọn kiểu MINHHO~1, liên kết -> đường dẫn thật
+    except Exception:
+        pass
+    return os.path.normcase(p)
+
+
+def allowed(p):
+    if re.match(r"^/dev/null$|^nul$", p, re.I):
+        return True
+    n = norm(p)
+    roots = [norm(r) for r in ALLOW + [tempfile.gettempdir()]]
+    return any(n == r or n.startswith(r.rstrip("\\/") + os.sep) for r in roots)
+
+
+try:
+    d = json.load(sys.stdin)
+    cmd = str((d.get("tool_input") or {}).get("command") or "")
+except Exception:
+    sys.exit(0)
+if not DEL.search(cmd):
+    sys.exit(0)
+paths = [a or b for a, b in re.findall(r'"([^"]+)"|\'([^\']+)\'', cmd)]
+rest = re.sub(r'"[^"]*"|\'[^\']*\'', " ", cmd)
+paths = [p for p in paths if re.match(r"^(?:[A-Za-z]:[\\/]|/|~[\\/])", p)]
+paths += re.findall(r"(?<![\w:.])(?:[A-Za-z]:[\\/]|~[\\/]|/(?=[A-Za-z]))[^\s|;&<>()]*", rest)
+bad = [p for p in paths if not allowed(p)]
+if bad:
+    sys.stderr.write("Maestro chặn: lệnh có xoá/di chuyển file và có đường dẫn ngoài thư mục được phép (" + ", ".join(bad[:3]) +
+                     "). Chỉ xoá/di chuyển trong thư mục task, OUTPUT" + (" hoặc thư mục dự án" if len(ALLOW) > 5 else "") +
+                     ". Cần xoá file ở nơi khác thì báo người dùng tự làm. Lệnh chỉ đọc/chép từ nơi khác: tách riêng khỏi lệnh xoá.")
+    sys.exit(2)
+'''
+
+
+def guard_settings(t):
+    """Giới hạn cứng bằng mã (thay cho câu "Cấm" trong hướng dẫn): hook chặn Claude xoá / di chuyển file ngoài thư mục task,
+    OUTPUT, file người dùng gửi (và thư mục dự án của Code mode). Lỗi khi tạo hook -> chạy như cũ (không chặn nhầm)."""
+    try:
+        allow = [str(wdir(t)), str(out_dir(t)), str(tdir(t))] + ([t["pdir"]] if t.get("pdir") else []) + [
+            py_console(), str(APP)]                      # lệnh gọi app (python + app.py) hay đi kèm trong cùng dòng lệnh
+        f = wdir(t) / ".guard.py"
+        f.write_text(GUARD_PY.replace("__ALLOW__", json.dumps(allow, ensure_ascii=False)), encoding="utf-8")
+        cmd = f'"{Path(py_console()).as_posix()}" "{f.as_posix()}"'
+        return ["--settings", json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash|PowerShell", "hooks": [
+            {"type": "command", "command": cmd, "timeout": 15}]}]}}, ensure_ascii=False)]
+    except Exception as e:
+        dlog(f"guard {t.get('id')}: {e}")
+        return []
 
 
 def start_run(t):
@@ -149,8 +241,8 @@ def start_run(t):
     hard = t.get("mode") == "pro" and ef.exists() and ef.read_text("utf-8", "ignore").strip() == "xhigh"
     code = t.get("kind") == "code"
     cm, ce = pick_model(pm, "code" if code else t.get("mode", "balanced"), hard)   # Pro + bước quá khó: mức cao nhất
-    if pm == "claude" and not hard and route(t, nxt) == "ask":
-        ce = "low"                             # câu hỏi / tra cứu đơn giản: Opus mức suy nghĩ low (nhanh, đỡ hạn mức)
+    if pm == "claude" and not hard and ask_effort(t, nxt):
+        ce = ask_effort(t, nxt)                # câu hỏi nhanh: Opus mức low (nhanh, ngắn, đỡ hạn mức); hỏi "tại sao"... giữ mức chế độ
     if code:
         code_checkpoint(t)                      # điểm khôi phục trước khi sửa code (nút Khôi phục)
     t["_effort"], t["_hard"] = ce, hard
@@ -167,7 +259,7 @@ def start_run(t):
         args = [exe, "-p", build_prompt(t, nxt), "--output-format", "stream-json", "--verbose",
                 "--permission-mode", "acceptEdits",
                 "--allowedTools", "Bash,Read,Write,Edit,MultiEdit,Glob,Grep,LS,WebSearch,WebFetch,Task,Agent,TodoWrite,"
-                                  "ToolSearch,mcp__claude_ai_Google_Drive", "--model", cm]
+                                  "ToolSearch,mcp__claude_ai_Google_Drive", "--model", cm] + guard_settings(t)
         if t.get("session_started"):
             args += ["--resume", t["session"]]
         else:
@@ -186,6 +278,7 @@ def start_run(t):
                                 env=dict(os.environ, AIO_INPUT=str(tdir(t) / "input"), AIO_MODE="code" if code else t.get("mode", "balanced"),
                                          AIO_HARD="1" if t.pop("_hard", False) else "",
                                          AIO_WATCH="1" if judge_on(t) else "0",     # worker biết Giám sát bật/tắt (tắt: không gắn tiêu chí)
+                                         AIO_SOLO="1" if (LOW_SPEC or norm_mode(t.get("mode")) == "eco" or free_setup()) else "",   # 1 worker một lúc (ép bằng mã)
                                          CLAUDE_CODE_EFFORT_LEVEL=t.pop("_effort", "medium") or "medium"),
                                 creationflags=NO_WINDOW | BELOW_NORMAL)
     except Exception as e:
@@ -235,10 +328,12 @@ def too_wide(p):
     return len(p.parts) <= 1 or p.parent == Path("/Volumes") or p == home or p in home.parents
 
 
-def path_in_text(text):
-    """Thư mục người dùng/Claude nêu trong câu trả lời (vd export vào chỗ khác thư mục mặc định)."""
-    root = r"(?:[A-Za-z]:[\\/]|/Users/|/Volumes/|/home/|~/)"          # Windows (C:\...) và Mac (/Users/..., ~/...)
+def path_in_text(text, avoid=None):
+    """Thư mục người dùng/Claude nêu trong câu trả lời (vd export vào chỗ khác thư mục mặc định, kể cả ổ mạng \\\\server\\share).
+    avoid: thư mục kết quả mặc định của task -> ưu tiên đường dẫn NẰM NGOÀI nó (nơi người dùng chỉ định)."""
+    root = r"(?:[A-Za-z]:[\\/]|\\\\[^\\/\s`*\"<>|]+[\\/]|/Users/|/Volumes/|/home/|~/)"   # Windows (C:\..., \\server\share), Mac
     cands = re.findall(r"`(" + root + r"[^`\n]+)`", text or "") + re.findall(r"(" + root + r"[^\n`*\"<>|]+)", text or "")
+    found = []
     for c in cands:
         c = c.strip()
         for _ in range(200):                 # bớt dần ký tự cuối cho tới khi ra đường dẫn có thật
@@ -253,35 +348,37 @@ def path_in_text(text):
                     break
                 if too_wide(rp):
                     break                    # quá rộng (ổ đĩa, thư mục người dùng): quét sẽ rất chậm -> bỏ
-                return p
+                found.append(p)
+                break
             c = c[:-1]
-    return None
-
-
-def out_file(tid, idx, name):
-    """File kết quả gắn với 1 câu trả lời (chỉ trong thư mục của câu trả lời đó)."""
-    t = TASKS.get(tid)
-    try:
-        m = t["messages"][int(idx)]
-    except Exception:
-        return None
-    if name not in (m.get("files") or []):
-        return None
-    base = Path(m["dir"]) if m.get("dir") else out_dir(t)
-    f = (base / name).resolve()
-    try:
-        f.relative_to(base.resolve())
-    except ValueError:
-        return None
-    return f if f.is_file() else None
+    if avoid is not None:
+        try:
+            av = Path(avoid).resolve()
+            out = [p for p in found if not (p.resolve() == av or av in p.resolve().parents)]
+            if out:
+                return out[0]
+        except OSError:
+            pass
+    return found[0] if found else None
 
 
 def new_files(t, since, text=""):
-    """File mới tạo trong lượt làm; trả (danh sách, thư mục để mở)."""
-    fs = _scan(out_dir(t), since) if CFG.get("output") and t.get("folder") else []
+    """File mới tạo trong lượt làm; trả (danh sách, thư mục để mở). Câu trả lời nêu thư mục NGOÀI thư mục mặc định (người dùng
+    chỉ định, vd ổ chung) và ở đó có file mới -> mở đúng nơi đó, kể cả khi thư mục mặc định cũng có bản sao."""
+    od = out_dir(t) if CFG.get("output") and t.get("folder") else None
+    d = path_in_text(text, od)
+    if d and od is not None:
+        try:
+            outside = not (d.resolve() == od.resolve() or od.resolve() in d.resolve().parents)
+        except OSError:
+            outside = False
+        if outside:
+            fs = _scan(d, since)
+            if fs:
+                return fs[:30], str(d)
+    fs = _scan(od, since) if od is not None else []
     if fs:
         return fs[:30], ""
-    d = path_in_text(text)
     if d:
         fs = _scan(d, since)
         if fs:
@@ -402,7 +499,7 @@ def watch(t, p, nxt):
         t.pop("pid", None)
         if t.get("_quit"):
             t["status"] = "running"        # app đóng: giữ running để lần mở sau tự chạy tiếp
-        elif t.get("_redirect"):
+        elif t.get("_redirect") and not (rc0 == 0 and result and not result.get("is_error")):   # đã trả lời xong thì giữ câu trả lời
             end_work(t, "interrupted")
             t["status"] = "queued"
             t["next"] = t["_redirect"]
@@ -462,6 +559,10 @@ def watch(t, p, nxt):
             t["status"] = "queued"
             t["hold_until"], t["hold_timer"] = rz[0], True
             t["next"] = {"kind": "timer", "text": rz[1]}
+        rd = t.get("_redirect")                   # tin gửi thêm tới đúng lúc lượt vừa trả lời xong: chạy ngay sau, không mất câu trả lời
+        if rd and t["status"] in ("done", "waiting", "failed"):
+            t["next"] = {"kind": "answer" if t["status"] == "waiting" else "followup", "text": rd["text"], "files": rd["files"]}
+            t["status"] = "queued"
         qd = t.get("_queued")                     # tin nhắn gửi trong lúc lượt này chạy (đã xếp hàng): chạy ngay sau
         if qd and t["status"] in ("done", "waiting", "failed"):
             t.pop("_queued", None)

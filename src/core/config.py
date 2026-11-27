@@ -165,6 +165,8 @@ def load_cfg():
     c.setdefault("token", secrets.token_urlsafe(18))
     c.setdefault("output", "")
     c.setdefault("instructions", "")
+    if c.get("reply_style") not in ("short", "detail"):      # Cài đặt > Kiểu trả lời: mặc định ngắn gọn, dễ hiểu
+        c["reply_style"] = "short"
     if c["instructions"].startswith(OLD_DEFAULT_PREFIX):     # bỏ hướng dẫn mặc định của bản cũ
         c["instructions"] = ""
     c.setdefault("ais", {})

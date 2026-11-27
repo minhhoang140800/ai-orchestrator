@@ -108,13 +108,22 @@ EXPORT_SKIP_NAMES = {"TASK.md", "worker.log", "status.json", "result.md", "revie
 EXPORT_SKIP_DIRS = {"_backup", CODE_DRAWN}
 
 
-def export_group(out, group=""):
-    """Tên nhóm thư mục kết quả: Claude đặt bằng --group (vd icons, screenshots); không có thì đoán theo tên việc."""
+GROUP_BY_EXT = [("images", (".png", ".jpg", ".jpeg", ".webp", ".gif", ".psd", ".svg")),
+                ("sheets", (".xlsx", ".xls", ".csv")), ("slides", (".pptx",)), ("videos", (".mp4", ".mov", ".webm")),
+                ("docs", (".md", ".docx", ".pdf", ".txt", ".html"))]
+
+
+def export_group(out, group="", files=()):
+    """Tên nhóm thư mục kết quả: Claude đặt bằng --group (vd icons, screenshots); không có thì đoán theo tên việc.
+    Tên việc chỉ là mã ngắn (R1, S2...): bỏ số đi còn 1-2 ký tự vô nghĩa -> đoán theo loại file (images, docs...)."""
     g = (group or "").strip()
     if not g:
         n = out.name.lower()
         g = ("icons" if re.search(r"icon", n) else "screenshots" if re.search(r"(^|[_-])ss\d|screenshot|banner", n)
              else re.sub(r"([_-]?v\d+|[_-]?\d+)+$", "", out.name) or out.name)
+        if len(g) < 3:
+            exts = [Path(str(f)).suffix.lower() for f in files]
+            g = next((name for name, ext in GROUP_BY_EXT if exts and sum(e in ext for e in exts) * 2 >= len(exts)), "ket_qua")
     return safe_name(g, 40)
 
 
@@ -131,7 +140,7 @@ def export_products(st, v, out, proj, group=""):
     if not files:
         return
     n = int(v.name[1:]) if re.fullmatch(r"v\d+", v.name) else 1
-    g = export_group(out, group)
+    g = export_group(out, group, files)
     old = sorted((d for d in proj.parent.glob("*-" + g) if d.is_dir() and re.fullmatch(r"\d{8}-" + re.escape(g), d.name)), reverse=True)
     dst = old[0] if old else proj.parent / (datetime.date.today().strftime("%Y%m%d") + "-" + g)   # nhóm đã có (hôm trước) -> dùng lại
     dst.mkdir(parents=True, exist_ok=True)

@@ -250,6 +250,9 @@ main.drop::after{content:"Thả file vào đây";position:absolute;inset:8px;bor
 main{position:relative}
 .mdt{overflow-x:auto;margin:8px 0}.mdt table{border-collapse:collapse;font-size:13px;width:100%}.mdt th,.mdt td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
 .mdt th{background:var(--soft);font-weight:600}
+details.mdd{margin:10px 0 2px;border-top:1px solid var(--line);padding-top:8px}details.mdd>summary{cursor:pointer;font-size:13px;color:var(--mute);list-style:none;user-select:none}
+details.mdd>summary::before{content:"\25B8";display:inline-block;width:14px;transition:transform .15s}details.mdd[open]>summary::before{transform:rotate(90deg)}
+details.mdd[open]>summary{margin-bottom:6px}details.mdd>summary::-webkit-details-marker{display:none}
 .dec .dx{margin-right:6px;font-size:16px;line-height:1;color:var(--mute);width:28px;height:28px;padding:0}.dec .dx:hover{color:var(--ink)}
 .mhead{display:flex;align-items:center;position:relative}.hicons{display:flex;gap:2px;margin:-6px -8px -6px 0;position:relative}.hicons .icon{width:34px;height:34px;color:var(--mute)}.hicons .icon.on{background:var(--soft,#f0f0f0);color:var(--ink,#202020)}
 .ppop{position:absolute;right:0;top:calc(100% + 8px);width:244px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:14px;z-index:30;font-size:13px;font-weight:400;text-align:center}
@@ -261,6 +264,9 @@ main{position:relative}
 .rqr{display:flex;gap:14px;align-items:flex-start;margin-top:10px}.rqr .qr{flex:none;width:148px;height:148px;background:#fff;border:1px solid var(--line,#e5e5e5);border-radius:10px;padding:6px;box-sizing:border-box}.rqr .qr svg{width:100%;height:100%;display:block}.rtx{font-size:13px;line-height:1.5;display:flex;flex-direction:column;gap:6px}.rtx span{color:var(--mute)}@media (max-width:560px){.rqr{flex-direction:column}}
 .sw{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px}.sw input{width:16px;height:16px;accent-color:#202020}
 .ed{position:fixed;inset:0;background:rgba(17,17,17,.82);display:none;z-index:40}.ed.show{display:block}
+.edclose{position:absolute;top:max(10px,env(safe-area-inset-top));right:10px;z-index:3;width:40px;height:40px;border-radius:50%;border:1px solid #444;background:#1f1f1f;color:#fff;font-size:22px;line-height:1;padding:0}
+.edclose:hover{background:#2e2e2e}
+@media (max-width:700px){.edbar{max-width:calc(100vw - 16px);overflow-x:auto;justify-content:flex-start;bottom:max(10px,env(safe-area-inset-bottom))}.edbar>*{flex:none}}
 .edst{position:absolute;inset:0 0 72px 0;overflow:hidden;touch-action:none}
 .edst canvas{position:absolute;left:0;top:0;transform-origin:0 0;box-shadow:0 8px 30px rgba(0,0,0,.4);image-rendering:auto}
 .edtx{position:absolute;display:none;min-width:180px;border:1px solid #fff;background:rgba(0,0,0,.6);color:#fff;border-radius:6px;padding:4px 8px;font:14px Inter,system-ui}
@@ -434,6 +440,7 @@ display:flex;align-items:center;justify-content:center;background:#fff;border:1p
 <div class="pop smenu" id="sMenu" role="menu" style="position:fixed"></div>
 <div class="pop hmenu" id="hMenu" role="menu" style="position:fixed"></div>
 <div class="ed" id="ed">
+  <button class="edclose" id="edClose" title="Đóng (Esc)" aria-label="Đóng">×</button>
   <div class="edst" id="edSt"><canvas id="edC"></canvas><input id="edTx" class="edtx" type="text" placeholder="Nhập chữ, Enter"></div>
   <div class="edbar" id="edBar">
     <button data-tool="hand" title="Kéo ảnh (H)"><svg class="i" viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10V4.5a1.5 1.5 0 0 1 3 0V11M14 10.5V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L3 14.5a1.5 1.5 0 0 1 2.5-1.6L8 15.5"/></svg></button>
@@ -1578,9 +1585,18 @@ document.addEventListener("drop", (e) => {
   files.push(...e.dataTransfer.files); renderAtts(); $("txt").focus();
 });
 function mdInline(l) { return l.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<i>$2</i>"); }
-function md(s) {      // markdown gọn: tiêu đề, danh sách (•/1.), bảng, khối code — chỉ đổi cách hiển thị, không đổi nội dung
-  const out = []; let list = "", tb = null, code = null;
-  const endList = () => { if (list) { out.push(`</${list}>`); list = ""; } };
+function md(s) {      // markdown gọn: tiêu đề, danh sách lồng nhau (•/1.), bảng, khối code; "## Chi tiết" -> khối thu gọn
+  const out = []; let tb = null, code = null, det = false;
+  const st = [];        // danh sách đang mở (lồng nhau): {k: "ul"|"ol", ind: số dấu cách đầu dòng}; mục cuối của mỗi cấp còn mở <li>
+  const endList = (ind = -1) => { while (st.length && st[st.length - 1].ind > ind) out.push(`</li></${st.pop().k}>`); };
+  const item = (k, ind, n, body) => {
+    endList(ind);                                           // đóng các cấp sâu hơn
+    const top = st[st.length - 1];
+    if (top && top.ind === ind && top.k !== k) { endList(ind - 1); }   // cùng cấp nhưng đổi kiểu (• <-> 1.)
+    const cur = st[st.length - 1];
+    if (cur && cur.ind === ind) out.push(`</li><li>${body}`);
+    else { out.push(`<${k}${k === "ol" && n > 1 ? ` start="${n}"` : ""}><li>${body}`); st.push({ k, ind }); }   // mở cấp mới (nằm trong mục cha) — số đếm tiếp đúng số đang viết
+  };
   const flushT = () => { if (!tb) return; const rows = tb.filter((r) => !/^\|?\s*:?-{2,}/.test(r)).map((r) => r.replace(/^\||\|$/g, "").split("|").map((c) => mdInline(c.trim())));
     out.push(`<div class="mdt"><table>${rows.map((r, i) => `<tr>${r.map((c) => i ? `<td>${c}</td>` : `<th>${c}</th>`).join("")}</tr>`).join("")}</table></div>`); tb = null; };
   for (const raw of esc(s).split("\n")) {
@@ -1589,18 +1605,23 @@ function md(s) {      // markdown gọn: tiêu đề, danh sách (•/1.), bản
     if (/^\s*\|.*\|\s*$/.test(raw)) { endList(); (tb = tb || []).push(raw.trim()); continue; }
     flushT();
     const l = mdInline(raw);
-    const ul = l.match(/^(\s*)[-*•] (.*)$/), ol = l.match(/^(\s*)\d{1,3}[.)] (.*)$/), h = l.match(/^(#{1,4}) (.*)$/);
-    if (ul || ol) {
-      const k = ul ? "ul" : "ol", m = ul || ol;
-      if (list !== k) { endList(); out.push(`<${k}>`); list = k; }
-      out.push(`<li${m[1].length ? ` style="margin-left:${Math.min(m[1].length, 8) * 8}px"` : ""}>${m[2]}</li>`); continue;
+    if (!det && /^\s*(?:#{1,4}\s*|\*\*|<b>)?\s*(?:Chi tiết|Chi tiết kỹ thuật)\s*:?\s*(?:\*\*|<\/b>)?\s*:?\s*$/i.test(l)) {   // phần chi tiết kỹ thuật: thu gọn
+      endList(); out.push(`<details class="mdd"><summary>Xem chi tiết</summary>`); det = true; continue;
     }
-    if (list && !l.trim()) continue;           // dòng trống giữa các mục vẫn giữ cùng danh sách
+    const ul = l.match(/^(\s*)[-*•] (.*)$/), ol = l.match(/^(\s*)(\d{1,3})[.)] (.*)$/), h = l.match(/^(#{1,4}) (.*)$/);
+    if (ul) {      // gạch đầu dòng sát lề ngay dưới mục số "1." (AI hay viết vậy): coi là dòng con của mục số, không ngắt danh sách số
+      const top = st[st.length - 1], ind = ul[1].length;
+      item("ul", top && top.k === "ol" && ind <= top.ind ? top.ind + 1 : (st.find((x) => x.k === "ol" && x.ind === ind) && top.k === "ul" && top.ind > ind ? top.ind : ind), 1, ul[2]); continue;
+    }
+    if (ol) { item("ol", ol[1].length, +ol[2], ol[3]); continue; }
+    if (st.length && !l.trim()) continue;           // dòng trống giữa các mục vẫn giữ cùng danh sách
+    if (st.length && /^\s{2,}\S/.test(l)) { out.push(`<br>${l.trim()}`); continue; }   // dòng thụt vào dưới 1 mục: thuộc mục đó
     endList();
     out.push(h ? `<h${h[1].length <= 2 ? 2 : 3}>${h[2]}</h${h[1].length <= 2 ? 2 : 3}>` : l.trim() ? `<p>${l}</p>` : "");
   }
   if (code) out.push(`<pre><code>${code.join("\n")}</code></pre>`);
   flushT(); endList();
+  if (det) out.push("</details>");
   return out.join("");
 }
 function dur(sec) { sec = Math.max(0, Math.round(sec)); const m = Math.floor(sec / 60), s = sec % 60; return m ? `${m}m ${s}s` : `${s}s`; }
@@ -1664,7 +1685,11 @@ function patchThread(el, parts) {     // chỉ thay tin nhắn có thay đổi (
   parts.forEach((h, i) => {
     let k = kids[i];
     if (!k) { k = document.createElement("div"); k.className = "mpart"; el.appendChild(k); }
-    if (k._h !== h) { k.innerHTML = h; k._h = h; }
+    if (k._h !== h) {
+      const op = [...k.querySelectorAll("details.mdd")].map((d) => d.open);    // giữ khối "Xem chi tiết" đang mở khi tin nhắn vẽ lại
+      k.innerHTML = h; k._h = h;
+      if (op.some(Boolean)) k.querySelectorAll("details.mdd").forEach((d, j) => { if (op[j]) d.open = true; });
+    }
   });
   while (kids.length > parts.length) el.lastElementChild.remove();
 }
@@ -1705,7 +1730,7 @@ document.addEventListener("click", (e) => {      // bấm ảnh: xem lớn + đ�
   edOpen(src, a.dataset.fi != null ? +a.dataset.fi : -1, (a.getAttribute("title") || a.getAttribute("alt") || "anh").split("/").pop());
 }, true);
 /* ---------------- bộ đánh dấu ảnh: kéo, bút, khung, mũi tên, chữ, màu, nét, hoàn tác, zoom ---------------- */
-const ED = { img: null, shapes: [], tool: "rect", color: "#FF9F1C", w: 1, z: 1, x: 0, y: 0, fi: -1, name: "", cur: null, drag: null };
+const ED = { pts: new Map(), pinch: null, tap: null, img: null, shapes: [], tool: "hand", color: "#FF9F1C", w: 1, z: 1, x: 0, y: 0, fi: -1, name: "", cur: null, drag: null };
 // màu theo quy ước chú thích ảnh: đỏ = lỗi/cần xoá, cam = chỗ cần xem/thêm (mặc định); còn lại để phân biệt
 const ECOLS = ["#FF9F1C", "#E63946", "#30A46C", "#3E63DD", "#FFFFFF", "#111111"], EWID = [3, 5, 9];
 const CNAME = { "#FF9F1C": "cam", "#E63946": "đỏ", "#30A46C": "xanh lá", "#3E63DD": "xanh dương", "#FFFFFF": "trắng", "#111111": "đen" };
@@ -1713,11 +1738,12 @@ $("edCols").innerHTML = ECOLS.map((c) => `<button class="edc" data-col="${c}" st
 function edLw() { return EWID[ED.w] * Math.max(1, ED.img.naturalWidth / 900); }
 function edOpen(src, fi, name) {
   const im = new Image();
-  im.onload = () => { Object.assign(ED, { img: im, shapes: [], fi, name, cur: null }); const c = $("edC"); c.width = im.naturalWidth; c.height = im.naturalHeight; $("ed").classList.add("show"); edFit(); edTool(ED.tool); edDraw(); };
+  im.onload = () => { Object.assign(ED, { img: im, shapes: [], fi, name, cur: null }); const c = $("edC"); c.width = im.naturalWidth; c.height = im.naturalHeight; $("ed").classList.add("show"); edFit(); edTool("hand"); edDraw(); };
   im.onerror = () => toast("Không mở được ảnh");
   im.src = src;
 }
-function edClose() { $("ed").classList.remove("show"); $("edTx").style.display = "none"; ED.img = null; }
+function edClose() { $("ed").classList.remove("show"); $("edTx").style.display = "none"; ED.img = null; ED.pts.clear(); ED.pinch = null; ED.drag = null; ED.cur = null; }
+$("edClose").onclick = edClose;
 function edFit() { const st = $("edSt").getBoundingClientRect(); ED.z = Math.min(1, (st.width - 40) / ED.img.naturalWidth, (st.height - 40) / ED.img.naturalHeight); ED.x = (st.width - ED.img.naturalWidth * ED.z) / 2; ED.y = (st.height - ED.img.naturalHeight * ED.z) / 2; edView(); }
 function edView() { $("edC").style.transform = `translate(${ED.x}px,${ED.y}px) scale(${ED.z})`; $("edZ").textContent = Math.round(ED.z * 100) + "%"; }
 function edZoom(f, cx, cy) {
@@ -1750,19 +1776,47 @@ $("edBar").onclick = (e) => {
   else if (b.id === "edSave") edSave();
 };
 $("edSt").addEventListener("wheel", (e) => { if (!ED.img) return; e.preventDefault(); const r = $("edSt").getBoundingClientRect(); edZoom(e.deltaY < 0 ? 1.12 : 0.89, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+function edPinchStart() {       // 2 ngón: chụm/mở để phóng to, kéo để di chuyển (bỏ nét đang vẽ dở)
+  const [a, b] = [...ED.pts.values()], r = $("edSt").getBoundingClientRect();
+  ED.cur = null; ED.drag = null; ED.tap = null;
+  ED.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, cx: (a.x + b.x) / 2 - r.left, cy: (a.y + b.y) / 2 - r.top, z: ED.z, x: ED.x, y: ED.y };
+  edDraw();
+}
 $("edSt").addEventListener("pointerdown", (e) => {
-  if (!ED.img || e.target.id === "edTx") return; const p = edPt(e);
-  if (ED.tool === "hand" || e.button === 1) { ED.drag = { sx: e.clientX, sy: e.clientY, x: ED.x, y: ED.y }; $("edSt").style.cursor = "grabbing"; }
+  if (!ED.img || e.target.id === "edTx") return;
+  ED.pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); $("edSt").setPointerCapture(e.pointerId);
+  if (ED.pts.size === 2) return edPinchStart();
+  if (ED.pts.size > 2) return;
+  const p = edPt(e);
+  if (ED.tool === "hand" || e.button === 1) {
+    ED.drag = { sx: e.clientX, sy: e.clientY, x: ED.x, y: ED.y }; $("edSt").style.cursor = "grabbing";
+    const out = p.x < 0 || p.y < 0 || p.x > ED.img.naturalWidth || p.y > ED.img.naturalHeight;
+    ED.tap = out ? { x: e.clientX, y: e.clientY, t: Date.now() } : null;        // chạm nhẹ ra ngoài ảnh (chế độ xem) -> đóng
+  }
   else if (ED.tool === "text") { const tx = $("edTx"), r = $("edSt").getBoundingClientRect(); tx.style.left = e.clientX - r.left + "px"; tx.style.top = e.clientY - r.top + "px"; tx.style.display = "block"; tx.value = ""; tx.dataset.x = p.x; tx.dataset.y = p.y; setTimeout(() => tx.focus(), 0); return; }
   else if (ED.tool === "num") { ED.shapes.push({ t: "num", c: ED.color, w: edLw(), a: p, n: ED.shapes.filter((x) => x.t === "num").length + 1 }); edDraw(); return; }
   else ED.cur = ED.tool === "pen" ? { t: "pen", c: ED.color, w: edLw(), p: [p] } : { t: ED.tool, c: ED.color, w: edLw(), a: p, b: p };
-  $("edSt").setPointerCapture(e.pointerId);
 });
 $("edSt").addEventListener("pointermove", (e) => {
+  if (ED.pts.has(e.pointerId)) ED.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (ED.pinch && ED.pts.size >= 2) {
+    const [a, b] = [...ED.pts.values()], r = $("edSt").getBoundingClientRect(), P = ED.pinch;
+    const nz = Math.min(8, Math.max(0.05, P.z * Math.hypot(a.x - b.x, a.y - b.y) / P.d)), cx = (a.x + b.x) / 2 - r.left, cy = (a.y + b.y) / 2 - r.top;
+    ED.x = cx - (P.cx - P.x) * (nz / P.z); ED.y = cy - (P.cy - P.y) * (nz / P.z); ED.z = nz; return edView();
+  }
   if (ED.drag) { ED.x = ED.drag.x + e.clientX - ED.drag.sx; ED.y = ED.drag.y + e.clientY - ED.drag.sy; return edView(); }
   if (!ED.cur) return; const p = edPt(e); if (ED.cur.t === "pen") ED.cur.p.push(p); else ED.cur.b = p; edDraw();
 });
-$("edSt").addEventListener("pointerup", () => { if (ED.drag) { ED.drag = null; edTool(ED.tool); } if (ED.cur) { ED.shapes.push(ED.cur); ED.cur = null; edDraw(); } });
+const edUp = (e) => {
+  ED.pts.delete(e.pointerId);
+  if (ED.pinch) { if (ED.pts.size < 2) ED.pinch = null; if (!ED.pts.size) edTool(ED.tool); return; }
+  const tap = ED.tap; ED.tap = null;
+  if (tap && e.type === "pointerup" && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 8 && Date.now() - tap.t < 400) return edClose();
+  if (ED.drag) { ED.drag = null; edTool(ED.tool); }
+  if (ED.cur) { ED.shapes.push(ED.cur); ED.cur = null; edDraw(); }
+};
+$("edSt").addEventListener("pointerup", edUp);
+$("edSt").addEventListener("pointercancel", edUp);
 $("edTx").addEventListener("keydown", (e) => {
   e.stopPropagation(); const tx = $("edTx");
   if (e.key === "Enter" && tx.value.trim()) { ED.shapes.push({ t: "text", c: ED.color, w: edLw(), s: tx.value.trim(), a: { x: +tx.dataset.x, y: +tx.dataset.y } }); tx.style.display = "none"; edDraw(); }
@@ -1833,7 +1887,6 @@ function composer(id, ph) {
     <div class="bar"><span class="msel"><button class="ghost icon attach" id="bFile" title="Đính kèm file (hoặc dán Ctrl+V / kéo thả)" aria-label="Đính kèm file">${lu("plus")}</button><div class="pop tmenu" id="tplMenu" role="menu"></div></span>
       <span style="flex:1"></span><span class="hint" id="cHint"></span>
       <span class="msel"><button class="mbtn" id="modeBtn" type="button" aria-haspopup="true" title="Chế độ làm việc"></button><div class="pop mmenu" id="modeMenu" role="menu"></div></span>
-      <button class="ghost icon" id="bUrgent" type="button" hidden title="Gửi gấp: ngắt lượt đang làm để Claude đổi hướng ngay" aria-label="Gửi gấp">${lu("zap")}</button>
       <button class="pri sq" id="bSend" title="Gửi (Enter · Shift+Enter xuống dòng)" aria-label="Gửi">${I.send}</button></div></div>`;
 }
 const MODE = { pro: ["Pro", "Suy nghĩ sâu, chấm kĩ, tốn hạn mức"], balanced: ["Balanced", "Cân bằng chất lượng và tốc độ"], turbo: ["Turbo", "Nhanh nhất, giảm thẩm định"], eco: ["Eco", "Ít hạn mức nhất, chậm hơn"], code: ["Code", "Mạnh về coding, tự chạy thử"] };
@@ -1863,10 +1916,9 @@ const STOP = '<svg class="i" viewBox="0 0 24 24"><rect x="7" y="7" width="10" he
 function stopMode() { return !!(T && $("taskComp") && T.status === "running" && !$("txt").value.trim() && !files.length); }
 function sendIcon() {
   const b = $("bSend"); if (!b || b.disabled) return; const st = stopMode();
-  const queue = !!(T && $("taskComp") && T.status === "running" && !st);     // đang chạy + có chữ: tin sẽ xếp hàng (không ngắt)
+  const queue = !!(T && $("taskComp") && T.status === "running" && !st);     // đang chạy + có chữ: Claude nhận ngay, làm cùng
   b.innerHTML = st ? STOP : I.send; b.classList.add("sq");
-  b.title = st ? "Dừng và hủy task đang làm" : queue ? "Gửi: chạy ngay sau lượt đang làm (không ngắt)" : "Gửi (Enter · Shift+Enter xuống dòng)";
-  const u = $("bUrgent"); if (u) u.hidden = !queue;
+  b.title = st ? "Dừng và hủy task đang làm" : queue ? "Gửi thêm: Claude nhận ngay và làm cùng việc đang dở (worker vẫn chạy)" : "Gửi (Enter · Shift+Enter xuống dòng)";
 }
 const DRAFT = {};          // bản nháp ô nhập riêng cho từng đoạn chat (chữ + file đính kèm); chữ giữ cả khi tải lại trang
 let dKey = "";
@@ -1882,7 +1934,6 @@ function bindComposer(onSend) {
   ta.value = dr ? dr.text : (sessionStorage.getItem("draft:" + dKey) || ""); files = dr ? dr.files.slice() : [];
   $("bFile").onclick = () => $("fileIn").click();
   $("bSend").onclick = () => { if (!stopMode()) return onSend(); if (confirm("Hủy task đang làm?")) api("/api/task/act", { id: T.id, action: "cancel" }).then(kick); };
-  if ($("bUrgent")) $("bUrgent").onclick = () => onSend(true);
   ta.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); onSend(); }
   });
@@ -2289,15 +2340,15 @@ function startRename() {
   inp.onblur = () => done(true);
 }
 function annMeta() { const a = files.map((f) => f._ann).filter(Boolean); return a.length ? "\n\n" + a.join("\n") : ""; }
-async function sendMore(urgent) {
+async function sendMore() {
   const text = ($("txt").value.trim() + annMeta()).trim(); if (!text && !files.length && !curTpl) return $("txt").focus();
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   busy(true);
   try {
     const names = [];
     for (const [i, f] of files.entries()) { busy(true, `${i + 1}/${files.length}`); names.push(await upload(T.id, f)); }
-    const r = await api("/api/task/act", { id: T.id, action: "send", text, files: names, template: curTpl, urgent: urgent === true }); if (r.error) throw new Error(r.error);
-    if (T.status === "running") toast(urgent === true ? "Đã gửi gấp: Claude dừng lượt đang làm để đổi hướng" : "Đã xếp hàng: chạy ngay sau lượt đang làm");
+    const r = await api("/api/task/act", { id: T.id, action: "send", text, files: names, template: curTpl, }); if (r.error) throw new Error(r.error);
+    if (T.status === "running") toast("Đã gửi: Claude nhận ngay và làm cùng việc đang dở");
     files = []; curTpl = ""; $("txt").value = ""; $("txt").placeholder = PH_MORE; fit($("txt")); renderAtts(); busy(false); T = null; lastSnap = ""; await refresh(); kick();
   } catch (e) { toast(e.message); busy(false); }
 }
@@ -2490,6 +2541,7 @@ function renderSettings() {      // vẽ lại định kỳ: giữ nguyên vị 
   $("mbody").innerHTML = `<div class="f"><span class="k">Tài khoản AI${st.free ? ` <span class="plan">Chế độ Free</span>` : st.pm === "codex" ? ` <span class="plan">ChatGPT làm quản lý</span>` : ""}</span>${acc}</div>${gkBox}
     <div class="f"><span class="k">Thư mục nhận kết quả</span><div class="row"><span class="path" title="${esc(form.output)}">${esc(form.output || "Chưa chọn")}</span><button id="oPick" class="${form.output ? "" : "pri"}">Chọn…</button></div></div>
     <div class="f"><span class="k">Memory</span>
+      <div class="row" style="margin-bottom:8px"><span style="flex:1;font-size:13px;color:var(--mute)">Kiểu trả lời</span><div class="seg" id="rStyle"><button data-rs="short" class="${(S.reply_style || "short") === "short" ? "on" : ""}" title="Câu đầu trả lời thẳng, lời thường; chi tiết kỹ thuật thu gọn trong Xem chi tiết">Ngắn gọn, dễ hiểu</button><button data-rs="detail" class="${S.reply_style === "detail" ? "on" : ""}" title="Kèm đủ chi tiết kỹ thuật (file, lệnh, nguyên nhân)">Chi tiết</button></div></div>
       <textarea id="memTxt" rows="4" style="width:100%;box-sizing:border-box" placeholder="Ghi nhớ cho mọi task — vd: Xưng hô tôi – bạn. Trả lời ngắn, tiếng Việt.">${esc(S.instructions || "")}</textarea>
       <details style="margin-top:6px"${S.mem_auto ? "" : " hidden"}><summary style="cursor:pointer;font-size:12px;color:var(--mute)">Maestro tự ghi nhớ (cách làm việc, lịch sử) — sửa hoặc xoá được</summary>
         <textarea id="memAuto" rows="8" style="width:100%;box-sizing:border-box;margin-top:6px;font-size:12px">${esc(S.mem_auto || "")}</textarea></details>
@@ -2527,6 +2579,12 @@ function renderSettings() {      // vẽ lại định kỳ: giữ nguyên vị 
   if ($("gSave")) $("gSave").onclick = () => { const v = $("gKey").value.trim(); if (v) saveKey(v); else $("gKey").focus(); };
   if ($("gGet")) $("gGet").onclick = () => { window.open("https://aistudio.google.com/apikey", "_blank"); keyWait = true; renderSettings(); };
   if ($("gDel")) $("gDel").onclick = () => { if (confirm("Xoá Gemini API key khỏi máy này?")) saveKey(""); };
+  document.querySelectorAll("#rStyle [data-rs]").forEach((b) => b.onclick = async () => {
+    const v = b.dataset.rs; if (v === (S.reply_style || "short")) return;
+    const r = await api("/api/memory", { reply_style: v }); if (r.error) return toast(r.error);
+    S.reply_style = v; document.querySelectorAll("#rStyle [data-rs]").forEach((x) => x.classList.toggle("on", x.dataset.rs === v));
+    toast(v === "short" ? "Kiểu trả lời: ngắn gọn, dễ hiểu" : "Kiểu trả lời: chi tiết");
+  });
   let memT = 0;      // ghi nhớ tự lưu khi ngừng gõ (không cần nút Lưu)
   const memSave = async () => { clearTimeout(memT); const v = $("memTxt")?.value ?? ""; if (v === (S.instructions || "")) return; const r = await api("/api/memory", { instructions: v }); if (r.error) toast(r.error); else { S.instructions = v; toast("Đã lưu ghi nhớ"); } };
   $("memTxt").oninput = () => { clearTimeout(memT); memT = setTimeout(memSave, 1200); };
@@ -2561,6 +2619,16 @@ async function clipCheck() {   // quay lại tab Maestro: tự dán mã đăng n
 }
 addEventListener("focus", clipCheck);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) clipCheck(); });
+// bấm/chạm ra ngoài: đóng menu, popup và Cài đặt. Dùng pointerdown (trên iPhone, chạm vào vùng trống KHÔNG sinh sự kiện click
+// lên document nên các handler "click" cũ không đóng được -> phải tải lại trang)
+document.addEventListener("pointerdown", (e) => {
+  const tg = e.target instanceof Element ? e.target : null; if (!tg) return;
+  const off = (id, keep) => { const m = $(id); if (m && m.classList.contains("show") && !tg.closest(keep)) m.classList.remove("show"); };
+  off("pMenu", "#pMenu,#pBtn"); off("tplMenu", "#tplMenu"); off("hMenu", "#hMenu,#bMore"); off("uMenu", "#uMenu,#btnUse"); off("cMenu", "#cMenu");
+  if ($("modeMenu")?.classList.contains("show") && !tg.closest("#modeMenu,#modeBtn")) { $("modeMenu").classList.remove("show"); $("modeBtn")?.setAttribute("aria-expanded", "false"); }
+  if ($("sMenu").classList.contains("show") && !tg.closest("#sMenu,[data-more]")) closeSMenu();
+  if ($("ov").classList.contains("show") && tg === $("ov")) closeSettings();          // chạm nền mờ quanh Cài đặt
+}, true);
 function closeSettings() {
   $("ov").classList.remove("show"); chain = false;
   if ($("homeComp") && !$("txt").value.trim()) renderHome();   // banner chế độ Free/đăng nhập đổi theo tài khoản vừa sửa

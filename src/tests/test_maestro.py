@@ -174,8 +174,11 @@ class Prompts(unittest.TestCase):
 
     def test_kept_sections_only(self):
         _, md = self._md("balanced", text="Cho tôi idea, mỗi loại vào 1 Concept Board")
-        for keep in ("## Vai trò", "## Đường dẫn", "## Worker", "## Nghiệm thu", "## Khi cần người dùng quyết định", "## Chế độ:", "## Cấm"):
+        for keep in ("## Hướng dẫn của người dùng", "## Vai trò", "## Thư mục", "## Worker", "## Nghiệm thu", "## Chế độ:",
+                     "## Hỏi người dùng giữa chừng", "## Đọc thêm khi cần"):
             self.assertIn(keep, md)
+        for gone in ("## Khi cần người dùng quyết định", "## Cấm", "## Đường dẫn"):    # v14: không còn luật cách làm việc trong mã chung
+            self.assertNotIn(gone, md)
 
     def test_windows_paths_in_code_mode(self):          # lỗi cũ: bad escape \\U khi đường dẫn Windows lọt vào re.sub
         r = NS["new_task"]("sửa code", mode="code")
@@ -259,12 +262,12 @@ class V119(unittest.TestCase):
         NS["write_claude_md"](t2)
         self.assertIn("viết tasks/criteria.md", (NS["wdir"](t2) / "CLAUDE.md").read_text(encoding="utf-8"))
 
-    def test_memory_drops_ab_rule(self):
+    def test_memory_keeps_user_ab_rule(self):                     # v14: sở thích riêng của người dùng nằm ở ghi nhớ, app không lọc bỏ
         NS["mem_save"]("## Cách làm việc\n- Xưng hô tôi – bạn\n- Hỏi lựa chọn: tối đa 3 câu, trình bày A/B/C.")
         try:
             m = NS["mem_text"]()
             self.assertIn("Xưng hô", m)
-            self.assertNotIn("A/B/C", m)
+            self.assertIn("A/B/C", m)
         finally:
             NS["mem_save"]("")
 
@@ -276,22 +279,25 @@ class V123(unittest.TestCase):
         return t
 
     def test_message_while_running_is_queued(self):
-        """K1: tin nhắn lúc đang chạy -> xếp hàng, KHÔNG ngắt; nút Gửi gấp mới ngắt."""
+        """v14: bỏ nút Gửi gấp. Tin nhắn lúc đang chạy (mọi chế độ, cả Code) -> Claude nhận ngay để làm cùng: ngắt lượt Claude 1 lần
+        (worker vẫn chạy), tin tới tiếp trước khi lượt mới chạy thì gộp, không ngắt lại."""
         t = self._t("K1a")
         killed = []
         old = NS["kill_tree"]
         NS["kill_tree"] = lambda p: killed.append(p)
         try:
             NS["act"]("K1a", "send", "thêm 1 icon nữa")
-            NS["act"]("K1a", "send", "nền xanh")
-            self.assertEqual(killed, [])
-            self.assertEqual(t["_queued"]["text"], "thêm 1 icon nữa\n\nnền xanh")
-            self.assertFalse(t.get("_redirect"))
-            NS["act"]("K1a", "send", "dừng, đổi sang 5 icon", urgent=True)
             self.assertEqual(len(killed), 1)
             self.assertEqual(t["_redirect"]["kind"], "urgent")
-            self.assertIn("nền xanh", t["_redirect"]["text"])          # tin đã xếp hàng được gộp vào tin gấp
+            NS["act"]("K1a", "send", "nền xanh")
+            self.assertEqual(len(killed), 1)                           # đã ngắt rồi: chỉ gộp
+            self.assertEqual(t["_redirect"]["text"], "thêm 1 icon nữa\n\nnền xanh")
             self.assertNotIn("_queued", t)
+            p = NS["_build_prompt"]({**t, "session_started": True}, t["_redirect"])
+            self.assertIn("làm cùng với việc đang dở", p)
+            self.assertIn("worker đã giao vẫn chạy tiếp", p)
+            ui = (SRC / "web" / "ui.html").read_text(encoding="utf-8")
+            self.assertNotIn("bUrgent", ui)                            # không còn nút Gửi gấp
         finally:
             NS["kill_tree"] = old
             NS["TASKS"].pop("K1a", None)
@@ -376,7 +382,7 @@ class V124(unittest.TestCase):
         try:
             m = NS["mem_text"]()
             self.assertIn("Gọi Hoàng", m)
-            self.assertNotIn("Còn tồn tại", m)
+            self.assertIn("Còn tồn tại", m)                          # v14: khuôn báo cáo người dùng muốn -> giữ (ghi nhớ của từng người)
         finally:
             NS["mem_save"]("")
 
@@ -742,15 +748,12 @@ class V129(unittest.TestCase):
             self.assertIn("app không tự chuyển worker", md)
             self.assertEqual("xhigh vào tasks/effort.txt" in md, mode == "pro")
 
-    def test_memory_drops_choose_habit(self):
-        NS["mem_save"]("## Cách làm việc\n- Gọi Hoàng\n- Luôn đưa 2-3 phương án để Hoàng chọn trước khi làm.\n- Báo cáo có mục \"Đã kiểm tra\".")
-        try:
-            m = NS["mem_text"]()
-            self.assertIn("Gọi Hoàng", m)
-            self.assertNotIn("phương án", m)
-            self.assertNotIn("Đã kiểm tra", m)
-        finally:
-            NS["mem_save"]("")
+    def test_memory_prompt_user_only(self):                       # v14: bộ nhớ đọc Cài đặt (không chép trùng), chỉ học điều người dùng nói
+        p = NS["MEM_PROMPT"]
+        self.assertIn("{inst}", p)
+        self.assertIn("KHÔNG ghi thói quen của AI", p)
+        self.assertNotIn("mặc định AI tự", p)
+        self.assertNotIn("ASK_FMT_RE", NS)
 
 
 class NoConsole(unittest.TestCase):
@@ -802,8 +805,8 @@ class ResumeTimer(unittest.TestCase):
         t = {"id": "RT4", "text": "x", "mode": "balanced", "folder": "03 - Hẹn", "watch": False}
         NS["write_claude_md"](t)
         md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("Worker hết lượt: BẠN tự quyết chuyển hay chờ", md)
-        self.assertIn("KHÔNG viết vòng lặp sleep", md)
+        self.assertIn("Hết lượt: chuyển bên kia, hoặc ghi", md)
+        self.assertIn("Không viết vòng lặp sleep", md)
         self.assertIn("tasks/resume_at.txt", md)
         t.update(session_started=True)
         p = NS["_build_prompt"](t, {"kind": "timer", "text": "vẽ lại 3 ảnh"})
@@ -837,16 +840,17 @@ class AskOnlyMidway(unittest.TestCase):
         self.assertEqual(NS["strip_ask"]("Kết quả:\n- Vì sao lỗi: do hết lượt.\n- File: a.png"),
                          "Kết quả:\n- Vì sao lỗi: do hết lượt.\n- File: a.png")
 
-    def test_prompt_decides_itself(self):
+    def test_prompt_only_mechanism(self):
+        """v14: mã chung chỉ dạy cách dùng Maestro (nút hỏi giữa chừng); khi nào hỏi, cách báo cáo, git: theo người dùng."""
         t = {"id": "AQ1", "text": "x", "mode": "balanced", "folder": "04 - Hỏi", "watch": False}
         NS["write_claude_md"](t)
         md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("MẶC ĐỊNH TỰ QUYẾT", md)
-        self.assertIn("KHÔNG kết thúc câu trả lời bằng câu hỏi", md)
         self.assertIn("app hiện thành nút bấm", md)
-        self.assertIn("KHÔNG chép lại câu hỏi", md)
-        self.assertNotIn("Lựa chọn dạng nút bấm là TUỲ CHỌN", md)
-        self.assertIn("KHÔNG thêm mục \"Đã kiểm tra\", \"Còn tồn tại\"", md)          # không kèm khuôn báo cáo
+        self.assertIn("không chép lại câu hỏi", md)
+        for gone in ("MẶC ĐỊNH TỰ QUYẾT", "KHÔNG kết thúc câu trả lời bằng câu hỏi", "Còn tồn tại", "Đã kiểm tra", "commit", "push",
+                     "Không dùng API key"):
+            self.assertNotIn(gone, md, gone)
+        self.assertLess(md.index("Thứ tự ưu tiên"), md.index("## Vai trò"))        # 1 dòng thứ tự ưu tiên ở đầu file
 
 
 class AskUser(unittest.TestCase):
@@ -889,21 +893,21 @@ class AskUser(unittest.TestCase):
 
     def test_prompt_rule(self):
         t = {"id": "Q1", "text": "x", "mode": "balanced", "folder": "01 - Hỏi", "watch": False}
-        old_on, old_low = NS["workers_on"], NS["LOW_SPEC"]
-        NS["workers_on"] = lambda t: ["codex", "gemini"]          # như máy có đủ GPT + Gemini, cấu hình không thấp
+        old_on, old_low, old_free = NS["workers_on"], NS["LOW_SPEC"], NS["free_setup"]
+        NS["workers_on"] = lambda t: ["codex", "gemini"]          # như máy có đủ GPT + Gemini, cấu hình không thấp, có gói trả phí
         NS["LOW_SPEC"] = False
+        NS["free_setup"] = lambda: False
         try:
             NS["write_claude_md"](t)
         finally:
             NS["workers_on"] = old_on
+            NS["free_setup"] = old_free
         md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("MẶC ĐỊNH TỰ QUYẾT", md)
-        self.assertIn("CHỈ hỏi khi: thiếu dữ kiện bắt buộc", md)
         self.assertIn('"A - <ngắn gọn>"', md)                     # câu hỏi dạng lựa chọn (nút bấm)
-        self.assertIn("chuyển THẲNG vào thư mục nhóm", md)
+        self.assertIn("app chuyển THẲNG file", md)
         self.assertIn("--group <nhóm>", md)
-        self.assertIn("Số worker song song (BẠN tự quyết, trần", md)       # Claude tự chọn số worker theo hạn mức/giờ reset
-        self.assertIn("Hạn mức lúc bắt đầu lượt: app gửi kèm", md)
+        self.assertIn("Số worker song song: bạn tự quyết", md)    # Claude tự chọn số worker theo hạn mức/giờ reset
+        self.assertIn("app gửi kèm tin nhắn mỗi lượt", md)
         old = NS["workers_on"]
         NS["workers_on"] = lambda t: ["codex", "gemini"]
         try:
@@ -920,6 +924,209 @@ class AskUser(unittest.TestCase):
         self.assertIn("1 worker một lúc", (NS["wdir"](t2) / "CLAUDE.md").read_text(encoding="utf-8"))
         self.assertGreaterEqual(NS["MAX_PER_TASK"], NS["MAX_WORKERS"])
         self.assertNotIn("rồi chép bản đạt sang OUTPUT", md)
+
+
+class V140(unittest.TestCase):
+    """14.0: luật lõi ngắn + file chuyên biệt; kiểu trả lời; bỏ ghi chú phân loại; suy nghĩ ít cho câu hỏi nhanh; đặt tên task;
+    nhóm thư mục; giới hạn cứng bằng mã (1 worker, chặn xoá ngoài thư mục); tóm tắt phiên mới; đánh số trong khung chat."""
+    def _md(self, tid, text="vẽ 3 icon", mode="balanced", **kw):
+        t = {"id": tid, "text": text, "mode": mode, "folder": "14 - " + tid, **kw}
+        NS["write_claude_md"](t)
+        return t, (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
+
+    def test_core_short_rules_split(self):
+        old_on, old_free = NS["workers_on"], NS["free_setup"]
+        NS["workers_on"], NS["free_setup"] = (lambda t: ["codex", "gemini"]), (lambda: False)
+        try:
+            for mode in ("pro", "balanced", "turbo", "eco"):
+                t, md = self._md("CS" + mode, text="Viết 3 tiêu đề", mode=mode)
+                core = md.split("## Vai trò", 1)[1]                    # phần của app (không tính hướng dẫn người dùng)
+                self.assertLessEqual(len(core.splitlines()), 52, mode)
+                self.assertEqual(len([x for x in md.splitlines() if x.startswith("## Chế độ")]), 1)
+                self.assertLessEqual(len(md.split("## Chế độ", 1)[1].split("\n## ", 1)[0].strip().splitlines()), 3, mode)   # chế độ: 1 dòng
+        finally:
+            NS["workers_on"], NS["free_setup"] = old_on, old_free
+        t, md = self._md("CS1", text="vẽ 3 icon")
+        rules = NS["wdir"](t) / "rules"
+        for k in ("image", "markup", "drive", "edit"):
+            self.assertTrue((rules / f"{k}.md").is_file(), k)
+            self.assertIn(f"rules/{k}.md", md)
+        self.assertNotIn("Storyboard: mặc định", md)                   # nội dung chuyên biệt không nằm trong file lõi
+        self.assertIn("rules/image.md — tạo ảnh, storyboard  <- task này có vẻ cần", md)
+        self.assertNotIn("rules/drive.md — Google Drive/Sheets/Docs/Slides (đọc, sửa trực tiếp)  <-", md)
+        self.assertNotIn("lỗi thì app tự giao bên kia", (rules / "image.md").read_text(encoding="utf-8"))   # luật cũ sai (app không tự chuyển)
+        p = NS["_build_prompt"](t, {"kind": "start"})
+        self.assertIn("./rules/image.md", p)                           # nhắc đọc đúng file 1 lần
+        t["session_started"] = True
+        self.assertNotIn("./rules/image.md", NS["_build_prompt"](t, {"kind": "followup", "text": "tiếp"}))
+
+    def test_worker_brief_four_parts(self):
+        _, md = self._md("WB1")
+        self.assertIn("Mục tiêu / Bối cảnh", md)
+        self.assertIn("Ràng buộc", md)
+        self.assertIn("Xong khi", md)
+
+    def test_reply_style(self):
+        old = NS["CFG"].get("reply_style")
+        try:
+            NS["CFG"]["reply_style"] = "short"
+            _, md = self._md("RS1")
+            self.assertIn("NGẮN GỌN, DỄ HIỂU", md)
+            self.assertIn('"## Chi tiết"', md)
+            self.assertLess(md.index("NGẮN GỌN"), md.index("## Vai trò"))     # thuộc lớp của người dùng, không phải luật app
+            NS["CFG"]["reply_style"] = "detail"
+            _, md2 = self._md("RS2")
+            self.assertIn("Kiểu trả lời: CHI TIẾT", md2)
+            self.assertNotIn("NGẮN GỌN", md2)
+        finally:
+            NS["CFG"]["reply_style"] = old or "short"
+        self.assertEqual(NS["load_cfg"]().get("reply_style") in ("short", "detail"), True)
+
+    def test_no_route_note(self):
+        t = {"id": "RN1", "text": "tại sao task chậm?", "mode": "balanced", "folder": "14 - RN1", "session_started": True}
+        for nxt in ({"kind": "followup", "text": "tại sao task chậm?"}, {"kind": "followup", "text": "đổi màu nút"}):
+            self.assertNotIn("Đường xử lý", NS["_build_prompt"](t, nxt))
+        self.assertNotIn("ROUTE_NOTE", NS)
+
+    def test_ask_effort(self):
+        t = {"session_started": True}
+        ae = lambda q: NS["ask_effort"](t, {"kind": "followup", "text": q})
+        self.assertEqual(ae("file kết quả ở đâu?"), "low")
+        self.assertIsNone(ae("tại sao task chậm?"))                    # cần lập luận: giữ mức của chế độ
+        self.assertIsNone(ae("nên dùng PNG hay JPG cho banner?"))
+        self.assertIsNone(ae("sửa lỗi đăng nhập"))                     # không phải câu hỏi
+
+    def test_first_line_title(self):
+        f = NS["first_line_title"]
+        self.assertEqual(f("NoteTasker\nnâng cấp hướng bản mới, thêm đồng bộ 2 máy"), "NoteTasker")
+        self.assertEqual(f("**MusicPlus 1.0.13**\nđóng gói bản nhanh"), "MusicPlus 1.0.13")
+        self.assertEqual(f("Gợi ý cải tiến game Idle Clicker"), "")          # 1 dòng: để model đặt tên
+        self.assertEqual(f("Chào bạn\ngiúp tôi làm banner"), "")
+        self.assertEqual(f("Yêu cầu:\nvẽ banner"), "")
+        self.assertEqual(f("Đây là một dòng đầu rất dài vượt quá bốn mươi ký tự cho phép\nx"), "")
+        r = NS["new_task"]("NoteTasker\nnâng cấp hướng bản mới")
+        old = NS["threading"].Thread
+        started = []
+        NS["threading"].Thread = lambda *a, **k: type("T", (), {"start": lambda s: started.append(1)})()
+        try:
+            NS["submit_task"](r["id"], [])
+        finally:
+            NS["threading"].Thread = old
+        t = NS["TASKS"][r["id"]]
+        self.assertEqual(t["title"], "NoteTasker")
+        self.assertFalse(t.get("titling"))
+        self.assertEqual(started, [])                                  # không gọi model đặt tên
+        NS["TASKS"].pop(r["id"], None)
+
+    def test_group_for_short_job_names(self):
+        eg = NS["export_group"]
+        self.assertEqual(eg(Path("R1"), "", ["research.md"]), "docs")     # lỗi cũ: việc R1 -> thư mục "R"
+        self.assertEqual(eg(Path("S2"), "", ["a.png", "b.png"]), "images")
+        self.assertEqual(eg(Path("X1"), "", []), "ket_qua")
+        self.assertEqual(eg(Path("research_v2"), "", ["a.md"]), "research")
+        self.assertEqual(eg(Path("R1"), "research", ["a.md"]), "research")
+
+    def test_solo_worker_lock(self):
+        d = Path(tempfile.mkdtemp())
+        f = NS["_take_lock"](d, 1)
+        self.assertTrue(f and f.exists())
+        f.write_text("99999999")                                        # khoá của tiến trình đã chết -> thu hồi được
+        f2 = NS["_take_lock"](d, 1)
+        self.assertEqual(f2.read_text(), str(os.getpid()))
+
+    def test_guard_blocks_delete_outside(self):
+        root = Path(tempfile.mkdtemp()) / "01 - G"
+        t = {"id": "GD1", "text": "x", "mode": "balanced", "folder": "14 - GD1"}
+        NS["wdir"](t).mkdir(parents=True, exist_ok=True)
+        args = NS["guard_settings"](t)
+        self.assertEqual(args[0], "--settings")
+        hook = json.loads(args[1])["hooks"]["PreToolUse"][0]
+        self.assertIn("Bash", hook["matcher"])
+        g = NS["wdir"](t) / ".guard.py"
+        od = NS["out_dir"](t)
+
+        def run(cmd):
+            p = subprocess.run([sys.executable, str(g)], input=json.dumps({"tool_input": {"command": cmd}}), capture_output=True,
+                               text=True, encoding="utf-8")
+            return p.returncode
+        self.assertEqual(run("ls -la"), 0)
+        self.assertEqual(run(f'rm -rf "{od / "tmp"}"'), 0)                 # trong OUTPUT: cho phép
+        self.assertEqual(run("rm -f work/S1/v1/x.png && echo ok 2>/dev/null"), 0)   # đường dẫn tương đối (thư mục task)
+        self.assertEqual(run(f'cp "{root}" x && rm -rf "C:/Users/Someone/Documents/important"'), 2)
+        self.assertEqual(run('Remove-Item -Recurse "D:\\Projects\\game"'), 2)
+        self.assertEqual(run("rm -rf ~/Documents"), 2)
+        self.assertEqual(run(f'"{sys.executable}" -c "print(1)" && rm -f a.txt'), 0)  # python của app không bị coi là đường dẫn lạ
+        self.assertEqual(run("cat /c/Windows/win.ini"), 0)               # chỉ đọc: không chặn
+
+    def test_open_user_export_folder(self):
+        """Task xuất ra ổ chung (nơi người dùng chỉ định) mà thư mục mặc định cũng có bản sao -> nút Mở thư mục mở ổ chung."""
+        t = {"id": "EX1", "text": "x", "status": "done", "folder": "14 - EX1", "messages": []}
+        od = NS["out_dir"](t)
+        (od / "20261127-images").mkdir(parents=True, exist_ok=True)
+        share = Path(tempfile.mkdtemp()) / "O chung" / "Idle Clicker"
+        share.mkdir(parents=True)
+        since = time.time() - 5
+        (od / "20261127-images" / "a.png").write_bytes(b"x")        # bản sao trong thư mục mặc định
+        (share / "a.png").write_bytes(b"x")
+        txt = f"Đã xuất 1 ảnh vào `{share}` (bản nháp ở `{od}`)."
+        fs, d = NS["new_files"](t, since, txt)
+        self.assertEqual(Path(d), share)
+        self.assertEqual(fs, ["a.png"])
+        fs2, d2 = NS["new_files"](t, since, "Xong, file ở thư mục kết quả.")
+        self.assertEqual(d2, "")                                        # không nêu nơi khác: thư mục mặc định như cũ
+        t["messages"] = [{"role": "claude", "text": txt, "files": fs, "dir": str(share)}]
+        NS["TASKS"]["EX1"] = t
+        opened = []
+        old = NS["open_path"]
+        NS["open_path"] = lambda p, *a: opened.append(Path(p))
+        try:
+            NS["act"]("EX1", "open")
+        finally:
+            NS["open_path"] = old
+            NS["TASKS"].pop("EX1", None)
+        self.assertEqual(opened, [share])
+
+    def test_popups_close_and_viewer(self):
+        ui = (SRC / "web" / "ui.html").read_text(encoding="utf-8")
+        self.assertIn('document.addEventListener("pointerdown"', ui)     # chạm ra ngoài đóng popup (iPhone không có click)
+        self.assertIn('tg === $("ov")) closeSettings()', ui)
+        self.assertIn('id="edClose"', ui)                               # nút X luôn hiện trên trình xem ảnh
+        self.assertIn('edTool("hand")', ui)                             # mở ảnh: chế độ xem, không tự bật đánh dấu
+        self.assertIn("edPinchStart", ui)                               # chụm 2 ngón phóng to
+
+    def test_handover_keeps_last_answer(self):
+        long_plan = "Kế hoạch v12.9: " + "mục rất dài " * 300
+        t = {"id": "HO1", "text": "x", "folder": "14 - HO1",
+             "messages": [{"role": "user", "text": "u" * 400}, {"role": "claude", "text": "a" * 900}] * 6
+             + [{"role": "user", "text": "kết hợp các đề xuất"}, {"role": "claude", "text": long_plan}]}
+        h = NS["handover_text"](t)
+        self.assertIn(long_plan[:2500].replace("\n", " "), h)            # câu trả lời gần nhất không bị cắt ở 700 ký tự
+        self.assertLessEqual(len(h), 9000)
+
+    def test_chat_numbering_and_details(self):
+        ui = (SRC / "web" / "ui.html").read_text(encoding="utf-8")
+        start = ui.index("function mdInline(")
+        end = ui.index("function dur(")
+        js = ("const esc=(s)=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');\n" + ui[start:end] +
+              "\nconst r=md(process.argv[2]); console.log(JSON.stringify(r));")
+        f = Path(tempfile.mkdtemp()) / "md.js"
+        f.write_text(js, encoding="utf-8")
+        src = ("**Kế hoạch**\n\n1. Sửa lỗi đánh số\n   - Nguyên nhân: x\n   - Cách sửa: y\n\n2. Phân lớp\n- con trực tiếp\n"
+               "3. Kiểu trả lời\n   Dòng giải thích thụt vào\n\nKết luận.\n\n## Chi tiết\n- file a.py\n- lệnh b")
+        try:
+            out = json.loads(subprocess.run(["node", str(f), src], capture_output=True, text=True, encoding="utf-8", timeout=30).stdout)
+        except FileNotFoundError:
+            self.skipTest("không có node")
+        self.assertEqual(out.count("<ol"), 1, out)                      # 1 danh sách số duy nhất: 1, 2, 3 (không 1, 1, 1)
+        self.assertEqual(out.count("<ul>"), 3, out)                     # dòng con nằm TRONG mục số
+        self.assertLess(out.index("<ol"), out.index("<ul>"))
+        self.assertIn("<br>Dòng giải thích thụt vào", out)
+        self.assertIn('<details class="mdd"><summary>Xem chi tiết</summary>', out)
+        self.assertTrue(out.endswith("</details>"))
+        self.assertIn("file a.py", out.split("<details")[1])
+        out2 = json.loads(subprocess.run(["node", str(f), "Phần 1:\n\n1. a\n\nGiải thích\n\n2. b"], capture_output=True, text=True,
+                                         encoding="utf-8", timeout=30).stdout)
+        self.assertIn('<ol start="2">', out2)                           # danh sách bị ngắt bởi đoạn văn: đếm tiếp đúng số đang viết
 
 
 class App(unittest.TestCase):

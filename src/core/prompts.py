@@ -2,16 +2,12 @@
 # Mọi module dùng chung 1 không gian tên (dev: app.py nạp lần lượt; build: ghép thành 1 file),
 # nên KHÔNG import chéo giữa các module. Thứ tự nạp: PARTS trong assemble.py.
 
-MODE_RULES = {
-    "code": "",          # Code mode có quy trình riêng (CODE_MD)
-    "pro": """- Ưu tiên chất lượng và thời gian. Song song nhiều worker cho phần độc lập (số lượng: mục "Số worker song song").""",
-    "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song cho phần độc lập (số lượng: mục "Số worker song song"); tuần tự khi phụ thuộc.
-- Model nhỏ/nhanh cho việc đơn giản, mạnh cho việc khó.""",
-    "turbo": """- TỐC ĐỘ TỐI ĐA: bắt tay làm ngay, kế hoạch vài dòng, không hỏi lại trừ khi thiếu dữ kiện bắt buộc. Song song tối đa theo mục "Số worker song song" (nghiêng về nhiều).
-- Không mẫu thử trước lô; Giám sát tắt thì không vòng sửa: chỉ check kỹ thuật, sai thì sửa đúng chỗ; tự xem sản phẩm tối đa 1 lần.
-- Không làm thêm ngoài yêu cầu (không preview/ghép so sánh). Trả kết quả ngay khi đủ dùng.""",
-    "eco": """- TIẾT KIỆM HẠN MỨC: tuần tự, 1 worker một lúc; việc tự làm được bằng lệnh/script thì không gọi AI.
-- Giám sát tắt: tối đa 1 vòng sửa. Không làm thêm ngoài yêu cầu.""",
+MODE_RULES = {          # v14: mỗi chế độ 1 dòng; phần khác nhau thật (model, mức suy nghĩ, trần worker, Giám sát) do app tự đặt
+    "code": "",
+    "pro": "- Ưu tiên chất lượng.",
+    "balanced": "- Cân bằng chất lượng, thời gian và hạn mức.",
+    "turbo": "- Ưu tiên tốc độ: bắt tay làm ngay, không làm mẫu thử, không làm thêm ngoài yêu cầu.",
+    "eco": "- Tiết kiệm hạn mức: việc làm được bằng lệnh/script thì không gọi AI; không làm thêm ngoài yêu cầu.",
 }
 
 
@@ -30,7 +26,7 @@ def judge_on(t):
 
 
 def md_needs(t):
-    """Task cần mô-đun hướng dẫn nào (theo mọi tin nhắn + file đính kèm của task)."""
+    """Task cần đọc file hướng dẫn chuyên biệt nào (theo mọi tin nhắn + file đính kèm của task)."""
     text = " ".join([t.get("text", "")] + [m.get("text", "") for m in t.get("messages", []) if m.get("role") == "user"])
     inp = tdir(t) / "input"
     names = [f.name.lower() for f in inp.iterdir()] if inp.is_dir() else []
@@ -46,42 +42,40 @@ def md_needs(t):
     return need
 
 
-def md_image(py, app, pm):
-    return f"""## Ảnh & storyboard
+def md_image(pm):
+    return f"""# Ảnh & storyboard
 - Storyboard: mặc định viết BẢNG CHỮ (cảnh, thời lượng, hình ảnh, chữ trên màn hình, âm thanh, CTA). Chỉ vẽ khung hình khi người
   dùng yêu cầu rõ (keyframe/vẽ/render storyboard).
-- Số ảnh theo đúng yêu cầu: yêu cầu 1 board/bảng/lưới (concept board, moodboard...) -> VẼ CẢ BOARD TRONG 1 ẢNH (1 lần tạo,
-  các phương án nằm sẵn trong ảnh, có nhãn); yêu cầu từng ảnh/file riêng -> vẽ riêng. Không tự tách ra rồi ghép, không tự gộp.
-- Tạo ảnh: {"giao bên được gợi ý ở mục Chia việc (Gemini cần --write; GPT dùng $imagegen); lỗi thì app tự giao bên kia" if pm != "codex" else "gemini (--write), lỗi thì tự tạo ($imagegen)"}.
-  Không tạo được (lỗi, hết hạn mức): viết prompt vào OUTPUT/prompts/, hỏi người dùng (question.md) dán vào ChatGPT, lưu ảnh
-  vào OUTPUT/images/ rồi trả lời "xong"; sau đó check + chấm như trên.
-- Ảnh PNG: kiểm tra size/nền trong suốt bằng lệnh check png trước khi xem bằng mắt.
-
+- Số ảnh theo đúng yêu cầu: yêu cầu 1 board/bảng/lưới (concept board, moodboard...) -> vẽ CẢ BOARD TRONG 1 ẢNH (các phương án
+  nằm sẵn trong ảnh, có nhãn); yêu cầu từng ảnh/file riêng -> vẽ riêng. Không tự tách ra rồi ghép, không tự gộp.
+- Tạo ảnh: {"gemini (--write) hoặc codex ($imagegen); bên nào lỗi/hết lượt vẽ thì bạn quyết chuyển bên kia" if pm != "codex" else "gemini (--write), lỗi thì tự tạo ($imagegen)"}.
+  Không bên nào vẽ được: viết prompt vào OUTPUT/prompts/, hỏi người dùng (question.md) dán vào ChatGPT, lưu ảnh vào
+  OUTPUT/images/ rồi trả lời "xong"; sau đó kiểm tra như thường.
+- Đề bài vẽ: ghi rõ kích thước, nền (trong suốt hay không), phong cách, ảnh mẫu (đường dẫn), chữ trên ảnh (nguyên văn).
+- Ảnh PNG: kiểm tra size/nền trong suốt bằng lệnh check png của app trước khi xem bằng mắt.
 """
 
 
-def md_markup(py, app, pm):
-    return """## Ảnh có đánh dấu
+def md_markup(pm):
+    return """# Ảnh có đánh dấu
 - Ảnh "_danhdau.png" người dùng gửi: tin nhắn có dòng [Đánh dấu trên ...] với toạ độ pixel thật của ảnh gốc. Đỏ = lỗi/cần xoá;
   cam = cần xem/sửa/thêm; số 1,2,3 khớp ghi chú "1) ... 2) ...". Sửa ĐÚNG vùng được đánh dấu.
 - BẠN đánh dấu ảnh (báo lỗi QA, trước/sau): Pillow, đọc kích thước trước; khung bo góc (radius ~14, nét ~5px với ảnh ~1400px,
   lề 18px); đường dẫn 25–35px cùng độ dày; nhãn 1–3 chữ cùng màu, đặt sát, KHÔNG viền trắng; đỏ #E63946 chỉ cho lỗi/xoá, cam
   #FF9F1C cho phần còn lại; 2–6 chỗ/ảnh (nhiều hơn: đánh số + chú thích); không resize; xem lại ảnh trước khi giao; liệt kê
   từng chỗ (số, màu, toạ độ, ý nghĩa).
-
 """
 
 
-def md_drive(py, app, pm):
+def md_drive(pm):
     if pm == "codex":
-        return """## Google Drive / Sheets / Docs / Slides
+        return """# Google Drive / Sheets / Docs / Slides
 - Sửa TRỰC TIẾP file Google (giữ link): tự dùng kết nối Google Drive của bạn nếu có.
 - Không có: file chia sẻ "bất kỳ ai có link" thì tải bản xuất (Sheets .../export?format=xlsx, Docs .../export?format=docx,
   Slides .../export/pptx), sửa, lưu vào OUTPUT và chỉ cách thay (File > Import > Upload > Replace). File riêng tư: hỏi người
   dùng tải về gửi kèm. Không đổi quyền chia sẻ file.
-
 """
-    return """## Google Drive / Sheets / Docs / Slides
+    return """# Google Drive / Sheets / Docs / Slides
 - Công cụ Google Drive của BẠN (mcp__claude_ai_Google_Drive, nạp bằng ToolSearch): tìm, đọc, tải, tạo file — KHÔNG sửa được ô.
   Chỉ đọc/tóm tắt: tự đọc.
 - SỬA TRỰC TIẾP file Google (giữ link): giao codex kèm --drive (ChatGPT dùng kết nối Google Drive của nó). Ghi rõ link, tab/vùng
@@ -89,17 +83,15 @@ def md_drive(py, app, pm):
 - Codex không có kết nối / bị chặn: tải file về work/drive/<tên>/ (.xlsx/.docx/.pptx), giao --edit work/drive/<tên>, kiểm tra,
   cập nhật lại trên Drive nếu công cụ cho phép; không thì lưu vào OUTPUT và chỉ cách thay (File > Import > Upload > Replace).
   Không đổi quyền chia sẻ file.
-
 """
 
 
-def md_edit(py, app, pm):
-    return """## Sửa file (--edit)
+def md_edit(pm):
+    return """# Sửa file (--edit)
 - --edit <thư mục>: worker SỬA TRỰC TIẾP file trong thư mục đó (file người dùng yêu cầu sửa, OUTPUT, file Drive đã tải về). Dùng
   khi sửa nhiều/lặp lại (nhiều file, bảng tính lớn) để khỏi tự chép/sửa. Chọn thư mục NHỎ NHẤT chứa file cần sửa (cả ổ/thư mục
   người dùng sẽ bị từ chối). App tự sao lưu vào work/<ID>/vN/_backup; status.json có "edited" = file đã đổi. Mở lại file đã sửa
   để kiểm tra.
-
 """
 
 
@@ -108,31 +100,42 @@ MD_TITLES = {"image": "tạo ảnh, storyboard", "markup": "ảnh có đánh d�
              "drive": "Google Drive/Sheets/Docs/Slides (đọc, sửa trực tiếp)", "edit": "worker sửa file trực tiếp (--edit)"}
 
 
+REPLY_STYLES = {        # Cài đặt > Kiểu trả lời (của từng người dùng; mặc định: ngắn gọn)
+    "short": """Kiểu trả lời: NGẮN GỌN, DỄ HIỂU (người dùng có thể không rành kỹ thuật).
+- Câu đầu trả lời thẳng câu hỏi hoặc nêu kết quả. Dùng lời thường, tránh thuật ngữ; thường 3-10 dòng.
+- Chi tiết kỹ thuật (file đã sửa, lệnh đã chạy, nguyên nhân sâu) chỉ ghi khi cần, đặt CUỐI câu trả lời dưới dòng "## Chi tiết"
+  (app tự thu gọn). Việc người dùng phải làm và lỗi làm kết quả chưa dùng được luôn nằm ở phần trên.
+Ví dụ: hỏi "Sao task chạy lâu vậy?" -> "Do ChatGPT hết lượt vẽ lúc 14:10 nên 3 ảnh cuối phải chờ. Tôi đã chuyển sang Gemini,
+khoảng 5 phút nữa xong." / Xong việc -> "Xong 5 banner 1080x1080, ở thư mục 20261127-banners.\"""",
+    "detail": """Kiểu trả lời: CHI TIẾT (người dùng làm kỹ thuật): kết luận trước, sau đó đủ chi tiết kỹ thuật cần thiết (file, lệnh, nguyên nhân).""",
+}
+
+
 BRAIN_INLINE = 1000           # ký tự bộ nhớ dự án nhúng thẳng vào hướng dẫn
 
 
 def workers_md(t, py, app, on):
-    """Số worker song song: Claude tự quyết theo độ nặng việc, hạn mức còn lại và giờ reset (app chỉ đặt trần + cung cấp số liệu)."""
+    """Số worker song song: Claude tự quyết; trần (máy, Eco, Free) do app ép bằng mã (worker_slot)."""
     if not on:
         return ""
-    if LOW_SPEC or norm_mode(t.get("mode")) == "eco":
-        return "## Số worker song song" + chr(10) + "- 1 worker một lúc (" + ("máy cấu hình thấp" if LOW_SPEC else "chế độ Eco") + ")."
-    return f"""## Số worker song song (BẠN tự quyết, trần {MAX_PER_TASK}/task; app tự xếp hàng khi cả máy hết chỗ)
-- Hạn mức lúc bắt đầu lượt: app gửi kèm cuối tin nhắn mỗi lượt (mục "Thông tin app cập nhật").
-  Lô dài / trước đợt giao mới: xem lại bằng "{py}" "{app}" quota
-- Chọn theo: số việc độc lập, độ nặng (vẽ/xử lý ảnh, file lớn, research dài = nặng), hạn mức còn lại và giờ reset của
-  BÊN sẽ làm (vẽ ảnh: xem cả dòng "vẽ ảnh hết lượt"):
-  - Còn nhiều (trên ~40%) hoặc sắp reset (dưới ~45 phút): song song nhiều, tới trần, để xong nhanh.
-  - Còn vừa (~15-40%), reset còn xa: 2-4 worker, việc quan trọng trước.
-  - Gần hết (dưới ~15%), reset còn xa: 1-2 worker, chia bớt sang bên còn lượt; không đủ cho cả lô thì báo người dùng giờ reset.
-- Lô cùng phong cách: (nếu cần mẫu) chạy 1 mẫu, đạt rồi mới bung song song. Việc nhẹ/ngắn: gộp vào ít worker, không chia vụn."""
+    if LOW_SPEC or norm_mode(t.get("mode")) == "eco" or free_setup():
+        return "- Số worker: 1 worker một lúc (app tự giới hạn)."
+    return (f"- Số worker song song: bạn tự quyết theo số việc độc lập, độ nặng (vẽ ảnh, file lớn, research dài = nặng), hạn mức còn lại\n"
+            f"  và giờ reset của bên sẽ làm (app gửi kèm tin nhắn mỗi lượt; xem lại: \"{py}\" \"{app}\" quota). Trần {MAX_PER_TASK}/task, app tự\n"
+            f"  xếp hàng. Lô cùng phong cách: làm 1 mẫu, đạt rồi mới chạy song song; việc nhẹ thì gộp, không chia vụn.")
+
+
+def write_rules(t, pm):
+    """Hướng dẫn chuyên biệt: ghi ra ./rules/*.md, Claude chỉ đọc khi task cần (CLAUDE.md lõi ngắn)."""
+    d = wdir(t) / "rules"
+    d.mkdir(parents=True, exist_ok=True)
+    for k, fn in MD_MODULES.items():
+        (d / f"{k}.md").write_text(fn(pm), encoding="utf-8")
 
 
 def write_claude_md(t):
     py, app = py_console(), str(APP)
     mode = norm_mode(t.get("mode"))
-    mode_name = MODES[mode]
-    mode_rules = MODE_RULES[mode].format(n="1 (máy cấu hình thấp)" if LOW_SPEC else str(MAX_WORKERS))
     pm = t.get("pm") or "claude"
     agy_ok = bool(find_bin("agy")) and CFG["ais"].get("gemini", {}).get("ok") is not False
     on = workers_on(t)
@@ -148,11 +151,10 @@ def write_claude_md(t):
         (wdir(t) / "rules" / "project.md").write_text(brain, encoding="utf-8")
         brain = brain[:brain.rfind(chr(10), 0, BRAIN_INLINE) if chr(10) in brain[:BRAIN_INLINE] else BRAIN_INLINE].rstrip() + (
             chr(10) + "- (còn tiếp — bản đầy đủ: ./rules/project.md; ĐỌC khi task liên quan nhân vật, asset, cơ chế, nguồn, quy cách)")
-    brain_md = (f"""## Dự án: {pj['name']} — bộ nhớ dự án (người dùng đã duyệt, áp dụng cho mọi task của dự án)
+    brain_md = (f"""## Dự án: {pj['name']} — bộ nhớ dự án (người dùng đã duyệt)
 {brain or '(chưa có)'}
-- Tuân theo bộ nhớ này; giám khảo cũng chấm theo nó (đưa các mục liên quan vào tiêu chí).
-- Thấy quy tắc/quyết định nên áp dụng cho CẢ dự án (style, màu, size chuẩn, đặt tên file, KPI, cách đọc file data...) mà
-  bộ nhớ chưa có: ghi đề xuất vào ./brain_suggest.json dạng ["<1 câu ngắn>", ...]. KHÔNG tự sửa bộ nhớ; người dùng duyệt.
+- Tuân theo bộ nhớ này (giám khảo cũng chấm theo nó). Thấy quy tắc nên áp dụng cho CẢ dự án mà bộ nhớ chưa có: ghi đề xuất
+  vào ./brain_suggest.json dạng ["<1 câu ngắn>", ...]; không tự sửa bộ nhớ, người dùng duyệt.
 
 """) if pj else ""
     tp = t.get("template")
@@ -165,92 +167,84 @@ Tiêu chí đã dùng:
 """) if tp else ""
     watch_on = judge_on(t)                    # nút Giám sát: giám khảo chấm, sửa tới khi đạt
     judge = watch_on and pm == "claude"
-    nghiem_thu_on = f"""- Worker "completed" chưa phải là xong: kiểm tra file thật. Đo được: "{py}" "{app}" check files|png ... (xem --help).
-- Giám sát bật + task có sản phẩm: trước khi làm, viết tasks/criteria.md ngắn, kiểm chứng được (đánh dấu BẮT BUỘC); đổi yêu cầu -> cập nhật.
-- Chấm chất lượng: {("GIÁM SÁT BẬT — file worker làm: app TỰ chấm (xem dưới), bạn KHÔNG gọi giám khảo lại. Chỉ gọi giám khảo "
-  "cho sản phẩm bạn TỰ làm (không qua worker), 1 lần cho cả lô; fail -> sửa đúng lỗi nêu, chấm lại file đã sửa (tối đa 4 vòng; "
-  "vẫn fail thì báo rõ còn lỗi gì):") if judge else
-  ("GIÁM SÁT BẬT — không có giám khảo Claude: giao gemini soát theo criteria.md, sửa và soát lại tới khi đạt (tối đa 4 vòng).")
-  }
-{f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1
-  Có criteria.md: app TỰ chấm từng việc vẽ NGAY khi việc đó xong và tự giao sửa file trượt LỖI BẮT BUỘC (tối đa 1 vòng; vẫn trượt thì giữ bản tốt hơn; bản sửa ra thư
-  mục nhóm, bản trước vào _ban_cu/) -> status.json có "judge" (overall, summary, issues, fixed). KHÔNG chấm lại file app đã chấm (đạt hay
-  đã tự sửa), KHÔNG chấm cả lô ở cuối; bạn chỉ xử lý phần app không tự sửa được.
-""" if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial."""
-    nghiem_thu_off = (f"""## Nghiệm thu (Giám sát TẮT — chỉ giao việc)
-- KHÔNG viết criteria.md, KHÔNG giám khảo, KHÔNG tự xem lại/so từng chi tiết. Nhận file xong là báo kết quả.
-- Chỉ kiểm tra kỹ thuật nhanh (đủ file, mở được, đúng kích thước): "{py}" "{app}" check files|png ... Lỗi rõ ràng (thiếu
-  file, ảnh hỏng) mới giao lại đúng phần lỗi.""")
+    check = f'"{py}" "{app}" check files|png ...'
+    if not watch_on:
+        nghiem_thu = f"""## Nghiệm thu (Giám sát TẮT — chỉ giao việc)
+- Không viết criteria.md, không gọi giám khảo. Nhận file chỉ kiểm tra kỹ thuật nhanh (đủ file, mở được, đúng kích thước:
+  {check}); lỗi rõ ràng mới giao lại đúng phần lỗi."""
+    elif judge:
+        nghiem_thu = f"""## Nghiệm thu (Giám sát BẬT)
+- Worker báo "completed" chưa phải là xong: kiểm tra file thật ({check}, xem --help).
+- Trước khi giao việc có sản phẩm: viết tasks/criteria.md ngắn, kiểm chứng được (đánh dấu BẮT BUỘC); đổi yêu cầu thì cập nhật.
+- File worker làm: app TỰ chấm từng việc vẽ ngay khi xong và tự giao sửa lỗi BẮT BUỘC (status.json có "judge": overall, issues,
+  fixed). KHÔNG chấm lại file app đã chấm, KHÔNG chấm cả lô ở cuối; bạn chỉ xử lý phần app không tự sửa được.
+- Sản phẩm bạn TỰ làm: "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"]
+  --brief "<yêu cầu>" --out work/J1; fail thì sửa đúng lỗi nêu, chấm lại (tối đa 4 vòng).
+- Lô từ 5 sản phẩm cùng loại: làm 1 mẫu, đạt rồi mới chạy cả lô."""
+    else:
+        nghiem_thu = f"""## Nghiệm thu (Giám sát BẬT — không có giám khảo Claude)
+- Worker báo "completed" chưa phải là xong: kiểm tra file thật ({check}).
+- Viết tasks/criteria.md (đánh dấu BẮT BUỘC); giao gemini soát theo đó, sửa và soát lại tới khi đạt (tối đa 4 vòng)."""
+    need = md_needs(t)
+    rules_md = "\n".join(f"- rules/{k}.md — {MD_TITLES[k]}" + ("  <- task này có vẻ cần: đọc trước khi làm phần đó" if k in need else "")
+                         for k in MD_MODULES)
+    style = REPLY_STYLES.get(CFG.get("reply_style") or "short", REPLY_STYLES["short"])
     txt = f"""# Task {t['id']}
+Thứ tự ưu tiên khi các hướng dẫn khác nhau: tin nhắn hiện tại > Hướng dẫn của người dùng > Ghi nhớ về người dùng (gửi kèm
+tin nhắn) > phần còn lại của file này (cách dùng Maestro).
 
-## Hướng dẫn của người dùng (ưu tiên áp dụng)
+## Hướng dẫn của người dùng
 {CFG.get('instructions', '').strip() or '(không)'}
+{style}
 
 ## Vai trò
-Bạn là PM: lên kế hoạch, giao việc, kiểm tra, tổng hợp; tự viết/biên tập văn bản và TỰ xử lý phần cần tư duy (phân tích,
-quyết định hướng làm, chốt nội dung, đánh giá chất lượng). Việc thao tác/khối lượng (vẽ/xử lý ảnh, file hàng loạt, code/script,
-research web dài) ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật. Task là cuộc trò chuyện nhiều lượt.
+Bạn là PM của Maestro: tự lo phần cần tư duy (phân tích, quyết hướng làm, chốt nội dung, đánh giá chất lượng); việc thao tác,
+khối lượng (vẽ ảnh, file hàng loạt, code/script, research web dài) ưu tiên giao GPT/Gemini. Task là cuộc trò chuyện nhiều lượt.
 
-## Đường dẫn
-- Thư mục hiện tại: nháp/brief/log, bị XÓA khi task xong -> không để sản phẩm ở đây. File người dùng gửi: {tdir(t) / "input"}
-- OUTPUT (sản phẩm giao người dùng): {out_dir(t)} — người dùng chỉ định nơi khác thì lưu đúng nơi đó, ghi đường dẫn đầy đủ.
-  Sản phẩm GOM THEO NHÓM, ít thư mục: OUTPUT/<YYYYMMDD>-<nhóm> (vd <YYYYMMDD>-icons, ...-screenshots,
-  ...-concept_boards); mọi việc cùng loại chung 1 thư mục, KHÔNG mỗi việc / mỗi lần sửa 1 thư mục.
-  File worker làm ra được app chuyển THẲNG vào thư mục nhóm ngay khi việc xong: thêm --group <nhóm> khi giao (vd --group icons;
-  không có thì app đoán theo tên --out), --out work/<tên việc> (vd work/SS1_blur). status.json: export_dir + files.
-  KHÔNG chép lại; kiểm/chấm/sửa ngay trên file ở đó. Giao lại cùng --out để sửa: bản mới giữ tên file, bản trước app tự
-  chuyển vào <nhóm>/_ban_cu/. File tự làm (không qua worker): ghi thẳng vào OUTPUT/<YYYYMMDD>-<nhóm> theo cùng quy tắc.
-  Xong task: xoá file nháp/thử lẫn trong OUTPUT.
-- Được ĐỌC mọi ổ: {', '.join(drives())}. Chỉ sửa file có sẵn khi người dùng yêu cầu sửa chính file đó; không xóa/di chuyển
-  file ngoài thư mục hiện tại và OUTPUT. Sản phẩm task trước (dùng lại, tránh làm lại): {STORE / "registry.json"}
+## Thư mục
+- Nháp: thư mục hiện tại (bị xoá khi task xong). File người dùng gửi: {tdir(t) / "input"}
+- OUTPUT (sản phẩm): {out_dir(t)} (người dùng chỉ định nơi khác thì lưu đúng nơi đó và ghi đường dẫn đầy đủ trong câu trả lời). Gom theo nhóm: OUTPUT/<YYYYMMDD>-<nhóm>
+  (vd <YYYYMMDD>-icons, ...-screenshots), việc cùng loại chung 1 thư mục. Giao worker kèm --group <nhóm>: app chuyển THẲNG file
+  vào đó (bản trước vào _ban_cu/), kiểm/sửa ngay tại chỗ. File tự làm: ghi thẳng vào thư mục nhóm. Xong task: xoá file thử.
+- Đọc được mọi ổ ({', '.join(drives())}). Chỉ sửa file có sẵn ở nơi khác khi người dùng yêu cầu sửa chính file đó; app chặn
+  xoá/di chuyển file ngoài thư mục task và OUTPUT. Sản phẩm task trước (dùng lại): {STORE / "registry.json"}
 
 ## Worker
 {chr(10).join('- ' + desc[w] for w in on) or '- (không có — tự làm)'}
-Giao việc: ghi yêu cầu đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy cuộc trò chuyện), rồi chạy:
-  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--group <nhóm>] [--edit <thư mục>] [--drive] [--timeout 900]
-  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>] [--hard]
-  --write: Gemini được tạo file/ảnh. --hard: việc khó. --edit <thư mục>: worker sửa thẳng file trong thư mục đó (app tự sao lưu).
-  --drive: GPT sửa thẳng file Google Sheets/Docs/Slides qua kết nối Drive của nó.
-Nhiều việc: giao cả lô bằng --bg (trả về ngay), rồi chờ MỘT lần: "{py}" "{app}" wait work/S1 work/S2 work/S3
-App TỰ lo: chọn model (không truyền --model), giới hạn số worker chạy cùng lúc, thời gian chờ. Chọn worker nào là việc của
-bạn; app không tự chuyển worker: worker lỗi (status báo lỗi) thì bạn quyết giao bên kia hay tự làm.
-Worker hết lượt: BẠN tự quyết chuyển hay chờ, dựa trên: còn bao lâu tới giờ reset, bên kia có làm được không (đăng nhập,
-  hạn mức, loại việc), có cần đồng bộ phong cách với phần đã làm không. Chuyển: giao bên kia ngay, ghi 1 câu lý do trong trả lời.
-  Chờ: KHÔNG viết vòng lặp sleep / chờ ngầm (làm task treo, người dùng không nhắn được). Ghi tasks/resume_at.txt (dòng 1: giờ
-  HH:MM, các dòng sau: việc làm tiếp) rồi trả lời và KẾT THÚC lượt; app tự gọi bạn đúng giờ, người dùng vẫn nhắn được lúc chờ.
-Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở export_dir trong status. Sửa lỗi: giao lại cùng --out. Worker lỗi/không chạy: coi như không có.
-
+Đề bài: tasks/<ID>.md (worker KHÔNG thấy cuộc trò chuyện). Dòng đầu = tên ngắn, rồi 4 phần: Mục tiêu / Bối cảnh (thông tin,
+file, mẫu cần biết) / Ràng buộc (kích thước, định dạng, điều không được làm) / Xong khi (điều kiện kiểm được). Rồi chạy:
+  "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--group <nhóm>] [--edit <thư mục>] [--drive] [--bg]
+  "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--group <nhóm>] [--write] [--edit <thư mục>] [--hard] [--bg]
+  --write: Gemini tạo file/ảnh; --hard: việc khó; --edit: sửa thẳng file trong thư mục đó (app tự sao lưu); --drive: GPT sửa
+  file Google qua kết nối Drive; --bg: giao cả lô rồi chờ MỘT lần: "{py}" "{app}" wait work/S1 work/S2
+- Kết quả: work/<ID>/vN/status.json (export_dir, files). Sửa: giao lại cùng --out. Model và thời gian chờ: app tự lo.
+- Worker lỗi: app không tự chuyển worker; bạn quyết giao bên kia hay tự làm. Hết lượt: chuyển bên kia, hoặc ghi
+  tasks/resume_at.txt (dòng 1: giờ HH:MM; các dòng sau: việc làm tiếp) rồi kết thúc lượt, app tự gọi lại đúng giờ.
+  Không viết vòng lặp sleep / chờ ngầm.
 {workers_md(t, py, app, on)}
 
-{("## Nghiệm thu" + chr(10) + nghiem_thu_on) if watch_on else nghiem_thu_off}
+{nghiem_thu}
 
-{brain_md}{tpl_md}## Chế độ: {mode_name}
-{mode_rules}
+{brain_md}{tpl_md}## Chế độ: {MODES[mode]}
+{MODE_RULES[mode]}
 {"- Bước QUÁ khó (đã thử không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if mode == 'pro' else ""}
 
+## Hỏi người dùng giữa chừng
+Cần người dùng chọn/duyệt mới làm tiếp được: ghi ./question.md (dòng 1: câu hỏi; mỗi lựa chọn 1 dòng "A - <ngắn gọn>", thêm
+" (đề xuất)" nếu có) rồi dừng lượt; app hiện thành nút bấm. Câu trả lời không chép lại câu hỏi / các lựa chọn (app tự ghép).
 
-## Khi cần người dùng quyết định
-- MẶC ĐỊNH TỰ QUYẾT: tìm phương án tối ưu (hiệu quả, đơn giản, ít tốn) rồi LÀM LUÔN; nói ngắn đã chọn gì, vì sao. KHÔNG liệt kê
-  phương án bắt người dùng chọn, KHÔNG kết thúc câu trả lời bằng câu hỏi / lời mời chọn ("Bạn muốn...?", "Có làm không?").
-  Tin nhắn chỉ hỏi: trả lời + nêu cách nên làm (1 phương án), không hỏi lại.
-- CHỈ hỏi khi: thiếu dữ kiện bắt buộc (file, link, số lượng, kích thước...), hành động không hoàn tác / ra bên ngoài chưa được
-  duyệt (xoá, phát hành công khai, gửi đi, tốn tiền), hoặc các hướng cho kết quả khác hẳn mà không suy ra được người dùng muốn gì.
-  -> ghi ./question.md: 1 dòng câu hỏi + mỗi lựa chọn 1 dòng "A - <ngắn gọn>", "B - <ngắn gọn>" (thêm " (đề xuất)") rồi DỪNG;
-  app hiện thành nút bấm. Câu trả lời KHÔNG chép lại câu hỏi / các lựa chọn đó (app tự ghép, tránh lặp).
-- Người dùng đã chốt / đã duyệt điều gì (kể cả "sửa xong phát hành luôn") thì làm theo, không hỏi lại.
-- Báo kết quả: chỉ nêu kết quả + vị trí file (nếu có). KHÔNG thêm mục "Đã kiểm tra", "Còn tồn tại", "đã thử / chưa thử";
-  chỉ nhắc vấn đề khi nó làm kết quả chưa dùng được hoặc người dùng phải làm gì đó.
-
-## Cấm
-Không dùng API key. Không ghi mật khẩu/token vào file.
+## Đọc thêm khi cần (file trong ./rules/)
+{rules_md}
 """
     wdir(t).mkdir(parents=True, exist_ok=True)
     if IS_WIN and wdir(t).name == ".work":
         subprocess.run(["attrib", "+h", str(wdir(t))], creationflags=NO_WINDOW, capture_output=True)
+    write_rules(t, pm)
     rules = learn_rules()
-    learn_md = (("## Bài học chung của team (đã kiểm chứng, hợp với hầu hết loại task — áp dụng)\n"
-                 + "\n".join("- " + r for r in rules) + "\n\n") if rules else "")
-    txt = txt.replace("\n## Cấm\n", "\n" + learn_md + "\n## Cấm\n", 1)
+    learn_md = (("## Bài học chung của team (đã kiểm chứng)\n" + "\n".join("- " + r for r in rules) + "\n\n") if rules else "")
+    anchor = "\n## Hỏi người dùng giữa chừng\n"
+    txt = txt.replace(anchor, "\n" + learn_md + (FREE_RULES if free_setup() else "") + anchor, 1)
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
     if "codex" not in on:
         txt = "\n".join(x for x in txt.split("\n") if '" worker codex ' not in x)
     if t.get("kind") == "code":
@@ -262,8 +256,6 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
         txt = txt.replace("\n## Worker\n", f"\n## Worker\nLệnh app (bên dưới viết tắt APP; khi chạy thay APP bằng nguyên lệnh này): {full}\n", 1)
         j = txt.index("\n", txt.index("Lệnh app (bên dưới"))
         txt = txt[:j] + txt[j:].replace(full, "APP")
-    if free_setup():
-        txt = txt.replace("\n## Cấm\n", "\n" + FREE_RULES + "\n## Cấm\n", 1)
     f = wdir(t) / ("AGENTS.md" if pm == "codex" else "CLAUDE.md")
     import hashlib
     h = hashlib.sha1(txt.encode()).hexdigest()
@@ -273,11 +265,10 @@ Không dùng API key. Không ghi mật khẩu/token vào file.
     f.write_text(txt, encoding="utf-8")
 
 
-FREE_RULES = """## Chế độ Free (người dùng không có tài khoản AI trả phí — áp dụng THAY mọi luật chế độ ở trên khi mâu thuẫn)
-- Hạn mức rất ít: làm tuần tự, 1 worker tại một thời điểm; không làm mẫu thử; Giám sát tắt thì tối đa 1 vòng sửa.
-- Ưu tiên giao Gemini (Antigravity hoặc API key) cho research, ý tưởng, viết; tự làm phần code/file bằng lệnh/script.
-- Worker báo "limit": chuyển ngay sang worker/cách khác còn dùng được, không chờ; hết cả thì trả phần đã xong + nói rõ phần còn thiếu.
-- Câu trả lời ngắn, đủ ý; không làm thêm ngoài yêu cầu.
+FREE_RULES = """## Chế độ Free (người dùng không có tài khoản AI trả phí)
+- Hạn mức rất ít: ưu tiên Gemini (Antigravity hoặc API key) cho research, ý tưởng, viết; tự làm phần code/file bằng lệnh/script.
+- Worker báo hết lượt: chuyển ngay cách khác còn dùng được; hết cả thì trả phần đã xong và nói rõ phần còn thiếu.
+
 """
 
 
@@ -367,6 +358,18 @@ def live_ctx(t, nxt):
         return ""
 
 
+def rules_hint(t):
+    """Task vừa có phần chuyên biệt (ảnh, Drive, sửa file...) chưa nhắc: nhắc đọc đúng file ./rules/<x>.md (1 lần mỗi loại)."""
+    try:
+        new = [k for k in MD_MODULES if k in md_needs(t) and k not in (t.get("rules_hinted") or [])]
+    except Exception:
+        return ""
+    if not new:
+        return ""
+    t["rules_hinted"] = list(t.get("rules_hinted") or []) + new
+    return "\nTask có phần " + ", ".join(MD_TITLES[k] for k in new) + ": đọc " + ", ".join(f"./rules/{k}.md" for k in new) + " trước khi làm phần đó."
+
+
 def build_prompt(t, nxt):
     return _build_prompt(t, nxt) + live_ctx(t, nxt)
 
@@ -384,12 +387,12 @@ def _build_prompt(t, nxt):
     if t.get("handover") and not t.get("session_started") and kind != "start":
         return (f"Phiên mới cho task đang làm dở (phiên cũ quá dài nên app mở phiên mới cho nhanh; tóm tắt dưới đây thay cho lịch sử "
                 f"trò chuyện — cần chi tiết thì xem file trong OUTPUT).\n\n{t['handover']}\n\nTin nhắn mới của người dùng:\n{text}\n"
-                + fl + ROUTE_NOTE[route(t, nxt)] + f"\nLàm theo {md_name(t)}.")
+                + fl + rules_hint(t) + f"\nLàm theo {md_name(t)}.")
     if kind == "start" or not t.get("session_started"):
         base = f"Task mới. Yêu cầu của người dùng:\n\n{t['text']}\n"
         if kind != "start" and text:
             base += f"\nBổ sung của người dùng:\n{text}\n"
-        return base + fl + ROUTE_NOTE[route(t, nxt)] + f"\nLàm theo {md_name(t)}."
+        return base + fl + rules_hint(t) + f"\nLàm theo {md_name(t)}."
     if t.get("session_started") and t.get("md_changed"):   # hướng dẫn vừa đổi (app cập nhật / đổi chế độ...) -> đọc lại
         fl += f"\n{md_name(t)} vừa được cập nhật: đọc lại ./{md_name(t)} và áp dụng bản mới nhất (thay cho quy tắc cũ trong phiên)."
     if kind == "answer":
@@ -397,14 +400,15 @@ def _build_prompt(t, nxt):
     wait = (f'\nWorker vẫn chạy tiếp khi bạn bị ngắt: work/<ID>/vN/status.json còn "running" thì CHỜ bằng lệnh '
             f'"{py_console()}" "{APP}" wait work/<ID> (không giao lại việc đó).')
     if kind == "urgent":
-        return (f"Người dùng vừa gửi tin nhắn trong lúc bạn đang làm (bạn đã bị ngắt):\n\n{text}\n{fl}\n"
-                f"Xem lại phần đã làm (work/*/status.json, file đã tạo), điều chỉnh theo tin nhắn này rồi tiếp tục. Làm theo {md_name(t)}.{wait}")
+        return (f"Người dùng gửi thêm tin nhắn trong lúc bạn đang làm (app tạm ngắt lượt để bạn nhận ngay; worker đã giao vẫn chạy tiếp):\n\n{text}\n{fl}\n"
+                f"Đây là yêu cầu thêm: làm cùng với việc đang dở, không làm lại phần đã xong; tin nhắn bảo đổi hướng hay dừng phần nào thì theo "
+                f"tin nhắn. Xem lại phần đã làm (work/*/status.json, file đã tạo) rồi tiếp tục. Làm theo {md_name(t)}.{wait}")
     if kind == "timer":
         return (f"Tới giờ hẹn làm tiếp (bạn đã hẹn ở lượt trước). Việc cần làm tiếp:\n\n{text or '(xem lại lượt trước)'}\n\n"
                 f"Xem lại hạn mức (\"{py_console()}\" \"{APP}\" quota) rồi tự quyết: làm tiếp, chuyển bên khác hay hẹn tiếp. "
                 f"Làm theo {md_name(t)}.{wait}")
     if kind == "followup":
-        return f"Tin nhắn mới của người dùng:\n\n{text}\n{fl}{ROUTE_NOTE[route(t, nxt)]}\nLàm theo {md_name(t)}."
+        return f"Tin nhắn mới của người dùng:\n\n{text}\n{fl}{rules_hint(t)}\nLàm theo {md_name(t)}."
     return f"Task bị dừng giữa chừng. Xem lại phần đã làm (work/*/status.json, file đã tạo) và làm tiếp phần còn dở. Làm theo {md_name(t)}.{wait}"
 
 
@@ -443,9 +447,7 @@ Task này là một cuộc trò chuyện nhiều lượt.
    Giao diện web: chạy server local, chụp màn hình bằng trình duyệt có sẵn
    (Edge/Chrome: --headless=new --screenshot=<file.png> --window-size=1280,800 <url>) rồi tự xem ảnh, sửa chỗ lệch.
 5. Lỗi -> sửa -> chạy lại tới khi qua (tối đa 3 vòng cho một lỗi; vẫn lỗi thì báo rõ lỗi gì, đã thử gì).
-6. Báo cáo ngắn bằng lời dễ hiểu: đã đổi gì (ý chính). KHÔNG kèm mục "đã kiểm tra / đã chạy thử" hay "còn tồn tại / chưa thử"; chỉ nói khi có lỗi làm kết quả chưa dùng được. Không dán code dài.
-- Git: KHÔNG commit/push/đổi nhánh trừ khi người dùng yêu cầu. App tự lưu điểm khôi phục trước mỗi lượt (nút Khôi phục).
-- Không xoá file/thư mục của dự án ngoài yêu cầu. Không ghi mật khẩu/key vào code.
+- App tự lưu điểm khôi phục thư mục dự án trước mỗi lượt (nút Khôi phục). Không xoá file/thư mục của dự án ngoài yêu cầu.
 - Lệnh chạy lâu (server): chạy nền, nhớ tắt khi xong.
 
 ## GPT/Gemini hỗ trợ (chỉ khi có lợi rõ; việc chính bạn tự làm)
@@ -464,11 +466,10 @@ App hiện thông báo + nút Cài cho người dùng; cài xong app tự chạy
 
 
 def code_md(txt, t, py="", app=""):
-    """Hướng dẫn Code mode: thay mục Vai trò/Chia việc/Nghiệm thu/chế độ bằng quy trình code + chạy thử."""
+    """Hướng dẫn Code mode: thay mục Vai trò/Nghiệm thu/chế độ bằng quy trình code + chạy thử."""
     code = CODE_MD.format(pdir=t.get("pdir", ""))
     txt = re.sub(r"(?ms)^## Vai trò\n.*?(?=^## )", lambda m: code + "\n", txt, count=1)
-    for sec in ("Chia việc", "Nghiệm thu", "Ảnh có đánh dấu", "Ảnh & storyboard"):
-        txt = re.sub(r"(?ms)^## " + re.escape(sec) + r"\n.*?(?=^## )", "", txt, count=1)
+    txt = re.sub(r"(?ms)^## Nghiệm thu[^\n]*\n.*?(?=^## )", "", txt, count=1)
     mode_sec = ("## Chế độ: Code (Opus, suy nghĩ medium)\n- Ưu tiên chạy được và đúng; chạy thử thật trước khi báo xong.\n\n"
                  + (f"""## Giám sát (BẬT)
 - Có test tự động chạy được và ĐÃ QUA HẾT (test cũ + test bạn viết cho từng ý của yêu cầu) -> KHÔNG gọi giám khảo, báo xong luôn.

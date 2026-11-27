@@ -208,7 +208,7 @@ class H(BaseHTTPRequestHandler):
                     wjson(bj, b)
             return self.send(200, {"ais": ai_state(), "output": CFG["output"],
                                    "projects": [{"id": p["id"], "name": p["name"]} for p in projects()],
-                                   "templates": [{"id": x["id"], "name": x["name"], "steps": len(x.get("steps", []))} for x in templates()], "instructions": CFG["instructions"], "mem_auto": mem_text(),
+                                   "templates": [{"id": x["id"], "name": x["name"], "steps": len(x.get("steps", []))} for x in templates()], "instructions": CFG["instructions"], "reply_style": CFG.get("reply_style") or "short", "mem_auto": mem_text(),
                                    "tasks": ts, "version": VERSION, "release": RELEASE, "autostart": autostart_on(), "os": "mac" if IS_MAC else "win" if IS_WIN else "other", "updated": upd, "update_fail": fail,
                                    "machine": {"cpu": CPU, "ram": RAM_GB, "max": MAX_RUNNING}, "setup": setup_state(),
                                    "learn": learn_state(), "remote": remote_state()})
@@ -282,6 +282,9 @@ class H(BaseHTTPRequestHandler):
                 mem_save(d.get("auto"))
             if "instructions" in d:
                 CFG["instructions"] = str(d.get("instructions") or "")[:20000]
+                save_cfg()
+            if d.get("reply_style") in ("short", "detail"):
+                CFG["reply_style"] = d["reply_style"]
                 save_cfg()
             return {"ok": True, "msg": "Đã lưu ghi nhớ"}
         if path == "/api/gemini-key":

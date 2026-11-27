@@ -1,4 +1,5 @@
-# Maestro — core/router.py: Lễ tân: phân loại tin nhắn (hỏi đáp / việc nhỏ / đầy đủ).
+# Maestro — core/router.py: Lễ tân: phân loại tin nhắn (hỏi đáp / việc nhỏ / đầy đủ) — CHỈ để app chọn model, mức suy nghĩ;
+# không gửi chữ phân loại cho Claude (v14: đoán theo từ khoá dễ sai, đá nhau với luật khác).
 # Mọi module dùng chung 1 không gian tên (dev: app.py nạp lần lượt; build: ghép thành 1 file),
 # nên KHÔNG import chéo giữa các module. Thứ tự nạp: PARTS trong assemble.py.
 
@@ -20,15 +21,6 @@ def route(t, nxt):
     return "full"
 
 
-ROUTE_NOTE = {
-    "ask": "\nĐường xử lý (app tự phân loại): HỎI ĐÁP - trả lời thẳng, ngắn gọn; không giao worker, không tạo file, không giám khảo "
-           "(cần tra web nhiều nguồn mới giao gemini). Nếu thật ra người dùng bảo làm thì làm như bình thường.",
-    "small": "\nĐường xử lý (app tự phân loại): VIỆC NHỎ - tự làm 1 mạch hoặc giao đúng 1 worker; bỏ giám khảo và bước kiểm tra riêng. "
-             "Nếu thấy việc lớn hơn dự kiến thì làm theo quy trình đầy đủ.",
-    "full": "",
-}
-
-
 ASK_RE = re.compile(r"\?\s*$|có thể\b.{0,80}\bkhông\b|làm (?:thế|sao) nào|có cách nào|tại sao|vì sao|là gì|ở đâu|bao nhiêu|"
                     r"nên\b.{0,60}\bkhông\b|so sánh|tìm hiểu|tra cứu|research|giải thích|nghĩa là", re.I | re.M)
 DO_RE = re.compile(r"\b(?:làm đi|làm luôn|fix|sửa|tạo|viết|triển khai|áp dụng|update|cập nhật|thêm|xoá|xóa|đổi|build|chạy|"
@@ -41,3 +33,15 @@ def is_ask(t, nxt):
         return False
     text = nxt.get("text") or (t.get("text", "") if nxt.get("kind") == "start" or not t.get("session_started") else "")
     return 0 < len(text) <= 600 and bool(ASK_RE.search(text)) and not DO_RE.search(text)
+
+
+DEEP_RE = re.compile(r"tại sao|vì sao|nguyên nhân|giải thích|phân tích|đánh giá|nên\b.{0,40}\bhay\b|ưu nhược|rủi ro", re.I)
+
+
+def ask_effort(t, nxt):
+    """Mức suy nghĩ cho câu hỏi: hỏi nhanh -> low (trả lời nhanh, ngắn); hỏi cần lập luận (tại sao, nguyên nhân, so sánh...) ->
+    giữ mức của chế độ. None = không phải câu hỏi (theo chế độ)."""
+    if route(t, nxt) != "ask":
+        return None
+    text = nxt.get("text") or (t.get("text", "") if nxt.get("kind") == "start" or not t.get("session_started") else "")
+    return None if DEEP_RE.search(text) else "low"

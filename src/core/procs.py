@@ -65,10 +65,40 @@ def pid_alive(pid):
         return False
 
 
+def _take_lock(d, n):
+    """Giữ 1 trong n khoá ở thư mục d (chờ tới khi có chỗ); tự trả khi tiến trình thoát; khoá của tiến trình đã chết được thu hồi."""
+    import atexit
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    while True:
+        for i in range(n):
+            f = d / f"{i}.lock"
+            try:
+                fd = os.open(str(f), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                atexit.register(lambda f=f: f.unlink(missing_ok=True))
+                return f
+            except FileExistsError:
+                try:
+                    pid = int(f.read_text() or 0)
+                except Exception:
+                    pid = 0
+                if pid != os.getpid() and not pid_alive(pid):
+                    f.unlink(missing_ok=True)
+            except OSError:
+                return None
+        time.sleep(3)
+
+
 def worker_slot():
     """Giới hạn CỨNG số worker chạy cùng lúc trên máy (app tự ép, không dựa vào hướng dẫn cho AI).
     Mỗi worker giữ 1 file khoá data/slots/<i>.lock; hết chỗ thì chờ; worker bị tắt ngang -> khoá cũ tự được thu hồi."""
     import atexit
+    if os.environ.get("AIO_SOLO") == "1":       # Eco / Free / máy yếu: 1 worker một lúc trong task (ép bằng mã, không viết thành luật)
+        _take_lock(Path.cwd() / ".slots", 1)
     d = DATA / "slots"
     d.mkdir(parents=True, exist_ok=True)
     n = max(1, MAX_RUNNING * MAX_WORKERS, MAX_PER_TASK)

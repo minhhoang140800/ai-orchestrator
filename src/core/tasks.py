@@ -200,15 +200,13 @@ def act(tid, action, text="", files=None, template="", urgent=False):
                 if wdir(t).exists():
                     write_claude_md(t)
             tmsg(t, "user", text, files=files)
-            if s == "running" and urgent:              # nút "Gửi gấp": ngắt, Claude điều chỉnh rồi làm tiếp
-                q = t.pop("_queued", None)             # tin đã xếp hàng trước đó: gộp vào tin gấp
-                t["_redirect"] = {"kind": "urgent", "text": ((q or {}).get("text", "") + "\n\n" + text).strip(),
-                                  "files": (q or {}).get("files", []) + files}
-                kill_tree(PROCS.get(tid))
-            elif s == "running":                       # mặc định: XẾP HÀNG, không ngắt lượt đang làm (khỏi mất việc);
-                q = t.setdefault("_queued", {"text": "", "files": []})   # chạy ngay khi lượt hiện tại xong
-                q["text"] = (q["text"] + "\n\n" + text).strip()
-                q["files"] = q["files"] + files
+            if s == "running":                         # v14: gửi thêm lúc đang làm (mọi chế độ, cả Code) -> Claude nhận NGAY để làm
+                q = t.pop("_queued", None)             # cùng việc đang dở: ngắt lượt Claude, worker vẫn chạy tiếp; Claude nối
+                r = t.get("_redirect") or {}           # phiên cũ, xem phần đã làm rồi làm tiếp kèm yêu cầu mới (không làm lại)
+                t["_redirect"] = {"kind": "urgent", "text": "\n\n".join(x for x in (r.get("text", ""), (q or {}).get("text", ""), text) if x).strip(),
+                                  "files": r.get("files", []) + (q or {}).get("files", []) + files}
+                if not r:                              # chưa ngắt (tin thứ 2 tới trước khi lượt mới chạy: chỉ gộp)
+                    kill_tree(PROCS.get(tid))
             elif s == "queued" and t.get("next"):      # chưa chạy: gộp vào yêu cầu đang chờ
                 n = t["next"]
                 n["text"] = (n.get("text", "") + "\n\n" + text).strip()
@@ -247,8 +245,9 @@ def act(tid, action, text="", files=None, template="", urgent=False):
                 m.get("dir") == text for m in t.get("messages", [])):
             open_path(Path(text))
             return {"ok": True}
-        elif action == "open":
-            open_path(out_dir(t) if CFG.get("output") and out_dir(t).exists() else tdir(t))
+        elif action == "open":                         # lần xuất gần nhất ra nơi người dùng chỉ định (ổ chung...) -> mở nơi đó
+            last = next((m["dir"] for m in reversed(t.get("messages", [])) if m.get("dir") and Path(m["dir"]).is_dir()), None)
+            open_path(Path(last) if last else out_dir(t) if CFG.get("output") and out_dir(t).exists() else tdir(t))
             return {"ok": True}
         elif action == "delete" and s not in ("running", "queued"):
             TASKS.pop(tid, None)
@@ -312,8 +311,13 @@ def submit_task(tid, files):
         tmsg(t, "user", t["text"], files=files)
         t["status"] = "queued"
         t["next"] = {"kind": "start", "files": files}
-        t["titling"] = True
         t["created_ts"] = time.time()
+        own = first_line_title(t["text"])
+        if own:                                  # người dùng tự đặt tên ở dòng đầu: dùng nguyên, không nhờ model đặt
+            t["title"] = own
+        else:
+            t["titling"] = True
         tsave(t)
-    threading.Thread(target=gen_title, args=(t,), daemon=True).start()
+    if not own:
+        threading.Thread(target=gen_title, args=(t,), daemon=True).start()
     return {"ok": True}
