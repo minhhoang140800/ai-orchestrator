@@ -52,10 +52,17 @@ def open_sub_dir(tid, sub):
         return {"error": "Không tìm thấy việc"}
     d = wdir(t) / "work" / sub
     vs = sorted((v for v in d.iterdir() if v.is_dir() and re.fullmatch(r"v\d+", v.name)), key=lambda v: int(v.name[1:])) if d.is_dir() else []
-    if not vs:
+    sts = [rjson(v / "status.json", {}) or {} for v in reversed(vs)]
+    ex = next((x["export_dir"] for x in sts if x.get("export_dir") and Path(x["export_dir"]).is_dir()), None)
+    if not ex:                                   # việc đang chạy / chưa xuất file: mở thư mục nhóm sẽ nhận file (không mở nháp work/)
+        args = next((x.get("args") for x in sts if x.get("args")), None) or []
+        grp = args[args.index("--group") + 1] if "--group" in args and args.index("--group") + 1 < len(args) else ""
+        g = export_group(Path(sub), grp)
+        old = sorted((p for p in wdir(t).parent.glob("*-" + g) if p.is_dir() and re.fullmatch(r"\d{8}-" + re.escape(g), p.name)), reverse=True)
+        ex = str(old[0]) if old else None
+    if not ex and not vs:
         return {"error": "Thư mục việc này đã được dọn (task xong: file nằm trong thư mục kết quả)"}
-    ex = (rjson(vs[-1] / "status.json", {}) or {}).get("export_dir")
-    open_path(ex if ex and Path(ex).is_dir() else vs[-1])
+    open_path(ex or wdir(t).parent)              # chưa có thư mục nhóm: mở thư mục kết quả của task
     return {"ok": True}
 
 

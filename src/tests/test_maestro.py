@@ -633,10 +633,22 @@ class AskUser(unittest.TestCase):
         old = NS["open_path"]
         NS["open_path"] = lambda p, *a: opened.append(Path(p))
         try:
+            w = NS["wdir"](t)
             for v in ("v1", "v2"):
-                (NS["wdir"](t) / "work" / "S1" / v).mkdir(parents=True, exist_ok=True)
-            self.assertEqual(NS["open_sub_dir"]("SD1", "S1"), {"ok": True})
-            self.assertEqual(opened[-1].name, "v2")                          # bản mới nhất
+                (w / "work" / "SS8" / v).mkdir(parents=True, exist_ok=True)
+            NS["wjson"](w / "work" / "SS8" / "v2" / "status.json", {"status": "running", "args": ["--group", "screenshots"]})
+            self.assertEqual(NS["open_sub_dir"]("SD1", "SS8"), {"ok": True})
+            self.assertEqual(opened[-1], w.parent)                            # đang chạy, chưa có nhóm: thư mục kết quả, không mở work/
+            grp = w.parent / "20261126-screenshots"
+            grp.mkdir()
+            NS["open_sub_dir"]("SD1", "SS8")
+            self.assertEqual(opened[-1], grp)                                 # đang chạy: mở thư mục nhóm sẽ nhận file
+            exp = w.parent / "20261127-khac"
+            exp.mkdir()
+            NS["wjson"](w / "work" / "SS8" / "v1" / "status.json", {"status": "completed", "export_dir": str(exp)})
+            NS["wjson"](w / "work" / "SS8" / "v2" / "status.json", {"status": "running"})
+            NS["open_sub_dir"]("SD1", "SS8")
+            self.assertEqual(opened[-1], exp)                                 # lần trước đã xuất: mở đúng nơi đó
             self.assertIn("error", NS["open_sub_dir"]("SD1", "../../x"))     # chặn đường dẫn lạ
             self.assertIn("error", NS["open_sub_dir"]("SD1", "S9"))
         finally:
