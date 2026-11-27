@@ -45,7 +45,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .pill{font-size:12px;border-radius:99px;padding:1px 9px;white-space:nowrap;background:var(--soft);color:var(--mute)}
 .pill.login{background:#fbf0de;color:var(--wait)}.sd.login{background:var(--wait)}.pill.running,.pill.queued{background:#e6eefb;color:var(--run)}.pill.waiting{background:#fbf0de;color:var(--wait)}
 .pill.done,.pill.completed{background:#e3f2ea;color:var(--ok)}.pill.failed,.pill.rejected,.pill.limit,.pill.timeout{background:#f8e5e2;color:var(--bad)}
-.scroll{flex:1;overflow:auto;min-height:0}
+.scroll{flex:1;overflow:auto;min-height:0;contain:strict}
 .thread{max-width:780px;margin:0 auto;padding:22px 22px 10px;display:flex;flex-direction:column;gap:16px}
 .msg{white-space:pre-wrap;overflow-wrap:anywhere}
 .msg.user{align-self:flex-end;background:var(--panel);border:1px solid var(--line);border-radius:16px 16px 4px 16px;padding:9px 13px;max-width:85%}

@@ -737,6 +737,58 @@ class NoConsole(unittest.TestCase):
         self.assertTrue(callable(NS["agy_update_loop"]))
 
 
+class ResumeTimer(unittest.TestCase):
+    """Worker hết lượt: Claude tự quyết chuyển hay chờ; chờ thì hẹn giờ qua tasks/resume_at.txt (app giữ hẹn, không treo)."""
+    def test_resume_at_file(self):
+        t = {"id": "RT1", "text": "x", "status": "done", "folder": "03 - Hẹn", "messages": []}
+        d = NS["wdir"](t) / "tasks"
+        d.mkdir(parents=True, exist_ok=True)
+        self.assertIsNone(NS["resume_at"](t))                                  # không hẹn
+        at = NS["datetime"].datetime.now() + NS["datetime"].timedelta(minutes=20)
+        (d / "resume_at.txt").write_text(at.strftime("%H:%M") + chr(10) + "Vẽ lại icon 3, icon 5, logo C bằng ChatGPT", encoding="utf-8")
+        r = NS["resume_at"](t)
+        self.assertTrue(abs(r[0] - at.replace(second=0, microsecond=0).timestamp()) < 2)
+        self.assertEqual(r[1], "Vẽ lại icon 3, icon 5, logo C bằng ChatGPT")
+        self.assertFalse((d / "resume_at.txt").exists())                       # đọc xong xoá (không hẹn lặp)
+        past = NS["datetime"].datetime.now() - NS["datetime"].timedelta(minutes=5)
+        (d / "resume_at.txt").write_text(past.strftime("%H:%M"), encoding="utf-8")
+        self.assertLessEqual(NS["resume_at"](t)[0], NS["time"].time() + 1)    # giờ vừa qua: chạy ngay
+        (d / "resume_at.txt").write_text("khi nào rảnh", encoding="utf-8")
+        self.assertIsNone(NS["resume_at"](t))                                  # sai định dạng: bỏ qua
+
+    def test_user_message_cancels_timer_hold(self):
+        t = {"id": "RT2", "text": "x", "status": "queued", "folder": "03 - Hẹn", "messages": [], "created": "x",
+             "hold_until": NS["time"].time() + 900, "hold_timer": True, "next": {"kind": "timer", "text": "vẽ lại 3 ảnh"}}
+        NS["TASKS"]["RT2"] = t
+        try:
+            NS["act"]("RT2", "send", "làm bằng Gemini luôn")
+            self.assertNotIn("hold_until", t)                                  # tin người dùng chạy ngay, không chờ giờ hẹn
+            self.assertEqual(t["next"]["kind"], "urgent")
+            self.assertIn("vẽ lại 3 ảnh", t["next"]["text"])
+            self.assertIn("làm bằng Gemini luôn", t["next"]["text"])
+            t2 = {**t, "id": "RT3", "hold_until": NS["time"].time() + 900, "next": {"kind": "resume"}}
+            t2.pop("hold_timer", None)
+            NS["TASKS"]["RT3"] = t2
+            NS["act"]("RT3", "send", "tiếp đi")
+            self.assertIn("hold_until", t2)                                    # Claude hết lượt: vẫn phải chờ reset
+        finally:
+            NS["TASKS"].pop("RT2", None)
+            NS["TASKS"].pop("RT3", None)
+
+    def test_prompt_rules(self):
+        t = {"id": "RT4", "text": "x", "mode": "balanced", "folder": "03 - Hẹn", "watch": False}
+        NS["write_claude_md"](t)
+        md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("Worker hết lượt: BẠN tự quyết chuyển hay chờ", md)
+        self.assertIn("KHÔNG viết vòng lặp sleep", md)
+        self.assertIn("tasks/resume_at.txt", md)
+        t.update(session_started=True)
+        p = NS["_build_prompt"](t, {"kind": "timer", "text": "vẽ lại 3 ảnh"})
+        self.assertIn("Tới giờ hẹn", p)
+        self.assertIn("vẽ lại 3 ảnh", p)
+        self.assertIn("quota", p)
+
+
 class AskUser(unittest.TestCase):
     """Câu trả lời kết thúc bằng câu hỏi -> task 'Chờ bạn trả lời'; luật hỏi trước khi bắt tay khi đề bài mơ hồ."""
     def test_trailing_question(self):

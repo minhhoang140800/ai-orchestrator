@@ -45,6 +45,28 @@ def finish_clean(t, wi=None):
         t.pop("_cleaning", None)
 
 
+def resume_at(t):
+    """tasks/resume_at.txt do Claude ghi khi muốn chờ (vd worker hết lượt, reset 14:21): dòng 1 = giờ HH:MM, còn lại = việc
+    làm tiếp -> (epoch, ghi chú); đọc xong xoá. Giờ đã qua -> chạy ngay; tối đa 24 giờ."""
+    f = wdir(t) / "tasks" / "resume_at.txt"
+    if not f.is_file():
+        return None
+    try:
+        lines = f.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+        f.unlink()
+        m = re.search(r"(\d{1,2})[:h](\d{2})", lines[0] if lines else "")
+        if not m:
+            return None
+        now_ = datetime.datetime.now()
+        at = now_.replace(hour=int(m.group(1)) % 24, minute=int(m.group(2)), second=0, microsecond=0)
+        if at < now_ - datetime.timedelta(hours=1):     # giờ đã qua lâu -> hiểu là ngày mai
+            at += datetime.timedelta(days=1)
+        return max(time.time(), at.timestamp()), "\n".join(lines[1:]).strip()
+    except Exception as e:
+        dlog(f"resume_at {t.get('id')}: {e}")
+        return None
+
+
 def open_sub_dir(tid, sub):
     """Mở thư mục kết quả của 1 việc đã giao (work/<ID>/vN mới nhất, gồm cả bên làm thay gpt/ gemini/)."""
     t = TASKS.get(tid)
@@ -191,8 +213,10 @@ def act(tid, action, text="", files=None, template="", urgent=False):
                 n = t["next"]
                 n["text"] = (n.get("text", "") + "\n\n" + text).strip()
                 n["files"] = (n.get("files") or []) + files
-                if n.get("kind") == "resume":
+                if n.get("kind") in ("resume", "timer"):
                     n["kind"] = "urgent"
+                if t.pop("hold_timer", None):          # đang chờ giờ hẹn của Claude (không phải Claude hết lượt): chạy ngay
+                    t.pop("hold_until", None)
             else:
                 t["status"] = "queued"
                 t["next"] = {"kind": "answer" if s == "waiting" else "followup", "text": text, "files": files}

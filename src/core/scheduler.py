@@ -335,6 +335,14 @@ def watch(t, p, nxt):
             tl_mark(t, "(Claude suy nghĩ)")
         elif typ == "result":
             result = ev
+            if pm != "codex":                 # đã có câu trả lời nhưng lệnh chạy ngầm (vd vòng chờ) giữ tiến trình sống -> task
+                def _reap(p=p):              # trông như treo: chờ 20 giây rồi dừng hẳn để kết thúc lượt
+                    time.sleep(20)
+                    if p.poll() is None:
+                        dlog(f"pm linger after result: kill {p.pid}")
+                        t["_reaped"] = True
+                        kill_tree(p)
+                threading.Thread(target=_reap, daemon=True).start()
     act["done"] = True
     th_err.join(timeout=10)
     err = "".join(errbuf)
@@ -346,6 +354,7 @@ def watch(t, p, nxt):
         raw.write("--- stderr ---\n" + err)
     raw.close()
     p.wait()
+    rc0 = 0 if t.pop("_reaped", False) else p.returncode    # dừng vì lệnh ngầm còn chạy sau khi đã trả lời: vẫn là lượt thành công
     if pm == "codex" and result and not result.get("is_error"):
         f = wdir(t) / ".pm_last.md"
         result["result"] = (f.read_text("utf-8", "replace").strip() if f.is_file() else "") or cx["last"] or "Xong."
@@ -378,12 +387,12 @@ def watch(t, p, nxt):
             end_work(t, "done")
             t["status"] = "waiting"
             qt = q.read_text(encoding="utf-8").strip()
-            rt = ((result or {}).get("result") or "").strip() if p.returncode == 0 and not (result or {}).get("is_error") else ""
+            rt = ((result or {}).get("result") or "").strip() if rc0 == 0 and not (result or {}).get("is_error") else ""
             if rt and qt not in rt:              # có câu trả lời + câu hỏi: hiện CẢ HAI (trước đây chỉ hiện câu hỏi, mất kết quả)
                 qt = rt + "\n\n" + qt
             fs, fd = new_files(t, since, qt)
             tmsg(t, "claude", qt, kind="question", files=fs, dir=fd)
-        elif p.returncode == 0 and result and not result.get("is_error"):
+        elif rc0 == 0 and result and not result.get("is_error"):
             end_work(t, "done")
             t["status"] = "done"
             t["finished"] = now()
@@ -397,7 +406,7 @@ def watch(t, p, nxt):
                 tmsg(t, "claude", rt, files=fs, dir=fd)
                 threading.Thread(target=after_turn, args=(t, t.get("wi")), daemon=True).start()   # dọn nháp + cập nhật bộ nhớ (nền)
         else:
-            msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {p.returncode}"
+            msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {rc0}"
             if is_limit(msg[-1500:]) or is_limit(err):          # AI quản lý hết hạn mức: chờ tới giờ reset rồi tự chạy tiếp
                 lm = note_limit(pm, msg + "\n" + err[-2000:])
                 end_work(t, "limit")
@@ -410,6 +419,11 @@ def watch(t, p, nxt):
                 end_work(t, "failed")
                 t["status"] = "failed"
                 tmsg(t, "claude", msg, kind="error")
+        rz = resume_at(t)                         # Claude hẹn giờ làm tiếp (vd chờ worker reset hạn mức) -> app giữ hẹn, không treo
+        if rz and t["status"] == "done":
+            t["status"] = "queued"
+            t["hold_until"], t["hold_timer"] = rz[0], True
+            t["next"] = {"kind": "timer", "text": rz[1]}
         qd = t.get("_queued")                     # tin nhắn gửi trong lúc lượt này chạy (đã xếp hàng): chạy ngay sau
         if qd and t["status"] in ("done", "waiting", "failed"):
             t.pop("_queued", None)
@@ -420,8 +434,10 @@ def watch(t, p, nxt):
             n = t["next"]
             n["text"] = (n.get("text", "") + "\n\n" + qd["text"]).strip()
             n["files"] = (n.get("files") or []) + qd["files"]
-            if n.get("kind") == "resume":
+            if n.get("kind") in ("resume", "timer"):
                 n["kind"] = "urgent"
+            if t.pop("hold_timer", None):        # đang chờ giờ hẹn của Claude: tin người dùng chạy ngay
+                t.pop("hold_until", None)
         t["_redirect"] = None
         tsave(t)
     try:

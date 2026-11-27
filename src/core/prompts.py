@@ -214,6 +214,10 @@ Giao việc: ghi yêu cầu đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu 
 Nhiều việc: giao cả lô bằng --bg (trả về ngay), rồi chờ MỘT lần: "{py}" "{app}" wait work/S1 work/S2 work/S3
 App TỰ lo: chọn model (không truyền --model), giới hạn số worker chạy cùng lúc, thời gian chờ. Chọn worker nào là việc của
 bạn; worker lỗi/hết lượt thì status báo lỗi, bạn quyết giao bên kia, chờ hay tự làm (app không tự chuyển).
+Worker hết lượt: BẠN tự quyết chuyển hay chờ, dựa trên: còn bao lâu tới giờ reset, bên kia có làm được không (đăng nhập,
+  hạn mức, loại việc), có cần đồng bộ phong cách với phần đã làm không. Chuyển: giao bên kia ngay, ghi 1 câu lý do trong trả lời.
+  Chờ: KHÔNG viết vòng lặp sleep / chờ ngầm (làm task treo, người dùng không nhắn được). Ghi tasks/resume_at.txt (dòng 1: giờ
+  HH:MM, các dòng sau: việc làm tiếp) rồi trả lời và KẾT THÚC lượt; app tự gọi bạn đúng giờ, người dùng vẫn nhắn được lúc chờ.
 Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở export_dir trong status. Sửa lỗi: giao lại cùng --out. Worker lỗi/không chạy: coi như không có.
 
 {workers_md(t, py, app, on)}
@@ -222,7 +226,7 @@ Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở expor
 
 {brain_md}{tpl_md}## Chế độ: {mode_name}
 {mode_rules}
-- Worker báo "limit": chuyển worker khác hoặc tự làm; không đảm bảo chất lượng thì hỏi người dùng.{" Bước QUÁ khó (đã thử không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if mode == 'pro' else ""}
+- Worker báo "limit": tự quyết chuyển bên / chờ (mục Giao việc) hoặc tự làm; không đảm bảo chất lượng thì hỏi người dùng.{" Bước QUÁ khó (đã thử không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if mode == 'pro' else ""}
 
 
 ## Khi cần người dùng quyết định
@@ -391,6 +395,10 @@ def _build_prompt(t, nxt):
     if kind == "urgent":
         return (f"Người dùng vừa gửi tin nhắn trong lúc bạn đang làm (bạn đã bị ngắt):\n\n{text}\n{fl}\n"
                 f"Xem lại phần đã làm (work/*/status.json, file đã tạo), điều chỉnh theo tin nhắn này rồi tiếp tục. Làm theo {md_name(t)}.{wait}")
+    if kind == "timer":
+        return (f"Tới giờ hẹn làm tiếp (bạn đã hẹn ở lượt trước). Việc cần làm tiếp:\n\n{text or '(xem lại lượt trước)'}\n\n"
+                f"Xem lại hạn mức (\"{py_console()}\" \"{APP}\" quota) rồi tự quyết: làm tiếp, chuyển bên khác hay hẹn tiếp. "
+                f"Làm theo {md_name(t)}.{wait}")
     if kind == "followup":
         return f"Tin nhắn mới của người dùng:\n\n{text}\n{fl}{ROUTE_NOTE[route(t, nxt)]}\nLàm theo {md_name(t)}."
     return f"Task bị dừng giữa chừng. Xem lại phần đã làm (work/*/status.json, file đã tạo) và làm tiếp phần còn dở. Làm theo {md_name(t)}.{wait}"
