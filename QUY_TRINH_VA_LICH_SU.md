@@ -139,6 +139,17 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 
 ---
 
+## Chờ duyệt — đã note, CHƯA làm (27/11, sau v12.2)
+- A. Luật cuối lượt: chỉ nêu phần còn tồn tại khi có vấn đề thật ảnh hưởng kết quả / việc người dùng phải làm tiếp; không có thì bỏ hẳn mục đó, không viết "không có", không liệt kê việc chưa kiểm tra nhỏ nhặt.
+- B. Bộ nhớ tự ghi: không ghi khuôn mẫu báo cáo ("Đã sửa", "Còn tồn tại", "đã thử/chưa thử"); lọc bỏ dòng đó nếu đang có.
+- G1. Chỉ tự vẽ lại khi ảnh trượt tiêu chí BẮT BUỘC (sai nhân vật, sai nội dung, sai kích thước, có chữ khi yêu cầu không chữ...); lỗi thẩm mỹ -> đạt kèm ghi chú.
+- G2. Tối đa 1 vòng tự vẽ lại (thay vì 2); bản vẽ lại vẫn trượt -> giữ bản tốt hơn, không vẽ tiếp.
+- G3. Giám khảo nhanh hơn, mục tiêu 10-20 giây/lần: chấm bằng ảnh thu nhỏ, giới hạn số bước phiên chấm, chỉ đưa ảnh mẫu khi tiêu chí cần so mẫu.
+- H1. Giám sát mặc định TẮT cho Balanced; chỉ bật cho Pro/Code hoặc khi người dùng bấm (tắt = Claude chỉ giao việc + xem 1 lần, như v1.7).
+- H2. Đề bài gửi ChatGPT vẽ ảnh: kiểu ngắn như v1.7, không gắn tiêu chí khi Giám sát tắt.
+- H3. ChatGPT vẽ ảnh dùng model + mức suy nghĩ mặc định của tài khoản (như v1.7), không ép medium.
+Bằng chứng (log 27/11): lượt 09:28 thêm 2 screenshot mất 10m27s — mỗi ảnh 3 lần vẽ (~2 phút) + 3 lần chấm (~1 phút), đều trượt vì lý do thẩm mỹ, cuối cùng dùng lại bản 1/bản 2. Lượt 17:15 ngày 26/11: 6/8 việc chấm trượt, chạy tới lần 3, ChatGPT +39% phiên.
+
 ## 4. Quyết định đã chốt (giữ nguyên trừ khi người dùng đổi)
 
 - Claude làm việc quan trọng/cần tư duy và viết lách; việc khối lượng giao worker.
