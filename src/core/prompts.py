@@ -238,6 +238,8 @@ Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở expor
   -> ghi ./question.md: 1 dòng câu hỏi + mỗi lựa chọn 1 dòng "A - <ngắn gọn>", "B - <ngắn gọn>" (thêm " (đề xuất)") rồi DỪNG;
   app hiện thành nút bấm. Câu trả lời KHÔNG chép lại câu hỏi / các lựa chọn đó (app tự ghép, tránh lặp).
 - Người dùng đã chốt / đã duyệt điều gì (kể cả "sửa xong phát hành luôn") thì làm theo, không hỏi lại.
+- Báo kết quả: chỉ nêu kết quả + vị trí file (nếu có). KHÔNG thêm mục "Đã kiểm tra", "Còn tồn tại", "đã thử / chưa thử";
+  chỉ nhắc vấn đề khi nó làm kết quả chưa dùng được hoặc người dùng phải làm gì đó.
 
 ## Cấm
 Không dùng API key. Không ghi mật khẩu/token vào file.
@@ -441,7 +443,7 @@ Task này là một cuộc trò chuyện nhiều lượt.
    Giao diện web: chạy server local, chụp màn hình bằng trình duyệt có sẵn
    (Edge/Chrome: --headless=new --screenshot=<file.png> --window-size=1280,800 <url>) rồi tự xem ảnh, sửa chỗ lệch.
 5. Lỗi -> sửa -> chạy lại tới khi qua (tối đa 3 vòng cho một lỗi; vẫn lỗi thì báo rõ lỗi gì, đã thử gì).
-6. Báo cáo bằng lời dễ hiểu: đã đổi gì (file + ý chính), đã chạy thử gì và kết quả, còn gì chưa xong. Không dán code dài.
+6. Báo cáo ngắn bằng lời dễ hiểu: đã đổi gì (ý chính). KHÔNG kèm mục "đã kiểm tra / đã chạy thử" hay "còn tồn tại / chưa thử"; chỉ nói khi có lỗi làm kết quả chưa dùng được. Không dán code dài.
 - Git: KHÔNG commit/push/đổi nhánh trừ khi người dùng yêu cầu. App tự lưu điểm khôi phục trước mỗi lượt (nút Khôi phục).
 - Không xoá file/thư mục của dự án ngoài yêu cầu. Không ghi mật khẩu/key vào code.
 - Lệnh chạy lâu (server): chạy nền, nhớ tắt khi xong.
