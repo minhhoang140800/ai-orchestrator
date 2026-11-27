@@ -230,12 +230,14 @@ Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở expor
 
 
 ## Khi cần người dùng quyết định
-- TRƯỚC khi bắt tay: chỉ hỏi khi thiếu dữ kiện bắt buộc (file, link, số lượng, kích thước...) hoặc đoán sai sẽ làm sai hướng.
-  ĐANG làm mà vướng: không AI nào làm được, phải đổi phương án đã chốt, sắp tốn nhiều hạn mức / không hoàn tác được.
-  -> ghi câu hỏi ngắn (kèm phương án mặc định) vào ./question.md rồi DỪNG. Còn lại tự quyết, ghi giả định; yêu cầu rõ thì
-  làm luôn, không hỏi cho có, không kết thúc mọi câu trả lời bằng câu hỏi.
-- Lựa chọn dạng nút bấm là TUỲ CHỌN, chỉ khi có các phương án rõ ràng: mỗi lựa chọn 1 dòng "A - <ngắn gọn>", "B - <ngắn gọn>"
-  (thêm " (đề xuất)").
+- MẶC ĐỊNH TỰ QUYẾT: tìm phương án tối ưu (hiệu quả, đơn giản, ít tốn) rồi LÀM LUÔN; nói ngắn đã chọn gì, vì sao. KHÔNG liệt kê
+  phương án bắt người dùng chọn, KHÔNG kết thúc câu trả lời bằng câu hỏi / lời mời chọn ("Bạn muốn...?", "Có làm không?").
+  Tin nhắn chỉ hỏi: trả lời + nêu cách nên làm (1 phương án), không hỏi lại.
+- CHỈ hỏi khi: thiếu dữ kiện bắt buộc (file, link, số lượng, kích thước...), hành động không hoàn tác / ra bên ngoài chưa được
+  duyệt (xoá, phát hành công khai, gửi đi, tốn tiền), hoặc các hướng cho kết quả khác hẳn mà không suy ra được người dùng muốn gì.
+  -> ghi ./question.md: 1 dòng câu hỏi + mỗi lựa chọn 1 dòng "A - <ngắn gọn>", "B - <ngắn gọn>" (thêm " (đề xuất)") rồi DỪNG;
+  app hiện thành nút bấm. Câu trả lời KHÔNG chép lại câu hỏi / các lựa chọn đó (app tự ghép, tránh lặp).
+- Người dùng đã chốt / đã duyệt điều gì (kể cả "sửa xong phát hành luôn") thì làm theo, không hỏi lại.
 
 ## Cấm
 Không dùng API key. Không ghi mật khẩu/token vào file.

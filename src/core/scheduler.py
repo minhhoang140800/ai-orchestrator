@@ -32,6 +32,18 @@ def asks_user(text):
     return bool(lines) and bool(ASK_END.search(lines[-1])) and len(lines[-1]) <= 400
 
 
+OPT_LINE = re.compile(r"^\s*(?:[-•*]\s*)?\**[A-F]\**\s*[-–.:)]\s+\S")
+
+
+def strip_ask(text):
+    """Bỏ các dòng lựa chọn "A - ..." và đoạn hỏi cuối (đã có trong question.md) khỏi câu trả lời, giữ phần kết quả."""
+    lines = [x for x in (text or "").splitlines() if not OPT_LINE.match(re.sub(r"[`_]", "", x))]
+    while lines and (not lines[-1].strip() or asks_user(lines[-1])
+                     or re.search(r"(chọn|lựa chọn)\s*:?\s*\**$", lines[-1].strip(), re.I)):
+        lines.pop()
+    return "\n".join(lines).strip()
+
+
 FOLDER_NO = re.compile(r"^(\d{1,4}) - ")
 
 
@@ -388,22 +400,24 @@ def watch(t, p, nxt):
             t["status"] = "waiting"
             qt = q.read_text(encoding="utf-8").strip()
             rt = ((result or {}).get("result") or "").strip() if rc0 == 0 and not (result or {}).get("is_error") else ""
-            if rt and qt not in rt:              # có câu trả lời + câu hỏi: hiện CẢ HAI (trước đây chỉ hiện câu hỏi, mất kết quả)
-                qt = rt + "\n\n" + qt
+            q_only = qt
+            if rt and qt not in rt:              # có câu trả lời + câu hỏi: hiện CẢ HAI, bỏ phần lựa chọn / câu hỏi cuối trùng
+                rt = strip_ask(rt)               # với question.md (trước đây bị lặp 2 lần và mất nút bấm)
+                qt = (rt + "\n\n" + qt) if rt else qt
             fs, fd = new_files(t, since, qt)
-            tmsg(t, "claude", qt, kind="question", files=fs, dir=fd)
+            tmsg(t, "claude", qt, kind="question", q=q_only, files=fs, dir=fd)
         elif rc0 == 0 and result and not result.get("is_error"):
             end_work(t, "done")
             t["status"] = "done"
             t["finished"] = now()
             rt = (result.get("result") or "Xong.").strip()
             fs, fd = new_files(t, since, rt)
-            if asks_user(rt):                  # câu trả lời kết thúc bằng câu hỏi cho người dùng -> "Chờ bạn trả lời" + thông báo
-                t["status"] = "waiting"
-                tmsg(t, "claude", rt, kind="question", files=fs, dir=fd)
-                threading.Thread(target=mem_maybe, args=(t,), daemon=True).start()      # giữ nháp (task chưa xong); bộ nhớ: theo lượt
+            # câu hỏi cuối câu trả lời (không qua question.md): chỉ là chữ - KHÔNG chuyển "Chờ bạn trả lời", không thông báo,
+            # không nút bấm. Nút A/B chỉ dành cho câu hỏi ngắt giữa chừng (question.md).
+            tmsg(t, "claude", rt, files=fs, dir=fd)
+            if asks_user(rt):                  # hỏi cuối câu: giữ nháp (người dùng có thể bảo làm tiếp); bộ nhớ: theo lượt
+                threading.Thread(target=mem_maybe, args=(t,), daemon=True).start()
             else:
-                tmsg(t, "claude", rt, files=fs, dir=fd)
                 threading.Thread(target=after_turn, args=(t, t.get("wi")), daemon=True).start()   # dọn nháp + cập nhật bộ nhớ (nền)
         else:
             msg = (result or {}).get("result") or err.strip()[-400:] or f"exit {rc0}"

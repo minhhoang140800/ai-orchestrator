@@ -789,6 +789,30 @@ class ResumeTimer(unittest.TestCase):
         self.assertIn("quota", p)
 
 
+class AskOnlyMidway(unittest.TestCase):
+    """Nút A/B chỉ cho câu hỏi ngắt giữa chừng (question.md); câu trả lời không lặp lại lựa chọn; mặc định Claude tự quyết."""
+    def test_strip_duplicate_options(self):
+        rt = ("Bản 1.0.13 đã build và test xong.\n\nFile: D:\\x\\a.zip\n\nBạn chọn:\n\n- A - Phát hành ngay (đề xuất)\n"
+              "- B - Chưa phát hành, tôi tự cài thử\n\nPhát hành lên kênh cập nhật không?")
+        out = NS["strip_ask"](rt)
+        self.assertIn("Bản 1.0.13 đã build và test xong.", out)
+        self.assertIn("a.zip", out)
+        self.assertNotIn("Phát hành ngay", out)                     # lựa chọn đã có trong question.md: không lặp
+        self.assertNotIn("Bạn chọn", out)
+        self.assertNotIn("không?", out)
+        self.assertEqual(NS["strip_ask"]("Đã sửa xong 3 lỗi."), "Đã sửa xong 3 lỗi.")
+
+    def test_prompt_decides_itself(self):
+        t = {"id": "AQ1", "text": "x", "mode": "balanced", "folder": "04 - Hỏi", "watch": False}
+        NS["write_claude_md"](t)
+        md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("MẶC ĐỊNH TỰ QUYẾT", md)
+        self.assertIn("KHÔNG kết thúc câu trả lời bằng câu hỏi", md)
+        self.assertIn("app hiện thành nút bấm", md)
+        self.assertIn("KHÔNG chép lại câu hỏi", md)
+        self.assertNotIn("Lựa chọn dạng nút bấm là TUỲ CHỌN", md)
+
+
 class AskUser(unittest.TestCase):
     """Câu trả lời kết thúc bằng câu hỏi -> task 'Chờ bạn trả lời'; luật hỏi trước khi bắt tay khi đề bài mơ hồ."""
     def test_trailing_question(self):
@@ -837,8 +861,8 @@ class AskUser(unittest.TestCase):
         finally:
             NS["workers_on"] = old_on
         md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("TRƯỚC khi bắt tay", md)
-        self.assertIn("ĐANG làm mà vướng", md)
+        self.assertIn("MẶC ĐỊNH TỰ QUYẾT", md)
+        self.assertIn("CHỈ hỏi khi: thiếu dữ kiện bắt buộc", md)
         self.assertIn('"A - <ngắn gọn>"', md)                     # câu hỏi dạng lựa chọn (nút bấm)
         self.assertIn("chuyển THẲNG vào thư mục nhóm", md)
         self.assertIn("--group <nhóm>", md)
