@@ -1,6 +1,6 @@
 # Maestro — Quy trình làm việc, vấn đề đã gặp và cách giải quyết
 
-Cập nhật đến bản v11.9 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
+Cập nhật đến bản v12.3 (2026-11-26). Source code ở nhánh `main` — đọc kèm `CLAUDE.md` ở đó (kiến trúc, đường dẫn, lệnh build).
 Nguồn: lịch sử commit (v1 → v10.2) và các phiên làm việc với Claude Code. Phần chưa kiểm chứng ghi ở mục 6.
 
 ---
@@ -116,6 +116,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 | Phong cách | Porcelain 2.0: font Geist, icon Lucide, chat 820px (v8.6) |
 | Thư mục kết quả khó tìm (<dự án>/<ngày>/<giờ tên task>, trùng tên thì "(2)") | `<số thứ tự> - <tên đoạn chat>` (có dự án thì nằm trong thư mục dự án); mỗi lần xuất vào thư mục con `YYYYMMDD-<tên>`, sửa lại thì tạo thư mục mới. Lượt đầu chờ đặt tên tối đa 10 giây để thư mục đúng tên đoạn chat (v11.1) |
 | Kết quả kém dần, chậm (so với ply36 Tug of War 23/11: GPT vẽ trực tiếp, hướng dẫn ngắn, phiên mới): Gemini trước cho ảnh, hướng dẫn 21,9k ký tự, nhiều bước (tiêu chí, chấm, A/B), phiên nối tiếp từ 23/11 | v11.9: bỏ luật Gemini trước, app tự học chọn worker theo kết quả + thời gian (worker_stats.json; Gemini vẽ kém -> giao thẳng GPT, 24h cho thử lại); theo dõi worker đang chạy, dừng sớm khi hết lượt / GPT im lặng quá 5-8 phút / chạy quá 4 lần thường thấy; worker ảnh không tự kiểm tra kỹ; nhãn bên đang làm thật; Giám sát tắt = chỉ giao việc (không tiêu chí/giám khảo/tự xem lại); câu hỏi A/B là tuỳ chọn; đề bài tự học (mẫu đề bài làm tốt); bộ nhớ gọn (chung <=700 + lịch sử theo dự án), bộ nhớ dự án dài chỉ nhúng 1.000 ký tự đầu; phiên Claude >=20 lượt hoặc nghỉ >1 ngày -> tin nhắn mới mở phiên mới kèm tóm tắt. Hướng dẫn Mini Soccer: 21,9k -> ~12-13k |
+| Tin nhắn gửi lúc task chạy ngắt lượt đang làm (12/105 lượt bị ngắt); có question.md thì mất câu trả lời (16:59 26/11: chỉ hiện A/B); hướng dẫn đổi mỗi lượt (số liệu worker, bộ nhớ, hạn mức, ngày) -> Claude bị bắt đọc lại ~12k ký tự mỗi lượt; giám khảo chấm thêm cả lô ở cuối; bộ nhớ cập nhật mỗi lượt | v12.3: K1 tin nhắn lúc đang chạy -> xếp hàng, chạy ngay sau lượt (nút ⚡ Gửi gấp mới ngắt); K2 hiện cả câu trả lời + câu hỏi; K3 phần hay đổi (bộ nhớ, số liệu chọn worker, mẫu đề bài, hạn mức) gửi kèm tin nhắn khi đổi, CLAUDE.md ổn định; K5 file app đã chấm không chấm lại cả lô; K6 bộ nhớ cập nhật ở lượt đầu + sau mỗi 5 lượt |
 | Muốn dùng Maestro trên điện thoại, mọi mạng, không cài app | Cloudflare Quick Tunnel (cloudflared tự tải, chạy tách khỏi app) + mã bí mật (cookie). QR cố định: trang GitHub Pages (nhánh `gh-pages`) đọc link hiện tại từ kênh ntfy.sh rồi chuyển sang; mã nằm sau `#` (v10.4) |
 | Giao diện điện thoại tràn ngang, composer lơ lửng | Thanh bên thành ngăn kéo, composer sát đáy trang chủ (v10.4) |
 | Dòng toạ độ đánh dấu hiện trong bong bóng chat; ảnh nằm trong bong bóng | Ẩn dòng toạ độ khi hiển thị (vẫn gửi cho AI); ảnh/file đưa ra ngoài bong bóng (v10.4) |
@@ -139,7 +140,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 
 ---
 
-## Chờ duyệt — đã note, CHƯA làm (27/11, sau v12.2)
+## Chờ duyệt — đã note, CHƯA làm (27/11, sau v12.2; v12.3 đã làm K1 K2 K3 K5 K6)
 - A. Luật cuối lượt: chỉ nêu phần còn tồn tại khi có vấn đề thật ảnh hưởng kết quả / việc người dùng phải làm tiếp; không có thì bỏ hẳn mục đó, không viết "không có", không liệt kê việc chưa kiểm tra nhỏ nhặt.
 - B. Bộ nhớ tự ghi: không ghi khuôn mẫu báo cáo ("Đã sửa", "Còn tồn tại", "đã thử/chưa thử"); lọc bỏ dòng đó nếu đang có.
 - G1. Chỉ tự vẽ lại khi ảnh trượt tiêu chí BẮT BUỘC (sai nhân vật, sai nội dung, sai kích thước, có chữ khi yêu cầu không chữ...); lỗi thẩm mỹ -> đạt kèm ghi chú.
@@ -148,6 +149,7 @@ Phân tích log cho thấy khoảng 91% thời gian là **chờ worker**, và gi
 - H1. Giám sát mặc định TẮT cho Balanced; chỉ bật cho Pro/Code hoặc khi người dùng bấm (tắt = Claude chỉ giao việc + xem 1 lần, như v1.7).
 - H2. Đề bài gửi ChatGPT vẽ ảnh: kiểu ngắn như v1.7, không gắn tiêu chí khi Giám sát tắt.
 - H3. ChatGPT vẽ ảnh dùng model + mức suy nghĩ mặc định của tài khoản (như v1.7), không ép medium.
+- K4 (chưa làm): gom phát hành 1-2 lần/ngày; phát triển Maestro trên bản thử riêng; chỉ lên bản mới khi không task nào chạy.
 Bằng chứng (log 27/11): lượt 09:28 thêm 2 screenshot mất 10m27s — mỗi ảnh 3 lần vẽ (~2 phút) + 3 lần chấm (~1 phút), đều trượt vì lý do thẩm mỹ, cuối cùng dùng lại bản 1/bản 2. Lượt 17:15 ngày 26/11: 6/8 việc chấm trượt, chạy tới lần 3, ChatGPT +39% phiên.
 
 ## 4. Quyết định đã chốt (giữ nguyên trừ khi người dùng đổi)
