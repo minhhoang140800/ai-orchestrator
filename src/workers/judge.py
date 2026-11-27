@@ -2,15 +2,12 @@
 # Mọi module dùng chung 1 không gian tên (dev: app.py nạp lần lượt; build: ghép thành 1 file),
 # nên KHÔNG import chéo giữa các module. Thứ tự nạp: PARTS trong assemble.py.
 
-JUDGE_PROMPT = """Bạn là GIÁM KHẢO độc lập nghiệm thu sản phẩm. Bạn KHÔNG tham gia làm và không biết quá trình làm.
-Nhiệm vụ: kiểm tra khắt khe từng file theo TIÊU CHÍ dưới đây. Người làm thường tự chấm dễ dãi; việc của bạn là tìm lỗi.
-Khi phân vân giữa đạt và chưa đạt: chấm CHƯA ĐẠT. Không khen xã giao.
+JUDGE_PROMPT = """Bạn là GIÁM KHẢO độc lập nghiệm thu sản phẩm. Chấm NHANH và đúng trọng tâm.
+Mở từng file cần chấm bằng Read (chỉ ĐỌC; code/bảng tính có thể chạy lệnh đọc) rồi trả kết quả ngay, không tìm hiểu thêm.
 
-Cách làm:
-1. Mở và kiểm tra THẬT từng file cần chấm{ref_note}: ảnh/văn bản/code dùng Read; bảng tính, dữ liệu, số liệu thì chạy lệnh
-   để đọc và tính lại (chỉ ĐỌC — tuyệt đối không sửa, xóa, tạo file sản phẩm).
-2. Với mỗi file, chấm từng tiêu chí 1-5 (5 = đạt hoàn toàn) và ghi lỗi cụ thể, kiểm chứng được (ở đâu, sai gì).
-3. File "fail" nếu vi phạm bất kỳ tiêu chí BẮT BUỘC nào, hoặc có tiêu chí nào <= 2.
+"fail" CHỈ KHI vi phạm tiêu chí BẮT BUỘC hoặc sai rõ ràng với yêu cầu: sai/không giống nhân vật, sai hoặc thiếu nội dung được yêu
+cầu, sai kích thước/định dạng/nền, có chữ khi yêu cầu không chữ (hoặc sai chữ), ảnh hỏng/méo/thiếu phần chính.
+Lỗi thẩm mỹ, bố cục, màu, ánh sáng, chi tiết nhỏ, "có thể đẹp hơn" -> vẫn "pass", ghi vào notes (không bắt làm lại).
 
 TIÊU CHÍ:
 {criteria}
@@ -18,12 +15,12 @@ TIÊU CHÍ:
 YÊU CẦU RIÊNG CỦA LẦN NÀY:
 {brief}
 
-FILE CẦN CHẤM:
+FILE CẦN CHẤM{ref_note}:
 {images}
 {refs}
 Chỉ trả về MỘT khối JSON, không thêm chữ nào khác:
-{{"overall": "pass" | "fail", "images": [{{"file": "<tên file>", "verdict": "pass" | "fail",
-"scores": {{"<tiêu chí>": 1-5}}, "issues": ["<lỗi cụ thể>"], "fix": "<chỉ dẫn sửa ngắn>"}}], "summary": "<1-2 câu>"}}"""
+{{"overall": "pass" | "fail", "images": [{{"file": "<tên file>", "verdict": "pass" | "fail", "issues": ["<lỗi BẮT BUỘC cụ thể>"],
+"notes": ["<góp ý thẩm mỹ, không bắt sửa>"], "fix": "<chỉ dẫn sửa ngắn nếu fail>"}}], "summary": "<1 câu>"}}"""
 
 
 CODE_EXT = (".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".json", ".java", ".kt", ".cs", ".go", ".rs", ".cpp", ".c", ".h",
@@ -33,19 +30,23 @@ CODE_EXT = (".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".json", ".jav
 JUDGE_SKIP = {"TASK.md", "status.json", "worker.log", "result.md", "prompt.md", "last.txt"}   # sổ sách của worker, không chấm
 
 
+JUDGE_PX = 768                       # cạnh dài ảnh đưa giám khảo (đủ thấy nhân vật, chữ, bố cục; đọc nhanh hơn nhiều)
+REF_NEED_RE = re.compile(r"mẫu|giống|reference|\bref\b|so với|đồng bộ|nhất quán|cùng phong cách|base", re.I)
+
+
 def judge_view(f, d):
-    """Ảnh lớn -> bản thu nhỏ (cạnh dài 1280px) cho giám khảo xem nhanh hơn; giữ nguyên file gốc."""
+    """Ảnh lớn -> bản thu nhỏ (cạnh dài JUDGE_PX) cho giám khảo xem nhanh hơn; giữ nguyên file gốc."""
     if f.suffix.lower() not in IMG_EXT:
         return f
     try:
         from PIL import Image
         im = Image.open(f)
-        if max(im.size) <= 1400:
+        if max(im.size) <= JUDGE_PX + 100:
             return f
         d.mkdir(parents=True, exist_ok=True)
-        o = d / (f.stem + "__xem.png")
-        im.thumbnail((1280, 1280))
-        im.save(o)
+        o = d / (f.stem + "__xem.jpg")
+        im.thumbnail((JUDGE_PX, JUDGE_PX))
+        im.convert("RGB").save(o, quality=85)
         return o
     except Exception:
         return f
@@ -55,16 +56,25 @@ def judge_once(files, refs, crit, brief, model, timeout, v):
     """1 phiên Claude chấm độc lập -> (status, verdict). Ảnh lớn được thu nhỏ trước cho nhanh."""
     exe = find_bin("claude")
     views = {judge_view(f, v / "xem"): f for f in files}            # file xem -> file gốc
+    ctext = crit.read_text(encoding="utf-8")[:12000]
+    code = any(f.suffix.lower() in CODE_EXT for f in files)
+    if refs and not code and not REF_NEED_RE.search(ctext + "\n" + brief):
+        refs = []                                   # tiêu chí không cần so mẫu -> không mở ảnh mẫu (đỡ thời gian)
     prompt = JUDGE_PROMPT.format(
-        criteria=crit.read_text(encoding="utf-8")[:12000], brief=brief,
+        criteria=ctext, brief=brief,
         images="\n".join(f"- {x}" + (f"   (bản thu nhỏ của {o.name})" if x != o else "") for x, o in views.items()),
         ref_note=" và các MẪU ĐÃ DUYỆT (chuẩn để so sánh)" if refs else "",
         refs=("\nMẪU ĐÃ DUYỆT (chỉ để so sánh, không chấm):\n" + "\n".join(f"- {judge_view(f, v / 'xem')}" for f in refs) + "\n") if refs else "")
-    cmd = [exe, "-p", prompt, "--output-format", "json", "--allowedTools", "Read,Glob,Grep,Bash", "--model", model]
+    # ảnh/văn bản: chỉ cho Read + giới hạn số bước (mở file rồi trả lời ngay, không đi tìm hiểu thêm) -> nhanh
+    cmd = [exe, "-p", prompt, "--output-format", "json", "--allowedTools", "Read,Glob,Grep,Bash" if code else "Read",
+           "--model", model]
     for d in dict.fromkeys([str(x.parent) for x in list(views) + refs]):
         cmd += ["--add-dir", d]
     t0 = time.time()
-    code, so, se, to = run_limited(cmd, v, timeout)
+    lim = [] if code else ["--max-turns", str(len(views) + len(refs) + 3)]
+    rc, so, se, to = run_limited(cmd + lim, v, timeout)
+    if rc != 0 and lim and re.search(r"unknown option|unrecognized|max-turns", (se or "") + (so or ""), re.I) and "{" not in (so or ""):
+        rc, so, se, to = run_limited(cmd, v, timeout)      # CLI cũ không có --max-turns
     with open(v / "worker.log", "a", encoding="utf-8") as fh:
         fh.write(f"--- stdout ---\n{so}\n--- stderr ---\n{se}\n")
     verdict = None
@@ -73,7 +83,7 @@ def judge_once(files, refs, crit, brief, model, timeout, v):
         verdict = json.loads(text[text.index("{"):text.rindex("}") + 1])
     except Exception:
         pass
-    st = {"seconds": round(time.time() - t0), "exit_code": code}
+    st = {"seconds": round(time.time() - t0), "exit_code": rc}
     if to:
         st.update(status="timeout", error=f"Quá {timeout}s")
     elif not isinstance(verdict, dict) or "images" not in verdict:
@@ -145,6 +155,29 @@ def fix_failed(verdict, files, rnd):
     return out
 
 
+def keep_previous(orig, new):
+    """Bản sửa không tốt hơn: đưa bản trước (app đã chuyển vào _ban_cu/) về lại đúng tên, bản sửa vào _ban_cu/ (không mất file).
+    Chỉ làm được khi bản sửa thay đúng chỗ bản trước (file đã ở thư mục kết quả). Trả True nếu đã đổi lại."""
+    try:
+        if Path(new) != Path(orig) or not Path(new).is_file():
+            return False
+        bc = Path(orig).parent / "_ban_cu"
+        olds = sorted(bc.glob(f"{orig.stem}_v*{orig.suffix}"), key=lambda f: f.stat().st_mtime) if bc.is_dir() else []
+        if not olds:
+            return False
+        k = bc / f"{orig.stem}_ban_sua_truot{orig.suffix}"
+        i = 2
+        while k.exists():
+            k = bc / f"{orig.stem}_ban_sua_truot_{i}{orig.suffix}"
+            i += 1
+        shutil.move(str(new), str(k))
+        shutil.move(str(olds[-1]), str(orig))
+        return True
+    except Exception as e:
+        dlog(f"keep_previous {orig}: {e}")
+        return False
+
+
 def cmd_judge(argv):
     import argparse
     ap = argparse.ArgumentParser(prog="judge", description="Giám khảo độc lập (phiên Claude mới) nghiệm thu file theo tiêu chí")
@@ -156,7 +189,7 @@ def cmd_judge(argv):
     ap.add_argument("--out", required=True, help="vd work/J1")
     ap.add_argument("--model")
     ap.add_argument("--timeout", type=int)
-    ap.add_argument("--rounds", type=int, default=2, help="số vòng app tự giao lại file trượt cho worker (0 = không)")
+    ap.add_argument("--rounds", type=int, default=1, help="số vòng app tự giao lại file trượt cho worker (0 = không)")
     a = ap.parse_args(argv)
     imgs = []
     for p in a.images:
@@ -196,6 +229,7 @@ def cmd_judge(argv):
             if not bad or code or rnd >= a.rounds:
                 break
             rnd += 1
+            prev = {str(i.get("file")): i for i in bad}       # bản trước (trượt): để so với bản sửa
             newmap = fix_failed(verdict, todo, rnd)
             if not newmap:
                 break                                  # file trượt không do worker làm (vd đã chép sang OUTPUT) -> Claude xử lý
@@ -205,6 +239,22 @@ def cmd_judge(argv):
             todo = [x for vv in newmap.values() for x in vv][:12]
             if not todo:
                 break
+            r2, v2 = judge_once(todo, refs, crit, a.brief, model, timeout, v)       # chấm lại CHỈ bản sửa
+            st.update(seconds=st.get("seconds", 0) + r2.get("seconds", 0))
+            for it in (v2 or {}).get("images") or []:
+                final[str(it.get("file"))] = it
+            if not v2:                                         # chấm lại lỗi: giữ kết quả chấm bản trước
+                for k in newmap:
+                    final.setdefault(k, prev.get(k) or {"file": k, "verdict": "fail"})
+            for k, news in newmap.items():                    # bản sửa vẫn trượt và không ít lỗi hơn -> giữ bản trước
+                for nf in news:
+                    it = final.get(str(nf))
+                    old = prev.get(k)
+                    if it and old and it.get("verdict") != "pass" and len(it.get("issues") or []) >= len(old.get("issues") or []):
+                        if keep_previous(Path(k), nf):
+                            final.pop(str(nf), None)
+                            final[k] = {**old, "kept_previous": True}
+            break                                              # tối đa 1 vòng sửa (G2)
         if final:
             items = list(final.values())
             bad = [i for i in items if i.get("verdict") != "pass"]

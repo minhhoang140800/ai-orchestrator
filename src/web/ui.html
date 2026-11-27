@@ -1997,9 +1997,10 @@ const homeProj = () => { const v = localStorage.getItem("proj") || ""; return S.
 const curProj = (t) => (t ? t.project || "" : T && $("taskComp") ? T.project || "" : homeProj());
 function whenTxt(c) { const d = new Date(String(c).replace(" ", "T")); if (isNaN(d)) return c || ""; const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5); return days <= 0 ? "Hôm nay" : days === 1 ? "Hôm qua" : `${days} ngày trước`; }
 const WHISTLE = '<svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="15" r="5"/><path d="M12.6 11.4 21 8v4.2l-6.6 1.4"/><path d="M4 5.5l1.6 1.6M8.5 3.5v2.3M2 9.5h2.3"/></svg>';
-const JUDGE_MODES = ["pro", "balanced", "code"];      // các chế độ tự bật Giám sát
+const JUDGE_MODES = ["pro", "code"];      // các chế độ tự bật Giám sát (Balanced: tắt mặc định từ v12.4)
+try { if (localStorage.getItem("judgeV") !== "2") { localStorage.removeItem("judge"); localStorage.setItem("judgeV", "2"); } } catch (e) {}   // 1 lần: về mặc định mới
 function homeJudge() { const v = lsGet("judge"); return v ? v === "1" : JUDGE_MODES.includes(normMode(lsGet("mode"))); }
-function watchBtn(t) {       // nút Giám sát: giám khảo chấm, sửa tới khi đạt (Pro/Balanced tự bật khi đổi chế độ)
+function watchBtn(t) {       // nút Giám sát: giám khảo chấm, sửa tới khi đạt (Pro/Code tự bật khi đổi chế độ)
   const on = t ? !!t.judge : T && $("taskComp") ? !!T.judge : homeJudge();
   return `<button class="wbtn ${on ? "on" : ""}" id="wBtn" data-watch="1" aria-pressed="${on}" data-tip="Giám sát: Lâu hơn, check lại và fix đến khi hoàn thiện">${WHISTLE}<span class="bl">Giám sát</span></button>`;
 }

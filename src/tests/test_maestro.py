@@ -388,6 +388,59 @@ class V123(unittest.TestCase):
         self.assertNotIn("cuối lô chỉ chấm nhanh", md)
 
 
+class V124(unittest.TestCase):
+    def test_watch_default_off_for_balanced(self):                 # H1
+        self.assertFalse(NS["judge_on"]({"mode": "balanced"}))
+        self.assertTrue(NS["judge_on"]({"mode": "pro"}))
+        self.assertTrue(NS["judge_on"]({"mode": "code"}))
+        self.assertTrue(NS["judge_on"]({"mode": "balanced", "judge": True}))   # người dùng bấm bật
+
+    def test_no_criteria_when_watch_off(self):                     # H2
+        d = Path(tempfile.mkdtemp())
+        (d / "tasks").mkdir()
+        (d / "tasks" / "criteria.md").write_text("- BẮT BUỘC: 1080x1080", encoding="utf-8")
+        old = os.environ.get("AIO_WATCH")
+        try:
+            os.environ["AIO_WATCH"] = "0"
+            self.assertNotIn("TIÊU CHÍ NGHIỆM THU", NS["with_criteria"]("vẽ banner", d))
+            os.environ["AIO_WATCH"] = "1"
+            self.assertIn("TIÊU CHÍ NGHIỆM THU", NS["with_criteria"]("vẽ banner", d))
+        finally:
+            os.environ.pop("AIO_WATCH", None) if old is None else os.environ.__setitem__("AIO_WATCH", old)
+
+    def test_judge_prompt_lenient_and_fast(self):                  # G1, G3
+        jp = NS["JUDGE_PROMPT"]
+        self.assertIn('"fail" CHỈ KHI vi phạm tiêu chí BẮT BUỘC', jp)
+        self.assertIn("vẫn \"pass\", ghi vào notes", jp)
+        self.assertNotIn("phân vân", jp)
+        self.assertEqual(NS["JUDGE_PX"], 768)
+        self.assertFalse(NS["REF_NEED_RE"].search("- BẮT BUỘC: 1080x1920, không chữ"))
+        self.assertTrue(NS["REF_NEED_RE"].search("- nhân vật giống mẫu đã duyệt"))
+
+    def test_keep_previous_when_fix_not_better(self):              # G2
+        d = Path(tempfile.mkdtemp())
+        (d / "_ban_cu").mkdir()
+        (d / "_ban_cu" / "shot_07_v1.png").write_bytes(b"BAN_TRUOC")
+        (d / "shot_07.png").write_bytes(b"BAN_SUA")
+        self.assertTrue(NS["keep_previous"](d / "shot_07.png", d / "shot_07.png"))
+        self.assertEqual((d / "shot_07.png").read_bytes(), b"BAN_TRUOC")
+        self.assertEqual((d / "_ban_cu" / "shot_07_ban_sua_truot.png").read_bytes(), b"BAN_SUA")
+        self.assertFalse(NS["keep_previous"](d / "x.png", d / "y.png"))
+
+    def test_end_of_turn_and_memory_rules(self):                   # A, B
+        t = {"id": "AB1", "text": "x", "mode": "balanced", "folder": "01 - AB"}
+        NS["write_claude_md"](t)
+        md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("Không có thì BỎ HẲN", md)
+        NS["mem_save"]("## Cách làm việc\n- Gọi Hoàng\n- Trước khi báo xong: tách \"Đã sửa\" và \"Còn tồn tại\", ghi rõ đã thử và chưa thử.")
+        try:
+            m = NS["mem_text"]()
+            self.assertIn("Gọi Hoàng", m)
+            self.assertNotIn("Còn tồn tại", m)
+        finally:
+            NS["mem_save"]("")
+
+
 class FailReason(unittest.TestCase):
     def test_no_image(self):
         v = Path(tempfile.mkdtemp())

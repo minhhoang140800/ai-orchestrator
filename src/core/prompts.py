@@ -21,10 +21,13 @@ IMG_RE = re.compile(r"ảnh|hình|image|png|jpe?g|webp|keyframe|storyboard|moodb
 EDIT_RE = re.compile(r"sửa|chỉnh|edit|cập nhật|thay|đổi tên|xóa|xoá|clear|\.xlsx|\.docx|\.pptx|\.csv|[A-Za-z]:\\|\\\\|/Users/", re.I)
 
 
+JUDGE_MODES = ("pro", "code")        # chế độ tự bật Giám sát (Balanced: tắt mặc định — chỉ giao việc + xem 1 lần, như v1.7)
+
+
 def judge_on(t):
-    """Nút Giám sát của task; chưa bấm thì theo chế độ (Pro, Balanced bật)."""
+    """Nút Giám sát của task; chưa bấm thì theo chế độ (Pro, Code bật)."""
     v = t.get("judge")
-    return bool(v) if v is not None else norm_mode(t.get("mode")) in ("pro", "balanced", "code")
+    return bool(v) if v is not None else norm_mode(t.get("mode")) in JUDGE_MODES
 
 
 def md_needs(t):
@@ -181,7 +184,7 @@ Tiêu chí đã dùng:
   ("GIÁM SÁT BẬT — không có giám khảo Claude: giao gemini soát theo criteria.md, sửa và soát lại tới khi đạt (tối đa 4 vòng).")
   }
 {f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1
-  Có criteria.md: app TỰ chấm từng việc vẽ NGAY khi việc đó xong và tự giao sửa file trượt (tối đa 2 vòng; bản sửa ra thư
+  Có criteria.md: app TỰ chấm từng việc vẽ NGAY khi việc đó xong và tự giao sửa file trượt LỖI BẮT BUỘC (tối đa 1 vòng; vẫn trượt thì giữ bản tốt hơn; bản sửa ra thư
   mục nhóm, bản trước vào _ban_cu/) -> status.json có "judge" (overall, summary, issues, fixed). KHÔNG chấm lại file app đã chấm (đạt hay
   đã tự sửa), KHÔNG chấm cả lô ở cuối; bạn chỉ xử lý phần app không tự sửa được.
 """ if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial."""
@@ -266,8 +269,10 @@ Cuối câu trả lời hỏi: có làm không / làm phương án nào. Chỉ l
 
 ## Kết thúc mỗi lượt
 Báo cáo, research, so sánh: viết thẳng trong câu trả lời, KHÔNG tạo file .md/.txt; chỉ tạo file khi sản phẩm vốn là file hoặc
-người dùng yêu cầu (lưu vào OUTPUT). Trả lời ngắn: đạt/chưa đạt, điểm cần biết, việc người dùng cần làm. Không liệt kê lại file,
+người dùng yêu cầu (lưu vào OUTPUT). Trả lời ngắn: kết quả, điểm cần biết, việc người dùng cần làm. Không liệt kê lại file,
 KHÔNG kể quá trình/worker trừ khi ảnh hưởng kết quả. Dùng được **đậm**, `code`, gạch đầu dòng.
+Phần "còn tồn tại / chưa đạt": CHỈ khi có vấn đề thật ảnh hưởng kết quả hoặc việc người dùng phải làm tiếp. Không có thì BỎ HẲN
+mục đó (không viết "không có"), không liệt kê việc chưa kiểm tra nhỏ nhặt, không theo khuôn "Đã sửa / Còn tồn tại" cố định.
 
 ## Cấm
 Không dùng API key. Không ghi mật khẩu/token vào file.

@@ -109,8 +109,8 @@ def set_aside_code_drawn(v, since):
 def with_criteria(text, proj):
     """Gửi kèm tiêu chí nghiệm thu (tasks/criteria.md) cho worker ngay từ đầu để tự kiểm trước khi nộp -> ít bị chấm trượt."""
     f = Path(proj) / "tasks" / "criteria.md"
-    if not f.is_file() or "TIÊU CHÍ NGHIỆM THU" in text:
-        return text
+    if os.environ.get("AIO_WATCH") == "0" or not f.is_file() or "TIÊU CHÍ NGHIỆM THU" in text:
+        return text                                # Giám sát tắt: đề bài gọn, không gắn tiêu chí (như v1.7)
     return (text + "\n\n---\nTIÊU CHÍ NGHIỆM THU (giám khảo sẽ chấm đúng theo đây — tự kiểm tra từng mục BẮT BUỘC trước khi nộp,"
             " chỉ sửa trong phạm vi việc của bạn):\n" + f.read_text(encoding="utf-8", errors="replace")[:6000])
 
@@ -347,7 +347,7 @@ def export_products(st, v, out, proj, group=""):
 
 def auto_judge(st, v, out, proj, want_img):
     """Giám sát bật (có tasks/criteria.md) + việc vẽ vừa xong: giám khảo chấm NGAY các file của việc này, trượt thì app tự giao
-    lại worker sửa (tối đa 2 vòng) -> các việc khác vẫn chạy song song, không đợi cả lô xong mới chấm rồi làm lại."""
+    lại worker sửa (tối đa 1 vòng; vẫn trượt thì giữ bản tốt hơn) -> các việc khác vẫn chạy song song, không đợi cả lô xong mới chấm rồi làm lại."""
     crit = proj / "tasks" / "criteria.md"
     if (os.environ.get("AIO_NOJUDGE") or not want_img or st.get("status") != "completed" or not st.get("export_dir")
             or not crit.is_file()):
@@ -355,7 +355,7 @@ def auto_judge(st, v, out, proj, want_img):
     brief = next((x.strip().lstrip("#").strip() for x in (v / "TASK.md").read_text(encoding="utf-8", errors="replace").splitlines()
                   if x.strip()), "(không)") if (v / "TASK.md").is_file() else "(không)"
     cmd = [sys.executable, str(APP), "judge", "--files", *([str(Path(st["export_dir"]) / x) for x in st.get("files") or []] or [st["export_dir"]]), "--criteria", str(crit), "--brief", brief[:300],
-           "--out", str(out.parent / (out.name + "_cham")), "--rounds", "2"]
+           "--out", str(out.parent / (out.name + "_cham")), "--rounds", "1"]
     try:
         p = subprocess.run(cmd, cwd=str(proj), env=dict(os.environ, AIO_NOJUDGE="1"), stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800, creationflags=NO_WINDOW)
@@ -544,7 +544,10 @@ def cmd_worker(argv):
             drive_note = ("Được sửa TRỰC TIẾP file Google (Sheets/Docs/Slides) bằng kết nối Google Drive của bạn: chỉ sửa đúng file/link "
                           "trong yêu cầu, không xoá/di chuyển/chia sẻ file, không dùng kết nối khác (Gmail, Calendar...). Đọc lại sau khi sửa "
                           "để kiểm tra. Không có kết nối Google Drive thì nói rõ, không làm cách khác. ") if a.drive else ""
-            prompt = (drive_note + f"Thực hiện đúng yêu cầu trong {v / 'TASK.md'}. "
+            short = want_img and not edit and not a.drive and os.environ.get("AIO_WATCH") == "0"
+            prompt = ((f"Thực hiện đúng yêu cầu trong {v / 'TASK.md'}. File đầu vào (chỉ đọc): {inp_}. "    # vẽ ảnh, Giám sát tắt:
+                       "Ghi mọi file kết quả vào thư mục hiện tại. Cuối cùng liệt kê file đã tạo.") if short else   # đề bài ngắn như v1.7
+                      drive_note + f"Thực hiện đúng yêu cầu trong {v / 'TASK.md'}. "
                       f"File đầu vào (chỉ đọc): {inp_}. " + (edit_note or "Ghi mọi file kết quả vào thư mục hiện tại. ") +
                       "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung sản phẩm (không chỉ tóm tắt); "
                       "nếu tạo file thì liệt kê file đã tạo và cách đã kiểm tra." + IMG_QUICK * want_img)
@@ -554,6 +557,8 @@ def cmd_worker(argv):
             mods = [a.model] if a.model else list(mods)
             base_cmd = cmd + ["-c", f'model_reasoning_effort="{eff}"'] + (DRIVE_APPROVE if a.drive else [])
             cands = [base_cmd + ["-m", m_, prompt] for m_ in mods] + [base_cmd + [prompt]]   # model không dùng được -> thử model kế, cuối cùng mặc định
+            if want_img and not a.model:            # vẽ ảnh: model + mức suy nghĩ MẶC ĐỊNH của tài khoản (như v1.7), không ép
+                cands = [cmd + (DRIVE_APPROVE if a.drive else []) + [prompt]]
             cmd = cands[0]
             cwd = edit or v                 # Codex chỉ được ghi trong thư mục làm việc của nó (sandbox)
         else:

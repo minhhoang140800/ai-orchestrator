@@ -6,7 +6,7 @@
 # Chỉ nằm trên máy người dùng (thư mục _AI-Orchestrator cạnh lịch sử task), được nhúng vào hướng dẫn của mọi task sau.
 # Người dùng xem/sửa/xoá trong Cài đặt > Memory.
 
-ASK_FMT_RE = re.compile(r"\bA\s*/\s*B\b|A-B-C|A/B/C", re.I)
+ASK_FMT_RE = re.compile(r"\bA\s*/\s*B\b|A-B-C|A/B/C|còn tồn tại|đã thử.{0,30}chưa thử|\"?đã sửa\"?\s*(?:và|/)", re.I)   # khuôn hỏi / khuôn báo cáo
 MEM_STYLE_MAX = 700                  # cách làm việc chung: ngắn, áp dụng cho MỌI task (không làm dài hướng dẫn)
 MEM_HIST_MAX = 800                   # lịch sử: riêng từng dự án, chỉ nhúng vào task của dự án đó
 _mlock = threading.Lock()
@@ -30,7 +30,8 @@ Viết lại cả 2 mục, giữ điều còn đúng, thêm điều mới học 
 ## Cách làm việc
 (dưới {smax} ký tự. CHỈ điều đúng với MỌI loại task: xưng hô, độ dài/kiểu trả lời, điều người dùng hay sửa/không thích.
 KHÔNG ghi quy trình riêng của 1 loại việc hay 1 dự án — vd phát hành, chạy test, đặt thư mục, cách vẽ asset — những thứ đó ghi ở Lịch sử.
-KHÔNG ghi quy định bắt buộc về cách đặt câu hỏi / lựa chọn A-B-C: app tự quyết theo từng task.)
+KHÔNG ghi quy định bắt buộc về cách đặt câu hỏi / lựa chọn A-B-C, KHÔNG ghi khuôn mẫu báo cáo ("Đã sửa", "Còn tồn tại",
+"đã thử / chưa thử"): app tự quyết theo từng task.)
 ## Lịch sử
 (dưới {hmax} ký tự, tối đa 10 dòng, mới nhất ở đầu: việc đã làm/đang dở, quyết định đã chốt, quy trình riêng của dự án này)
 KHÔNG ghi mật khẩu, mã, key, token, số điện thoại, email, số tài khoản hay nội dung bí mật. Không có gì đáng nhớ thì trả lại như cũ.
@@ -55,7 +56,7 @@ def _read(f, n):
 def mem_text():
     """Cách làm việc chung (bản cũ có cả mục Lịch sử trong cùng file: chỉ lấy phần trước Lịch sử)."""
     s = _read(mem_file(), 6000).split("## Lịch sử")[0]
-    s = "\n".join(x for x in s.splitlines() if not ASK_FMT_RE.search(x))   # cách hỏi A/B: theo task, không phải luật chung
+    s = "\n".join(x for x in s.splitlines() if not ASK_FMT_RE.search(x))   # khuôn hỏi A/B, khuôn báo cáo: theo task, không phải luật chung
     return s.strip()[:4000]     # người dùng tự sửa được dài hơn; AI tự ghi thì giới hạn MEM_STYLE_MAX
 
 

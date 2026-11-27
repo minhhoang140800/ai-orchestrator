@@ -205,7 +205,7 @@ def act(tid, action, text="", files=None, template="", urgent=False):
             if wdir(t).exists():
                 write_claude_md(t)
         elif action == "mode" and MODE_ALIAS.get(text, text) in MODES:
-            t["judge"] = norm_mode(text) in ("pro", "balanced", "code")   # đổi chế độ: Pro/Balanced/Code tự bật Giám sát
+            t["judge"] = norm_mode(text) in JUDGE_MODES   # đổi chế độ: Pro/Code tự bật Giám sát, chế độ khác tắt
             t["mode"] = norm_mode(text)                           # áp dụng từ lượt chạy kế tiếp
             write_claude_md(t)
         elif action == "install" and s == "waiting" and t.get("install") and not t.get("installing"):
