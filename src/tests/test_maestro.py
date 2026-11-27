@@ -823,6 +823,7 @@ class AskOnlyMidway(unittest.TestCase):
         self.assertIn("app hiện thành nút bấm", md)
         self.assertIn("KHÔNG chép lại câu hỏi", md)
         self.assertNotIn("Lựa chọn dạng nút bấm là TUỲ CHỌN", md)
+        self.assertIn("KHÔNG thêm mục \"Đã kiểm tra\", \"Còn tồn tại\"", md)          # không kèm khuôn báo cáo
 
 
 class AskUser(unittest.TestCase):
