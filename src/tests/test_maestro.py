@@ -167,15 +167,15 @@ class Prompts(unittest.TestCase):
         for m in ("pro", "balanced", "turbo", "eco", "code"):
             t, md = self._md(m)
             self.assertIn("## Hướng dẫn của người dùng", md, m)
-            self.assertIn("## Hỏi / nghiên cứu / đề xuất ≠ làm", md, m)
+            for gone in ("## Hỏi / nghiên cứu", "## Tốc độ", "## Chia việc", "## Kết thúc mỗi lượt", "## Ghi lại", "## Ảnh & storyboard",
+                         "## Hướng dẫn thêm"):
+                self.assertNotIn(gone, md, m)          # v12.5: chỉ giữ các luật người dùng chọn
             self.assertLess(len(md), 14000, m)
 
-    def test_research_and_board_rules(self):
-        _, md = self._md("balanced")
-        self.assertIn("Research: tối đa ~2 phút", md)
-        self.assertIn("=w320", md)
+    def test_kept_sections_only(self):
         _, md = self._md("balanced", text="Cho tôi idea, mỗi loại vào 1 Concept Board")
-        self.assertIn("VẼ CẢ BOARD TRONG 1 ẢNH", md)
+        for keep in ("## Vai trò", "## Đường dẫn", "## Worker", "## Nghiệm thu", "## Khi cần người dùng quyết định", "## Chế độ:", "## Cấm"):
+            self.assertIn(keep, md)
 
     def test_windows_paths_in_code_mode(self):          # lỗi cũ: bad escape \\U khi đường dẫn Windows lọt vào re.sub
         r = NS["new_task"]("sửa code", mode="code")
@@ -431,7 +431,7 @@ class V124(unittest.TestCase):
         t = {"id": "AB1", "text": "x", "mode": "balanced", "folder": "01 - AB"}
         NS["write_claude_md"](t)
         md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("Không có thì BỎ HẲN", md)
+        self.assertNotIn("## Kết thúc mỗi lượt", md)
         NS["mem_save"]("## Cách làm việc\n- Gọi Hoàng\n- Trước khi báo xong: tách \"Đã sửa\" và \"Còn tồn tại\", ghi rõ đã thử và chưa thử.")
         try:
             m = NS["mem_text"]()
@@ -802,7 +802,7 @@ class AskUser(unittest.TestCase):
             p = NS["build_prompt"](t, {"kind": "start"})
             self.assertIn("## Hạn mức lúc bắt đầu lượt", p)       # hạn mức đi kèm tin nhắn mỗi lượt
             self.assertIn("ChatGPT", p)
-            self.assertIn("## Chia việc — số liệu máy này", p)
+            self.assertNotIn("## Chia việc", p)
         finally:
             NS["workers_on"] = old
             NS["LOW_SPEC"] = old_low

@@ -166,16 +166,6 @@ Tiêu chí đã dùng:
 """) if tp else ""
     watch_on = judge_on(t)                    # nút Giám sát: giám khảo chấm, sửa tới khi đạt
     judge = watch_on and pm == "claude"
-    need = md_needs(t)
-    mods = {k: f(py, app, pm) for k, f in MD_MODULES.items()}
-    inline = "".join(mods[k] for k in mods if k in need)
-    extra = [k for k in mods if k not in need]
-    rd = wdir(t) / "rules"
-    rd.mkdir(parents=True, exist_ok=True)
-    for k in mods:                              # mô-đun không cần lúc này: để sẵn file, cần thì Claude tự đọc
-        (rd / f"{k}.md").write_text(mods[k], encoding="utf-8")
-    extra_md = ("## Hướng dẫn thêm — CHỈ đọc khi task cần tới\n" + "\n".join(
-        f"- {MD_TITLES[k]}: ./rules/{k}.md" for k in extra) + "\n\n") if extra else ""
     nghiem_thu_on = f"""- Worker "completed" chưa phải là xong: kiểm tra file thật. Đo được: "{py}" "{app}" check files|png ... (xem --help).
 - Giám sát bật + task có sản phẩm: trước khi làm, viết tasks/criteria.md ngắn, kiểm chứng được (đánh dấu BẮT BUỘC); đổi yêu cầu -> cập nhật.
 - Chấm chất lượng: {("GIÁM SÁT BẬT — file worker làm: app TỰ chấm (xem dưới), bạn KHÔNG gọi giám khảo lại. Chỉ gọi giám khảo "
@@ -220,44 +210,21 @@ research web dài) ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật. Ta
 Giao việc: ghi yêu cầu đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu = tên ngắn; worker không thấy cuộc trò chuyện), rồi chạy:
   "{py}" "{app}" worker codex  --task tasks/S1.md --out work/S1 [--group <nhóm>] [--edit <thư mục>] [--drive] [--timeout 900]
   "{py}" "{app}" worker gemini --task tasks/S2.md --out work/S2 [--write] [--edit <thư mục>] [--hard]
-  --write: Gemini được tạo file/ảnh. --hard: việc khó. --edit / --drive: xem mục sửa file / Google Drive.
+  --write: Gemini được tạo file/ảnh. --hard: việc khó. --edit <thư mục>: worker sửa thẳng file trong thư mục đó (app tự sao lưu).
+  --drive: GPT sửa thẳng file Google Sheets/Docs/Slides qua kết nối Drive của nó.
 Nhiều việc: giao cả lô bằng --bg (trả về ngay), rồi chờ MỘT lần: "{py}" "{app}" wait work/S1 work/S2 work/S3
 App TỰ lo: chọn model (không truyền --model), giới hạn số worker chạy cùng lúc, thời gian chờ, giao bên kia làm lại khi
 worker lỗi/hết lượt/không vẽ ra ảnh (status via=gpt-fallback/gemini-fallback) — KHÔNG tự kiểm tra rồi giao lại.
 Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở export_dir trong status. Sửa lỗi: giao lại cùng --out. Worker lỗi/không chạy: coi như không có.
 
-## Chia việc
-- Giao theo số liệu thật của máy này (app tự học sau mỗi việc: làm được không, mất bao lâu). Bên kia là dự phòng: app tự
-  giao lại khi lỗi / hết lượt / không ra ảnh / chậm bất thường.
-- Số liệu chọn worker từng loại việc, mẫu đề bài từng làm tốt, bộ nhớ về người dùng: app gửi kèm cuối tin nhắn (mục "Thông tin
-  app cập nhật") lần đầu và mỗi khi đổi — luôn dùng bản mới nhất.
-- Việc độc lập: chạy song song (mỗi worker --out riêng; không 2 worker --edit cùng thư mục).
-
 {workers_md(t, py, app, on)}
-
-## Tốc độ (quan trọng)
-- Cuối tin nhắn có "Đường xử lý" (HỎI ĐÁP / VIỆC NHỎ) do app phân loại: làm đúng theo đó (không criteria, không giám khảo).
-- Văn bản worker viết: dặn ghi TOÀN BỘ vào câu trả lời cuối; không chép/viết lại phần đã đạt. Gộp nhiều lệnh đọc/kiểm tra.
-- Research: tối đa ~2 phút (trừ khi người dùng yêu cầu nghiên cứu sâu); hết giờ thì dùng phần đã có, ghi rõ phạm vi đã xem.
-  Cần xem ảnh (icon, screenshot, banner đối thủ...): KHÔNG tải ảnh gốc. Tối đa 8 app x 5 ảnh, tải BẢN THU NHỎ (Google Play:
-  thay đuôi "=..." của link ảnh play-lh.googleusercontent.com bằng "=w320") SONG SONG trong 1 script (timeout 15 giây/ảnh,
-  lỗi thì bỏ qua), ghép thành 1 ảnh tổng hợp (contact sheet, có nhãn tên app) rồi xem 1 lần.
 
 {("## Nghiệm thu" + chr(10) + nghiem_thu_on) if watch_on else nghiem_thu_off}
 
-{inline}{extra_md}{brain_md}{tpl_md}## Chế độ: {mode_name}
+{brain_md}{tpl_md}## Chế độ: {mode_name}
 {mode_rules}
 - Worker báo "limit": chuyển worker khác hoặc tự làm; không đảm bảo chất lượng thì hỏi người dùng.{" Bước QUÁ khó (đã thử không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if mode == 'pro' else ""}
 
-## Ghi lại (để giao diện hiển thị)
-- Người dùng góp ý hoặc chốt điều gì (chỉ khi đó): cập nhật tasks/decisions.json, gom theo phần việc, sửa/gộp mục cũ:
-  [{{"group": "<phần việc>", "items": [{{"type": "feedback"|"decision", "text": "<1 câu>", "status": "open"|"done"}}]}}]
-  Có file này thì đọc đầu mỗi lượt, theo đúng các quyết định đã chốt, không hỏi lại.
-{"- Task nhiều phần: xong phần nào hữu ích thì ghi ngay vào ./stages/<số>.md (giao diện hiện cho người dùng đọc trong lúc làm)." + chr(10) if watch_on else ""}
-## Hỏi / nghiên cứu / đề xuất ≠ làm
-Tin nhắn là CÂU HỎI ("có thể … không", "làm thế nào", "có cách nào", "nên … không", "tại sao") hoặc nhờ research/phân tích/
-đề xuất/so sánh -> CHỈ trả lời (kết luận, phương án, ưu nhược, công sức); không sửa file, không tạo sản phẩm, không chạy việc dài.
-Cuối câu trả lời hỏi: có làm không / làm phương án nào. Chỉ làm khi người dùng bảo làm. Không chắc -> coi là hỏi.
 
 ## Khi cần người dùng quyết định
 - TRƯỚC khi bắt tay: chỉ hỏi khi thiếu dữ kiện bắt buộc (file, link, số lượng, kích thước...) hoặc đoán sai sẽ làm sai hướng.
@@ -266,13 +233,6 @@ Cuối câu trả lời hỏi: có làm không / làm phương án nào. Chỉ l
   làm luôn, không hỏi cho có, không kết thúc mọi câu trả lời bằng câu hỏi.
 - Lựa chọn dạng nút bấm là TUỲ CHỌN, chỉ khi có các phương án rõ ràng: mỗi lựa chọn 1 dòng "A - <ngắn gọn>", "B - <ngắn gọn>"
   (thêm " (đề xuất)").
-
-## Kết thúc mỗi lượt
-Báo cáo, research, so sánh: viết thẳng trong câu trả lời, KHÔNG tạo file .md/.txt; chỉ tạo file khi sản phẩm vốn là file hoặc
-người dùng yêu cầu (lưu vào OUTPUT). Trả lời ngắn: kết quả, điểm cần biết, việc người dùng cần làm. Không liệt kê lại file,
-KHÔNG kể quá trình/worker trừ khi ảnh hưởng kết quả. Dùng được **đậm**, `code`, gạch đầu dòng.
-Phần "còn tồn tại / chưa đạt": CHỈ khi có vấn đề thật ảnh hưởng kết quả hoặc việc người dùng phải làm tiếp. Không có thì BỎ HẲN
-mục đó (không viết "không có"), không liệt kê việc chưa kiểm tra nhỏ nhặt, không theo khuôn "Đã sửa / Còn tồn tại" cố định.
 
 ## Cấm
 Không dùng API key. Không ghi mật khẩu/token vào file.
@@ -383,11 +343,7 @@ def live_ctx(t, nxt):
     try:
         on = workers_on(t)
         mem = mem_block(t)
-        need = md_needs(t)
-        bm = briefs_md(["image"] if "image" in need else ["text"]) if on else ""
-        st = (("## Chia việc — số liệu máy này (app tự học sau mỗi việc)\n" + stats_md(on) + ("\n" + bm if bm else "") + "\n")
-              if on else "")
-        stable = mem + st
+        stable = mem
         import hashlib
         h = hashlib.sha1(stable.encode()).hexdigest()
         add = stable if stable and (not t.get("session_started") or t.get("live_hash") != h) else ""
