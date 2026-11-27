@@ -3,7 +3,7 @@
     python -m unittest discover -s src/tests -v
 
 Kiểm tra: ghép module đúng thứ tự (= 1 file như bản build), lễ tân, ghi JSON song song, hướng dẫn cho AI theo
-mọi chế độ (kể cả đường dẫn Windows có dấu \\), bộ nhớ người dùng, lý do worker lỗi, và app khởi động trả API.
+mọi chế độ (kể cả đường dẫn Windows có dấu \\), bộ nhớ người dùng, giám khảo, và app khởi động trả API.
 """
 import ast
 import builtins
@@ -228,58 +228,6 @@ class Memory(unittest.TestCase):
             NS["find_bin"] = old
 
 
-class WorkerStats(unittest.TestCase):
-    def setUp(self):
-        (Path(NS["DATA"]) / NS["WSTATS_F"]).unlink(missing_ok=True)
-
-    def test_default_without_data(self):
-        self.assertEqual(NS["best_worker"]("image"), "codex")
-        self.assertEqual(NS["best_worker"]("research"), "gemini")
-
-    def test_learns_from_results(self):
-        for _ in range(5):
-            NS["record_stat"]("gemini", "image", False, 200)
-            NS["record_stat"]("codex", "image", True, 240)
-            NS["record_stat"]("gemini", "text", True, 60)
-            NS["record_stat"]("codex", "text", True, 180)
-        self.assertEqual(NS["best_worker"]("image"), "codex")          # GPT vẽ được nhiều hơn rõ
-        self.assertEqual(NS["best_worker"]("text"), "gemini")          # ngang nhau -> bên nhanh hơn
-        self.assertTrue(NS["stat_poor"]("gemini", "image"))            # -> app giao thẳng GPT
-        self.assertFalse(NS["stat_poor"]("codex", "image"))
-        d = json.loads((Path(NS["DATA"]) / NS["WSTATS_F"]).read_text(encoding="utf-8"))
-        for x in d["gemini:image"]:
-            x["t"] -= 25 * 3600                                        # đã hơn 24 giờ -> cho Gemini thử lại
-        (Path(NS["DATA"]) / NS["WSTATS_F"]).write_text(json.dumps(d), encoding="utf-8")
-        self.assertFalse(NS["stat_poor"]("gemini", "image"))
-        self.assertEqual(NS["stat_cap"]("codex", "image", 900), 900)   # 4 x 240s = 960 > giới hạn gốc 900
-        self.assertEqual(NS["stat_cap"]("gemini", "text", 900), 360)   # tối thiểu 6 phút
-        md = NS["stats_md"](["codex", "gemini"])
-        self.assertIn("Ảnh: giao GPT", md)
-        self.assertIn("Viết / idea / phân tích: giao Gemini", md)
-
-
-class Watchdog(unittest.TestCase):
-    def test_stops_on_limit_text(self):
-        code = "import time,sys;print('working',flush=True);time.sleep(1);print('Error: usage limit reached',file=sys.stderr,flush=True);time.sleep(60)"
-        t0 = time.time()
-        r = NS["run_watched"]([sys.executable, "-c", code], _TMP, 120, "gemini", "text", 120, "viết bài")
-        self.assertEqual(r[4], "limit")
-        self.assertLess(time.time() - t0, 20)
-
-    def test_stops_when_slow(self):
-        r = NS["run_watched"]([sys.executable, "-c", "import time;time.sleep(60)"], _TMP, 120, "gemini", "text", 4, "x")
-        self.assertEqual(r[4], "slow")
-
-    def test_normal_run(self):
-        r = NS["run_watched"]([sys.executable, "-c", "print('ok')"], _TMP, 60, "codex", "text", 60, "x")
-        self.assertEqual((r[0], r[4], r[1].strip()), (0, "", "ok"))
-
-    def test_limit_words_in_task_not_misread(self):
-        code = "import time,sys;print('rate limit exceeded la gi',flush=True)"
-        r = NS["run_watched"]([sys.executable, "-c", code], _TMP, 60, "codex", "text", 60, "giải thích rate limit exceeded")
-        self.assertEqual(r[4], "")
-
-
 class V119(unittest.TestCase):
     def test_session_refresh(self):
         old = time.time() - 2 * 86400
@@ -310,14 +258,6 @@ class V119(unittest.TestCase):
         t2 = {"id": "WO2", "text": "vẽ 3 ảnh banner", "mode": "balanced", "judge": True, "folder": "01 - y"}
         NS["write_claude_md"](t2)
         self.assertIn("viết tasks/criteria.md", (NS["wdir"](t2) / "CLAUDE.md").read_text(encoding="utf-8"))
-
-    def test_good_briefs(self):
-        (Path(NS["DATA"]) / NS["BRIEFS_F"]).unlink(missing_ok=True)
-        NS["note_brief"]("codex", "image", 120, "Banner Mini Soccer\nVẽ 1 ảnh 1080x1080, nền trong suốt")
-        md = NS["briefs_md"](["image"])
-        self.assertIn("Mẫu đề bài từng làm tốt", md)
-        self.assertIn("Banner Mini Soccer", md)
-        self.assertEqual(NS["briefs_md"](["text"]), "")
 
     def test_memory_drops_ab_rule(self):
         NS["mem_save"]("## Cách làm việc\n- Xưng hô tôi – bạn\n- Hỏi lựa chọn: tối đa 3 câu, trình bày A/B/C.")
@@ -441,27 +381,6 @@ class V124(unittest.TestCase):
             NS["mem_save"]("")
 
 
-class FailReason(unittest.TestCase):
-    def test_no_image(self):
-        v = Path(tempfile.mkdtemp())
-        (v / "worker.log").write_text("--- stdout ---\nĐã vẽ xong\n--- stderr ---\nERROR: write blocked by sandbox\n", encoding="utf-8")
-        r = NS["fail_reason"]({"status": "completed"}, v, True)
-        self.assertIn("không tạo ra file ảnh", r)
-        self.assertIn("write blocked by sandbox", r)
-
-    def test_fallback_error_kept(self):
-        v = Path(tempfile.mkdtemp())
-        (v / "gpt").mkdir()
-        (v / "gpt" / "worker.log").write_text("--- stdout ---\nok\n", encoding="utf-8")
-        r = NS["fail_reason"]({"status": "completed", "codex_error": "Not logged in"}, v, False)
-        self.assertIn("GPT: Not logged in", r)
-
-    def test_ok_no_reason(self):
-        v = Path(tempfile.mkdtemp())
-        (v / "a.png").write_bytes(b"x")
-        self.assertEqual(NS["fail_reason"]({"status": "completed"}, v, True), "")
-
-
 class Folders(unittest.TestCase):
     """Thư mục kết quả: '<số thứ tự> - <tên đoạn chat>'; mỗi lần xuất: thư mục con YYYYMMDD-<tên>."""
     def test_numbering(self):
@@ -526,7 +445,7 @@ class Accounts(unittest.TestCase):
 
 
 class ImageQuota(unittest.TestCase):
-    """Gemini CLI hết lượt vẽ: nhớ đúng giờ mở lại; vẽ dở thì bên kia vẽ nốt phần thiếu."""
+    """Gemini CLI hết lượt vẽ: nhớ đúng giờ mở lại (hiện ở Cài đặt / mục hạn mức)."""
     MSG = ("Encountered error in tool execution: image generation quota exceeded, try again later: transport error "
            "(ResourceExhausted, HTTP 429): You have exhausted your capacity on this model. Your quota will reset after 3h20m14s.")
 
@@ -540,43 +459,11 @@ class ImageQuota(unittest.TestCase):
 
     def test_block_until_reset(self):
         until = int(time.time() + 3 * 3600)
-        NS["mark_img_fail"]("gemini", until)
-        self.assertTrue(NS["img_failed_recent"]("gemini"))
+        NS["mark_img_quota"]("gemini", until)
         self.assertEqual(NS["img_block_until"]("gemini"), until)
-        NS["mark_img_fail"]("gemini", int(time.time() - 5))           # đã qua giờ mở lại -> vẽ lại được
-        self.assertFalse(NS["img_failed_recent"]("gemini"))
-        NS["mark_img_fail"]("codex")                                   # không rõ giờ: nhớ 30 phút như cũ
-        self.assertTrue(NS["img_failed_recent"]("codex"))
+        NS["mark_img_quota"]("gemini", int(time.time() - 5))          # đã qua giờ mở lại -> vẽ lại được
+        self.assertEqual(NS["img_block_until"]("gemini"), 0)
         self.assertEqual(NS["img_block_until"]("codex"), 0)
-
-    def test_partial_then_other_draws_rest(self):
-        v = Path(tempfile.mkdtemp()) / "v1"
-        v.mkdir()
-        (v / "TASK.md").write_text("Vẽ 4 icon game, mỗi icon 1 file png", encoding="utf-8")
-        for i in (1, 2):
-            (v / f"icon_{i}.png").write_bytes(b"x")
-        st = {"status": "completed", "img_quota_until": NS["img_quota_until"](self.MSG)}
-        seen = {}
-
-        def fake_run(cmd, **kw):
-            seen["task"] = Path(cmd[cmd.index("--task") + 1]).read_text(encoding="utf-8")
-            gv = Path(cmd[cmd.index("--vdir") + 1])
-            for i in (3, 4):
-                (gv / f"icon_{i}.png").write_bytes(b"x")
-            NS["wjson"](gv / "status.json", {"status": "completed", "model": "gpt-x", "seconds": 5})
-        old = (NS["subprocess"].run, NS["find_bin"], NS["usage_block"])
-        NS["subprocess"].run, NS["find_bin"], NS["usage_block"] = fake_run, (lambda *a: "x"), (lambda *a, **k: 0)
-        try:
-            a = type("A", (), {"worker": "gemini", "timeout": 60})()
-            NS["worker_fallback"](st, v, a, None, True)
-        finally:
-            NS["subprocess"].run, NS["find_bin"], NS["usage_block"] = old
-        self.assertIn("PHẦN CÒN THIẾU", seen["task"])
-        self.assertIn("icon_1.png", seen["task"])
-        self.assertEqual(st.get("via"), "gpt-fallback")
-        self.assertIn("vẽ được 2 ảnh rồi hết lượt", st.get("gemini_error", ""))
-        self.assertEqual(len(NS["_imgs"](v)), 4)
-        self.assertTrue(NS["img_failed_recent"]("gemini"))
 
 
 class CodeDrawn(unittest.TestCase):
@@ -620,18 +507,17 @@ class Export(unittest.TestCase):
         out_root = Path(tempfile.mkdtemp()) / "01 - Thử"
         proj = out_root / ".work"
         v = proj / "work" / "icon_final" / "v1"
-        (v / "gpt").mkdir(parents=True)
-        (v / "_ve_bang_code").mkdir()
+        (v / "_ve_bang_code").mkdir(parents=True)
         for n in ("TASK.md", "worker.log", "result.md", "status.json"):
             (v / n).write_text("x", encoding="utf-8")
         (v / "icon_1.png").write_bytes(b"x")
-        (v / "gpt" / "icon_2.png").write_bytes(b"x")
+        (v / "icon_2.png").write_bytes(b"x")
         (v / "_ve_bang_code" / "bad.png").write_bytes(b"x")
         st = {"status": "completed"}
         NS["export_products"](st, v, v.parent, proj)
         dst = out_root / (time.strftime("%Y%m%d") + "-icons")              # gom theo nhóm (đoán từ tên việc)
         self.assertEqual(st["export_dir"], str(dst))
-        self.assertEqual(st["files"], ["icon_1.png", "icon_2.png"])          # ảnh bên làm thay đưa ra cùng cấp
+        self.assertEqual(st["files"], ["icon_1.png", "icon_2.png"])
         self.assertTrue((dst / "icon_2.png").exists() and not (v / "icon_1.png").exists())
         self.assertTrue((v / "result.md").exists() and not (dst / "result.md").exists())   # sổ sách ở lại nháp
         self.assertFalse((dst / "bad.png").exists())                         # ảnh vẽ bằng code không ra thư mục kết quả
@@ -732,6 +618,116 @@ class AutoJudge(unittest.TestCase):
             NS["subprocess"].run = old
         self.assertEqual(called, [])
         self.assertNotIn("judge", st)
+
+
+class V125(unittest.TestCase):
+    """12.5: giám khảo Opus 5.5 low + ảnh mẫu; app không tự chọn/theo dõi/chuyển worker; đề bài worker 1 mẫu chung;
+    chỉ dùng trong gói cố định trong code."""
+    def test_removed_features(self):
+        for n in ("worker_fallback", "fail_reason", "run_watched", "WATCH_IDLE", "IMG_QUICK", "stat_poor", "record_stat",
+                  "best_worker", "note_brief", "briefs_md", "task_kind", "img_failed_recent", "in_plan_only"):
+            self.assertNotIn(n, NS, n)
+
+    def test_plan_only_hardcoded(self):
+        self.assertIn("ANTHROPIC_API_KEY", NS["PLAN_ONLY_ENV"])
+        self.assertIn("OPENAI_API_KEY", NS["PLAN_ONLY_ENV"])
+        for k in NS["PLAN_ONLY_ENV"]:
+            self.assertNotIn(k, os.environ)                 # claude/codex/agy luôn dùng tài khoản gói, không tính phí API
+        f = Path(NS["DATA"]) / "usage.json"
+        old = f.read_text(encoding="utf-8") if f.exists() else None
+        try:
+            f.write_text(json.dumps({"codex": {"known": True, "five_hour": {"left": 1, "resets_at": int(time.time() + 600)}}}),
+                         encoding="utf-8")
+            self.assertGreater(NS["usage_block"]("codex"), time.time())   # gần hết gói -> luôn chặn, không có công tắc
+        finally:
+            f.unlink() if old is None else f.write_text(old, encoding="utf-8")
+
+    def test_judge_opus_low_with_refs(self):
+        d = Path(tempfile.mkdtemp())
+        img, ref = d / "out" / "ss4.png", d / "input" / "ss4.png"       # mẫu trùng tên file đang chấm
+        img.parent.mkdir()
+        ref.parent.mkdir()
+        img.write_bytes(b"x")
+        ref.write_bytes(b"y")
+        crit = d / "criteria.md"
+        crit.write_text("- BẮT BUỘC: Rabbit Run giống nhân vật trong game, tỉ lệ ~6.5 đầu", encoding="utf-8")
+        v = d / "J" / "v1"
+        v.mkdir(parents=True)
+        seen = {}
+
+        def fake_run(cmd, cwd, timeout, env=None):
+            seen["cmd"], seen["env"] = cmd, env or {}
+            return 0, json.dumps({"result": json.dumps({"overall": "pass", "images": [{"file": "ss4.png", "verdict": "pass"}]})}), "", False
+        old = (NS["run_limited"], NS["find_bin"])
+        NS["run_limited"], NS["find_bin"] = fake_run, (lambda *a: "claude")
+        try:
+            st, verdict = NS["judge_once"]([img], [ref], crit, "vẽ lại ss4", NS["JUDGE_MODEL"], 60, v)
+        finally:
+            NS["run_limited"], NS["find_bin"] = old
+        self.assertEqual(NS["JUDGE_MODEL"], "claude-opus-5-5")
+        self.assertEqual(seen["cmd"][seen["cmd"].index("--model") + 1], "claude-opus-5-5")
+        self.assertEqual(seen["env"].get("CLAUDE_CODE_EFFORT_LEVEL"), "low")
+        prompt = seen["cmd"][seen["cmd"].index("-p") + 1]
+        self.assertIn("MẪU ĐÃ DUYỆT", prompt)
+        self.assertIn(str(ref), prompt)
+        self.assertEqual(st["status"], "completed")
+
+    def test_judge_refs_pick(self):
+        root = Path(tempfile.mkdtemp()) / "01 - Rabbit"
+        proj = root / ".work"
+        v = proj / "work" / "ss4" / "v1"
+        v.mkdir(parents=True)
+        inp = root / "input"
+        inp.mkdir()
+        for i, n in enumerate(("old1.png", "old2.png", "sheet.png", "ss4_danhdau.png", "old3.png")):
+            (inp / n).write_bytes(b"x")
+            os.utime(inp / n, (time.time() - 100 + i, time.time() - 100 + i))
+        exp = root / "20261127-screenshots"
+        exp.mkdir()
+        (exp / "ss1.png").write_bytes(b"x")                  # bản đã chốt, đề bài có nhắc tên
+        (exp / "ss4.png").write_bytes(b"x")                  # file đang chấm
+        (v / "TASK.md").write_text("SS4\nNhân vật như input/sheet.png, giữ phong cách ss1.png", encoding="utf-8")
+        old = os.environ.get("AIO_INPUT")
+        os.environ["AIO_INPUT"] = str(inp)
+        try:
+            refs = NS["judge_refs"](proj, v, [str(exp / "ss4.png")])
+        finally:
+            os.environ.pop("AIO_INPUT") if old is None else os.environ.__setitem__("AIO_INPUT", old)
+        self.assertEqual([f.name for f in refs], ["sheet.png", "ss1.png", "old1.png"])
+
+    def test_worker_single_brief_no_fallback(self):
+        proj = Path(tempfile.mkdtemp()) / "01 - W" / ".work"
+        (proj / "tasks").mkdir(parents=True)
+        (proj / "tasks" / "S1.md").write_text("Banner\nVẽ 1 ảnh banner 1080x1080", encoding="utf-8")
+        seen = []
+
+        def fake_run(cmd, cwd, timeout, env=None):
+            seen.append(cmd)
+            return 1, "", "ERROR: something broke", False
+        keys = ("run_limited", "find_bin", "usage_block", "worker_slot")
+        old = {k: NS[k] for k in keys}
+        NS.update(run_limited=fake_run, find_bin=lambda *a: "codex", usage_block=lambda *a, **k: 0, worker_slot=lambda: None)
+        env_old = {k: os.environ.get(k) for k in ("AIO_WCHILD", "AIO_WATCH")}
+        os.environ.update(AIO_WCHILD="1", AIO_WATCH="0")
+        cwd = os.getcwd()
+        os.chdir(proj)
+        try:
+            with self.assertRaises(SystemExit):
+                NS["cmd_worker"](["codex", "--task", "tasks/S1.md", "--out", "work/S1"])
+        finally:
+            os.chdir(cwd)
+            NS.update(old)
+            for k, x in env_old.items():
+                os.environ.pop(k, None) if x is None else os.environ.__setitem__(k, x)
+        prompt = seen[0][-1]
+        self.assertIn("-m", seen[0])                         # model theo chế độ, kể cả việc vẽ ảnh
+        self.assertNotIn("KHÔNG tự đo", prompt)
+        self.assertNotIn("cách đã kiểm tra", prompt)
+        self.assertTrue(all(c[0] == "codex" for c in seen))  # lỗi -> không tự giao Gemini
+        st = json.loads((proj / "work" / "S1" / "v1" / "status.json").read_text(encoding="utf-8"))
+        self.assertEqual(st["status"], "failed")
+        self.assertNotIn("reason", st)
+        self.assertNotIn("via", st)
 
 
 class NoConsole(unittest.TestCase):

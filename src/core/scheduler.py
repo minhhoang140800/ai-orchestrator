@@ -149,7 +149,7 @@ def start_run(t):
                                 stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                                 env=dict(os.environ, AIO_INPUT=str(tdir(t) / "input"), AIO_MODE="code" if code else t.get("mode", "balanced"),
                                          AIO_HARD="1" if t.pop("_hard", False) else "",
-                                         AIO_WATCH="1" if judge_on(t) else "0",     # worker biết Giám sát bật/tắt (đề bài ngắn khi tắt)
+                                         AIO_WATCH="1" if judge_on(t) else "0",     # worker biết Giám sát bật/tắt (tắt: không gắn tiêu chí)
                                          CLAUDE_CODE_EFFORT_LEVEL=t.pop("_effort", "medium") or "medium"),
                                 creationflags=NO_WINDOW | BELOW_NORMAL)
     except Exception as e:

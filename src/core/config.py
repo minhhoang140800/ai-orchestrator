@@ -27,6 +27,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+# Chỉ dùng trong gói trả phí (Claude Max / ChatGPT Plus / Google AI Pro) — cố định trong code, không phải tuỳ chọn hay luật cho AI:
+# xoá biến môi trường API key / tính phí theo API để claude, codex, agy (và mọi lệnh con) luôn dùng tài khoản gói đã đăng nhập.
+# Ngoại lệ duy nhất: Gemini API key người dùng tự thêm trong Cài đặt (lưu ở data/config.json, app gọi thẳng, không qua biến này).
+PLAN_ONLY_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                 "OPENAI_API_KEY", "CODEX_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_USE_VERTEXAI")
+for _k in PLAN_ONLY_ENV:
+    os.environ.pop(_k, None)
+
 UI_B64 = ""  # filled at build time
 ICO_B64 = ""  # icon Windows (shortcut), filled at build time
 FONTS_B64 = ""  # font Geist/Geist Mono (src/fonts/*.woff2, OFL) dạng JSON {tên: base64}, filled at build time

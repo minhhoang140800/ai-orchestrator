@@ -341,10 +341,10 @@ class HiddenTerm:
             pass
 
 
-def run_limited(cmd, cwd, timeout):
+def run_limited(cmd, cwd, timeout, env=None):
     p = subprocess.Popen(cmd, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-                         creationflags=NO_WINDOW)
+                         creationflags=NO_WINDOW, env=env)
     try:
         so, se = p.communicate(timeout=timeout)
         return p.returncode, so, se, False

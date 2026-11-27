@@ -132,8 +132,6 @@ def export_log():
                     for s in m.get("subtasks", []):
                         lines.append(f"    - sub-task {s['id']}: {s['worker'] or '?'} {s['model']}  lần {s['attempt']}  "
                                      f"{fmt(s['seconds']) if s.get('seconds') is not None else '?'}  {s['status']}  {s['error']}")
-                        if s.get("reason"):              # lý do lỗi / chuyển worker / không ra ảnh (kèm nhật ký cuối)
-                            lines.append("        lý do: " + s["reason"].replace("\n", "\n        "))
                 else:
                     lines.append(f"- {m.get('time', '')}  CLAUDE ({m.get('kind') or 'trả lời'}): {m['text'][:200].replace(chr(10), ' ')}")
             lines.append("")

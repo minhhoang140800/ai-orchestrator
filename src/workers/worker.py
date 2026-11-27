@@ -1,4 +1,5 @@
-# Maestro — workers/worker.py: Lệnh con `worker` / `wait` (Claude gọi): giao việc, chuyển worker 2 chiều, ảnh.
+# Maestro — workers/worker.py: Lệnh con `worker` / `wait` (Claude gọi): giao việc, ảnh. Worker nào làm do Claude chọn;
+# worker lỗi/hết lượt thì status báo lại, Claude quyết (app không tự chọn/chuyển worker).
 # Mọi module dùng chung 1 không gian tên (dev: app.py nạp lần lượt; build: ghép thành 1 file),
 # nên KHÔNG import chéo giữa các module. Thứ tự nạp: PARTS trong assemble.py.
 
@@ -13,8 +14,7 @@ IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 
 IMG_MAKE = re.compile(r"vẽ|tạo (?:ảnh|hình|asset|icon|banner|keyframe|storyboard|sprite|logo|thumbnail)|render|imagegen|keyframe|"
                       r"sprite|\.png|\.jpe?g|\.webp|minh ho[ạa]|thumbnail|poster|banner|artwork|background|\bbg\b|logo|asset", re.I)
-IMG_FAIL_F = "img_fail.json"
-IMG_FAIL_TTL = 30 * 60          # 1 bên không vẽ được: 30 phút tới giao thẳng bên kia (chỉ thử 1 lần)
+IMG_FAIL_F = "img_fail.json"      # giờ mở lại vẽ ảnh của từng bên (hạn mức), hiện ở Cài đặt và mục hạn mức gửi Claude
 
 
 # Gemini CLI (Antigravity) hết lượt vẽ ảnh: vẫn báo SUCCESS, lỗi nằm trong câu trả lời / log. Hạn mức vẽ của CLI tách khỏi
@@ -32,21 +32,10 @@ def img_quota_until(text):
     return int(time.time() + (secs if secs > 0 else 3 * 3600))      # không đọc được giờ -> ước 3 giờ
 
 
-def img_failed_recent(worker):
+def mark_img_quota(worker, until):
+    """Bên này hết lượt vẽ ảnh: nhớ giờ mở lại."""
     d = rjson(DATA / IMG_FAIL_F, {}) or {}
-    if d.get(worker + "_until"):                                      # biết giờ mở lại (hết lượt vẽ)
-        return time.time() < float(d[worker + "_until"])
-    return time.time() - float(d.get(worker, 0)) < IMG_FAIL_TTL
-
-
-def mark_img_fail(worker, until=0):
-    """Bên này không vẽ được: nhớ tới giờ mở lại (nếu biết), không thì 30 phút; tới đó việc vẽ giao thẳng bên kia."""
-    d = rjson(DATA / IMG_FAIL_F, {}) or {}
-    d[worker] = int(time.time())
-    if until:
-        d[worker + "_until"] = int(until)
-    else:
-        d.pop(worker + "_until", None)
+    d[worker + "_until"] = int(until)
     wjson(DATA / IMG_FAIL_F, d)
 
 
@@ -115,167 +104,8 @@ def with_criteria(text, proj):
             " chỉ sửa trong phạm vi việc của bạn):\n" + f.read_text(encoding="utf-8", errors="replace")[:6000])
 
 
-IMG_QUICK = (" Ảnh: tạo xong là trả lời ngay; KHÔNG tự đo, so từng chi tiết hay kiểm tra lại kỹ (Maestro và Claude kiểm tra "
-             "sau) — chỉ sửa khi ảnh hỏng rõ ràng.")
-WATCH_IDLE = {"image": 480, "edit": 360, "research": 300, "text": 300}   # GPT không in thêm gì quá lâu -> coi là kẹt (giây)
-
-
-def _ftail(f, n=4000):
-    try:
-        f.flush()
-        size = os.fstat(f.fileno()).st_size
-        f.seek(max(0, size - n))
-        return f.read().decode("utf-8", "replace")
-    except Exception:
-        return ""
-
-
-def run_watched(cmd, cwd, timeout, worker, kind, cap, task_txt):
-    """Chạy worker và THEO DÕI trong lúc chạy (thay vì đợi chạy xong mới biết):
-    - in ra thông báo hết lượt / hết lượt vẽ ảnh -> dừng ngay (app giao bên kia);
-    - GPT (in nhật ký liên tục) im lặng quá WATCH_IDLE -> kẹt -> dừng;
-    - chạy quá cap (4 lần thời gian thường thấy của máy này) -> chậm bất thường -> dừng.
-    Trả (exit code, stdout, stderr, hết giờ?, lý do dừng sớm: ''|'limit'|'idle'|'slow'|'timeout')."""
-    import tempfile
-    fo, fe = tempfile.TemporaryFile(), tempfile.TemporaryFile()
-    p = subprocess.Popen(cmd, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=fo, stderr=fe, creationflags=NO_WINDOW)
-    t0 = last = time.time()
-    size, why = 0, ""
-    own_limit = is_limit(task_txt) or bool(img_quota_until(task_txt))     # đề bài tự nói về "limit" -> không bắt nhầm
-    while p.poll() is None:
-        time.sleep(3)
-        now = time.time()
-        try:
-            n = os.fstat(fo.fileno()).st_size + os.fstat(fe.fileno()).st_size
-        except Exception:
-            n = size
-        if n != size:
-            size, last = n, now
-            tail = _ftail(fe) + "\n" + _ftail(fo)
-            if not own_limit and (is_limit(tail) or (kind == "image" and img_quota_until(tail))):
-                why = "limit"
-        if not why and now - t0 > timeout:
-            why = "timeout"
-        elif not why and now - t0 > cap:
-            why = "slow"
-        elif not why and worker == "codex" and now - last > WATCH_IDLE.get(kind, 300):
-            why = "idle"
-        if why:
-            kill_tree(p)
-            try:
-                p.wait(15)
-            except Exception:
-                pass
-            break
-    code = p.returncode if p.returncode is not None else -1
-    out = []
-    for f in (fo, fe):
-        try:
-            f.seek(0)
-            out.append(f.read().decode("utf-8", "replace"))
-        except Exception:
-            out.append("")
-        f.close()
-    return (code if not why else -1), out[0], out[1], why == "timeout", why
-
-
-def _log_tail(f, n=12):
-    """n dòng cuối có nội dung của 1 nhật ký worker (chỉ đọc 64 KB cuối)."""
-    try:
-        with open(f, "rb") as fh:
-            fh.seek(max(0, f.stat().st_size - 65536))
-            ls = [x for x in fh.read().decode("utf-8", "replace").splitlines() if x.strip() and not x.startswith("--- ")]
-        out = []
-        for x in ls[-n:]:
-            if x.lstrip().startswith("{"):              # dòng JSON (\u0111...) -> chữ đọc được
-                try:
-                    x = json.dumps(json.loads(x), ensure_ascii=False)
-                except Exception:
-                    pass
-            out.append(x[:300])
-        return "\n".join(out)
-    except Exception:
-        return ""
-
-
-def fail_reason(st, v, want_img):
-    """Lý do worker lỗi / phải chuyển worker / báo xong mà không ra ảnh. Lưu vào status.json -> lịch sử task
-    (còn lại sau khi nháp bị dọn), hiện ở Activity và Export log để biết vì sao, không phải đoán."""
-    parts = [f"{n}: {st[k]}" for k, n in (("gemini_error", "Gemini"), ("codex_error", "GPT"), ("agy_error", "Antigravity"))
-             if st.get(k)]
-    if want_img and st.get("status") == "completed" and not _imgs(v) and not any(
-            str(x).lower().endswith(IMG_EXT) for x in st.get("edited") or []) and not st.get("via"):
-        parts.append("Báo xong nhưng không tạo ra file ảnh")
-    if st.get("status") not in ("completed", "running", None) and st.get("error"):
-        parts.append("Lỗi: " + str(st["error"]))
-    if not parts:
-        return ""
-    tails = [f"[{'' if lf.parent == v else lf.parent.name + ' '}nhật ký]\n{tx}" for lf in [v / "worker.log"] + sorted(v.glob("*/worker.log"))
-             if lf.is_file() and (tx := _log_tail(lf))]
-    return ("\n".join(dict.fromkeys(parts)) + ("\n\n" + "\n\n".join(tails) if tails else ""))[:2000]
-
-
-def worker_fallback(st, v, a, edit, want_img):
-    """Worker lỗi / hết lượt / báo xong mà không ra ảnh -> app tự giao worker kia làm lại NGAY trong cùng lệnh
-    (không quay về Claude). Gemini -> GPT cho mọi việc; GPT -> Gemini chỉ cho việc vẽ ảnh.
-    Bên nào không vẽ được ảnh -> nhớ 30 phút, việc vẽ sau giao thẳng bên kia (chỉ thử 1 lần)."""
-    src = a.worker
-    dst = "codex" if src == "gemini" else "gemini"
-    no_img = want_img and st.get("status") == "completed" and not _imgs(v) and not any(
-        str(x).lower().endswith(IMG_EXT) for x in st.get("edited") or [])
-    failed = st.get("status") in ("limit", "failed", "timeout")
-    quota = int(st.get("img_quota_until") or 0)            # hết lượt vẽ giữa chừng (Gemini CLI)
-    partial = want_img and quota and not no_img and not failed and bool(_imgs(v))   # vẽ dở: có vài ảnh rồi hết lượt
-    if want_img and (no_img or failed or partial) and "giao thẳng" not in st.get("error", ""):
-        mark_img_fail(src, quota)                # thật sự đã thử mà không vẽ được (không tính lần bỏ qua)
-    if not (no_img or failed or partial) or (src == "codex" and not want_img):
-        return
-    cfgd = rjson(CFG_FILE, {}) or {}
-    ok = ((cfgd.get("ais") or {}).get(dst) or {}).get("ok") is not False
-    if not find_bin("codex" if dst == "codex" else "agy") or not ok or usage_block(dst, fresh=dst == "codex") \
-            or (want_img and img_failed_recent(dst) and st.get("error", "").find("giao thẳng") < 0):
-        return                                   # bên kia không dùng được / cũng vừa không vẽ được -> để Claude quyết
-    gv = v / ("gpt" if dst == "codex" else "gemini")
-    gv.mkdir(parents=True, exist_ok=True)
-    wjson(v / "status.json", {**{k: x for k, x in st.items() if not k.startswith("_")}, "status": "running", "now_worker": dst,
-                              "pid": os.getpid()})       # giao diện hiện đúng bên đang làm thật
-    task_f = v / "TASK.md"
-    if partial:                                  # vẽ dở -> bên kia chỉ vẽ NỐT phần còn thiếu, giữ cùng phong cách
-        have = [str(f.relative_to(v)).replace("\\", "/") for f in _imgs(v)]
-        task_f = gv.parent / "TASK_vẽ_nốt.md"
-        task_f.write_text((v / "TASK.md").read_text(encoding="utf-8", errors="replace") + (
-            "\n\n---\nPHẦN CÒN THIẾU: worker trước đã vẽ được " + str(len(have)) + " ảnh rồi hết lượt. Ảnh đã có (trong "
-            + str(v) + "): " + ", ".join(have) + ".\nChỉ vẽ NỐT những ảnh còn thiếu theo đề bài trên; xem ảnh đã có để giữ cùng "
-            "phong cách, kích thước, cách đặt tên; KHÔNG vẽ lại ảnh đã có. Cuối câu trả lời ghi rõ đã vẽ thêm ảnh nào."
-            + (" Ảnh trong thư mục " + CODE_DRAWN + " do worker trước tự vẽ bằng code sau khi hết lượt (không đạt): vẽ lại "
-               "bằng AI." if st.get("code_drawn") else "")), encoding="utf-8")
-    cmd = [sys.executable, str(APP), "worker", dst, "--task", str(task_f), "--out", str(v / (gv.name + "_out")),
-           "--vdir", str(gv), "--timeout", str(a.timeout)] + (["--edit", str(edit)] if edit else []) + \
-          (["--write"] if dst == "gemini" and want_img and not edit else [])
-    try:
-        subprocess.run(cmd, cwd=str(Path.cwd()), env=dict(os.environ, AIO_WCHILD="1", AIO_NOFALLBACK="1"),
-                       stdin=subprocess.DEVNULL, capture_output=True, timeout=a.timeout + 180, creationflags=NO_WINDOW)
-    except Exception as e:
-        dlog(f"worker_fallback: {e}")
-    gs = rjson(gv / "status.json", {}) or {}
-    if (gv / "result.md").is_file():
-        shutil.copy2(gv / "result.md", v / "result.md")
-    who = "Gemini" if src == "gemini" else "GPT"
-    st[src + "_error"] = (f"{who} vẽ được {len(_imgs(v)) - len(_imgs(gv))} ảnh rồi hết lượt vẽ; bên kia vẽ nốt phần còn thiếu"
-                          if partial else f"{who} không tạo ra ảnh" if no_img else st.get("error", ""))[:300]
-    if st.get("code_drawn"):
-        st[src + "_error"] += f"; {len(st['code_drawn'])} ảnh {who} tự vẽ bằng code đã chuyển vào {CODE_DRAWN}"
-    if quota:
-        st[src + "_error"] += " (" + src + " vẽ lại được lúc " + datetime.datetime.fromtimestamp(quota).strftime("%H:%M") + ")"
-    tag = "gpt" if dst == "codex" else "gemini"
-    st.update(status=gs.get("status") or "failed", model=f"{tag}:" + str(gs.get("model") or "?"), via=f"{tag}-fallback",
-              error=gs.get("error", ""), seconds=(st.get("seconds") or 0) + (gs.get("seconds") or 0))
-    if gs.get("edited"):
-        st["edited"] = gs["edited"]
-
-
 EXPORT_SKIP_NAMES = {"TASK.md", "worker.log", "status.json", "result.md", "review.json", "prompt.md", "last.txt"}
-EXPORT_SKIP_DIRS = {"_backup", CODE_DRAWN, "gpt_out", "gemini_out"}
+EXPORT_SKIP_DIRS = {"_backup", CODE_DRAWN}
 
 
 def export_group(out, group=""):
@@ -313,8 +143,6 @@ def export_products(st, v, out, proj, group=""):
     moved = []
     for f in files:
         rel = f.relative_to(v)
-        if rel.parts[0] in ("gpt", "gemini"):          # ảnh bên làm thay: đưa ra cùng cấp (không để thư mục gpt/ gemini/)
-            rel = Path(*rel.parts[1:])
         rp = lambda p: str(p.relative_to(dst)).replace("\\", "/")
         t = dst / rel
         if t.exists() and rp(t) not in mine:            # trùng tên với việc khác: thêm tên việc (giữ cả hai)
@@ -345,8 +173,35 @@ def export_products(st, v, out, proj, group=""):
         st["files"] = sorted(moved)
 
 
+JUDGE_REFS = 3          # số ảnh mẫu tối đa đưa giám khảo so sánh
+
+
+def judge_refs(proj, v, judged):
+    """Ảnh mẫu cho giám khảo (tối đa JUDGE_REFS): ảnh người dùng gửi trong task và bản đã chốt mà đề bài/tiêu chí nhắc tên
+    (ưu tiên), rồi tới ảnh người dùng gửi sớm nhất. Bỏ ảnh đánh dấu lỗi (*_danhdau) và chính các file đang chấm."""
+    def imgs_in(d, skip=()):
+        try:
+            return sorted((f for f in d.rglob("*") if f.is_file() and f.suffix.lower() in IMG_EXT
+                           and not f.stem.endswith("_danhdau") and not set(f.relative_to(d).parts[:-1]) & set(skip)),
+                          key=lambda f: f.stat().st_mtime)
+        except Exception:
+            return []
+    judged = {Path(x).resolve() for x in judged}
+    inp = Path(os.environ.get("AIO_INPUT") or proj / "input")
+    sent = imgs_in(inp) if inp.is_dir() else []
+    done = imgs_in(proj.parent, (".work", "_ban_cu", CODE_DRAWN, STORE_NAME)) if proj.name == ".work" else []
+    text = " ".join(f.read_text(encoding="utf-8", errors="replace") for f in (v / "TASK.md", proj / "tasks" / "criteria.md")
+                    if f.is_file()).lower()
+    named = [f for f in sent + done if f.name.lower() in text]
+    out = []
+    for f in named + sent:
+        if f.resolve() not in judged and f not in out:
+            out.append(f)
+    return out[:JUDGE_REFS]
+
+
 def auto_judge(st, v, out, proj, want_img):
-    """Giám sát bật (có tasks/criteria.md) + việc vẽ vừa xong: giám khảo chấm NGAY các file của việc này, trượt thì app tự giao
+    """Giám sát bật (có tasks/criteria.md) + việc vẽ vừa xong: giám khảo chấm NGAY các file của việc này (kèm ảnh mẫu), trượt thì app tự giao
     lại worker sửa (tối đa 1 vòng; vẫn trượt thì giữ bản tốt hơn) -> các việc khác vẫn chạy song song, không đợi cả lô xong mới chấm rồi làm lại."""
     crit = proj / "tasks" / "criteria.md"
     if (os.environ.get("AIO_NOJUDGE") or not want_img or st.get("status") != "completed" or not st.get("export_dir")
@@ -354,8 +209,10 @@ def auto_judge(st, v, out, proj, want_img):
         return
     brief = next((x.strip().lstrip("#").strip() for x in (v / "TASK.md").read_text(encoding="utf-8", errors="replace").splitlines()
                   if x.strip()), "(không)") if (v / "TASK.md").is_file() else "(không)"
-    cmd = [sys.executable, str(APP), "judge", "--files", *([str(Path(st["export_dir"]) / x) for x in st.get("files") or []] or [st["export_dir"]]), "--criteria", str(crit), "--brief", brief[:300],
-           "--out", str(out.parent / (out.name + "_cham")), "--rounds", "1"]
+    files = [str(Path(st["export_dir"]) / x) for x in st.get("files") or []] or [st["export_dir"]]
+    refs = judge_refs(proj, v, files)            # ảnh mẫu (bảng nhân vật, ảnh game, bản đã chốt) để so "giống", "đúng tỉ lệ"
+    cmd = [sys.executable, str(APP), "judge", "--files", *files, "--criteria", str(crit), "--brief", brief[:300],
+           "--out", str(out.parent / (out.name + "_cham")), "--rounds", "1"] + (["--refs", *map(str, refs)] if refs else [])
     try:
         p = subprocess.run(cmd, cwd=str(proj), env=dict(os.environ, AIO_NOJUDGE="1"), stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800, creationflags=NO_WINDOW)
@@ -491,18 +348,15 @@ def cmd_worker(argv):
             sys.exit(0)
         return wait_status(v, a.timeout + 180 + (1800 if (proj / "tasks" / "criteria.md").is_file() else 0))   # + thời gian tự chấm/sửa
     wjson(v / "status.json", {**st, "status": "running", "pid": os.getpid()})   # Hủy task -> dừng được worker này
-    if not os.environ.get("AIO_NOFALLBACK"):   # bên làm thay (gọi lồng từ worker đang giữ chỗ) dùng chung chỗ đó
-        st["_slot"] = str(worker_slot() or "")  # đủ số worker đang chạy trên máy -> chờ tới lượt
+    st["_slot"] = str(worker_slot() or "")      # đủ số worker đang chạy trên máy -> chờ tới lượt
     exe = find_bin("codex" if a.worker == "codex" else "agy")
     task_txt = task.read_text(encoding="utf-8") if task.exists() else ""
     want_img = (a.worker == "codex" or a.write or bool(edit)) and bool(IMG_MAKE.search(task_txt))
-    kind = task_kind(want_img, edit, a.drive, task_txt)
-    skip_gem = want_img and img_failed_recent(a.worker)       # bên này vừa không vẽ được (30 phút) -> giao thẳng bên kia
-    poor = want_img and not skip_gem and stat_poor(a.worker, "image")   # số liệu: bên này gần đây hầu như không vẽ được
     bad_edit = edit_refused(edit) if edit else ""
     cfgd = rjson(CFG_FILE, {}) or {}
     key = cfgd.get("gemini_key", "") if a.worker == "gemini" else ""
-    # Gemini: không có Antigravity / chưa đăng nhập / đang hết lượt -> dùng Gemini API key (nếu người dùng đã thêm)
+    # Gemini: không có Antigravity / chưa đăng nhập / đang hết lượt -> dùng Gemini API key (nếu người dùng đã thêm).
+    # Đây là ngoại lệ DUY NHẤT ngoài gói trả phí (người dùng tự thêm key).
     use_api = bool(key) and not edit and (not exe or ((cfgd.get("ais") or {}).get("gemini") or {}).get("ok") is False
                                           or bool(limits().get("gemini")))
     if key and edit and not exe:
@@ -518,14 +372,6 @@ def cmd_worker(argv):
                                                    "dùng lại lúc " + datetime.datetime.fromtimestamp(ub).strftime("%H:%M %d/%m")))
     elif not task.exists():
         st.update(status="failed", error=f"Không thấy {task}")
-    elif (skip_gem or poor) and not os.environ.get("AIO_NOFALLBACK"):
-        (v / "TASK.md").write_text(task_txt, encoding="utf-8")
-        bu = img_block_until(a.worker) if skip_gem else 0
-        s_ = stat_of(a.worker, "image") if poor else None
-        st.update(status="failed", error=("Gemini" if a.worker == "gemini" else "GPT") + (
-            f" gần đây chỉ vẽ được {round(s_['rate'] * s_['n'])}/{s_['n']} lần" if s_ else
-            " hết lượt vẽ ảnh tới " + datetime.datetime.fromtimestamp(bu).strftime("%H:%M") if bu else
-            " vừa không tạo được ảnh (30 phút qua)") + " — giao thẳng bên kia")
     elif not exe and not use_api:
         st.update(status="failed", error="Worker chưa cài")
     elif use_api:
@@ -540,25 +386,19 @@ def cmd_worker(argv):
                      "yêu cầu; file mới cũng lưu trong thư mục này). KHÔNG sửa/xóa file ở nơi khác. "
                      "Excel/Word/PowerPoint: dùng Python (openpyxl, python-docx, python-pptx); không chuyển đổi định dạng file. "
                      "Câu trả lời cuối: liệt kê từng file đã sửa và đã sửa gì. ") if edit else ""
+        end_note = "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung sản phẩm (không chỉ tóm tắt); nếu tạo file thì liệt kê file đã tạo."
         if a.worker == "codex":
             drive_note = ("Được sửa TRỰC TIẾP file Google (Sheets/Docs/Slides) bằng kết nối Google Drive của bạn: chỉ sửa đúng file/link "
                           "trong yêu cầu, không xoá/di chuyển/chia sẻ file, không dùng kết nối khác (Gmail, Calendar...). Đọc lại sau khi sửa "
                           "để kiểm tra. Không có kết nối Google Drive thì nói rõ, không làm cách khác. ") if a.drive else ""
-            short = want_img and not edit and not a.drive and os.environ.get("AIO_WATCH") == "0"
-            prompt = ((f"Thực hiện đúng yêu cầu trong {v / 'TASK.md'}. File đầu vào (chỉ đọc): {inp_}. "    # vẽ ảnh, Giám sát tắt:
-                       "Ghi mọi file kết quả vào thư mục hiện tại. Cuối cùng liệt kê file đã tạo.") if short else   # đề bài ngắn như v1.7
-                      drive_note + f"Thực hiện đúng yêu cầu trong {v / 'TASK.md'}. "
-                      f"File đầu vào (chỉ đọc): {inp_}. " + (edit_note or "Ghi mọi file kết quả vào thư mục hiện tại. ") +
-                      "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung sản phẩm (không chỉ tóm tắt); "
-                      "nếu tạo file thì liệt kê file đã tạo và cách đã kiểm tra." + IMG_QUICK * want_img)
+            prompt = (drive_note + f"Thực hiện đúng yêu cầu trong {v / 'TASK.md'}. File đầu vào (chỉ đọc): {inp_}. "
+                      + (edit_note or "Ghi mọi file kết quả vào thư mục hiện tại. ") + end_note)
             cmd = [exe, "exec", "--skip-git-repo-check", *CODEX_SANDBOX, "-C", str(edit or v),
                    "--output-last-message", str(v / "result.md")]
             mods, eff = pick_model("codex", os.environ.get("AIO_MODE", "balanced"), os.environ.get("AIO_HARD") == "1")
             mods = [a.model] if a.model else list(mods)
             base_cmd = cmd + ["-c", f'model_reasoning_effort="{eff}"'] + (DRIVE_APPROVE if a.drive else [])
             cands = [base_cmd + ["-m", m_, prompt] for m_ in mods] + [base_cmd + [prompt]]   # model không dùng được -> thử model kế, cuối cùng mặc định
-            if want_img and not a.model:            # vẽ ảnh: model + mức suy nghĩ MẶC ĐỊNH của tài khoản (như v1.7), không ép
-                cands = [cmd + (DRIVE_APPROVE if a.drive else []) + [prompt]]
             cmd = cands[0]
             cwd = edit or v                 # Codex chỉ được ghi trong thư mục làm việc của nó (sandbox)
         else:
@@ -568,8 +408,7 @@ def cmd_worker(argv):
             gm, _ = pick_model("gemini", md_, hard_)
             inp = inp_
             gtext = (f"{text}\n\n---\nFile đầu vào (chỉ đọc): {inp}. " + (edit_note or
-                     f"Lưu mọi file kết quả (ảnh, tài liệu) vào thư mục hiện tại: {v}. ") +
-                     "Câu trả lời cuối: nếu sản phẩm là văn bản thì ghi ĐẦY ĐỦ nội dung; nếu tạo file thì liệt kê tên file." + IMG_QUICK * want_img)
+                     f"Lưu mọi file kết quả (ảnh, tài liệu) vào thư mục hiện tại: {v}. ") + end_note)
             cmd = [exe, "-p", gtext, "--output-format", "json", "--add-dir", str(proj)]
             if os.path.isdir(inp):
                 cmd += ["--add-dir", inp]
@@ -584,11 +423,9 @@ def cmd_worker(argv):
             cwd = v
         t0 = time.time()
         st["t0"] = t0
-        cap = stat_cap(a.worker, kind, a.timeout)
-        why = ""
         for i_, cmd in enumerate(cands):
-            code, so, se, to, why = run_watched(cmd, cwd, a.timeout, a.worker, kind, cap, text)
-            if why:                             # dừng sớm (hết lượt / kẹt / chậm bất thường): không thử cờ/model khác
+            code, so, se, to = run_limited(cmd, cwd, a.timeout)
+            if to:
                 break
             low_ = (so + se).lower()
             bad_flag = code != 0 and ("flag provided but not defined" in low_ or "unknown flag" in low_ or "unknown option" in low_)
@@ -624,19 +461,7 @@ def cmd_worker(argv):
                 if qu:
                     st["img_quota_until"] = qu
         res = v / "result.md"
-        if why == "limit":
-            lm = note_limit(a.worker, se + "\n" + so)
-            if want_img and a.worker == "gemini":
-                qu = img_quota_until(so + "\n" + se)
-                if qu:
-                    st["img_quota_until"] = qu
-            st.update(status="limit", reset=lm["until"], error="Dừng sớm: worker báo hết lượt giữa chừng, dùng lại lúc " +
-                      datetime.datetime.fromtimestamp(lm["until"]).strftime("%H:%M") + ("" if lm["known"] else " (ước tính)"))
-        elif why in ("idle", "slow"):
-            st.update(status="timeout", error="Dừng sớm: " + (
-                f"không có tiến triển {WATCH_IDLE.get(kind, 300) // 60} phút" if why == "idle" else
-                f"chạy quá {round(cap / 60)} phút (gấp 4 lần thường thấy ở máy này)"))
-        elif to:
+        if to:
             st.update(status="timeout", error=f"Quá {a.timeout}s")
         elif code != 0 and is_limit(se[-1500:] + "\n" + so[-1500:]):
             lm = note_limit(a.worker, se + "\n" + so)
@@ -649,17 +474,19 @@ def cmd_worker(argv):
             st.update(status="failed", error="Worker không trả kết quả")
         else:
             st["status"] = "completed"
-    if "exit_code" in st:                          # đã thật sự chạy: ghi số liệu để app tự học chọn worker
-        own_img = any(f.is_file() and f.suffix.lower() in IMG_EXT for f in v.iterdir())
-        ok_ = st.get("status") == "completed" and (not want_img or own_img) and not st.get("code_drawn")
-        if ok_:
-            note_brief(a.worker, kind, st.get("seconds") or 0, task_txt)      # trước khi ghi số liệu: so với mức cũ
-        record_stat(a.worker, kind, ok_, st.get("seconds"), why or st.get("status", ""))
-    if key and not use_api and not edit and "exit_code" in st and st.get("status") in ("limit", "failed"):   # Antigravity hết lượt/lỗi -> thử API
+        qu = int(st.get("img_quota_until") or 0)
+        if qu:                    # Gemini hết lượt vẽ ảnh (CLI vẫn báo xong): báo đúng để Claude quyết giao bên kia hay chờ
+            mark_img_quota(a.worker, qu)
+            got = len(_imgs(v))
+            st["error"] = ("Gemini hết lượt vẽ ảnh, vẽ lại được lúc " + datetime.datetime.fromtimestamp(qu).strftime("%H:%M")
+                           + (f"; đã vẽ {got} ảnh, phần còn lại chưa vẽ" if got else "; chưa vẽ được ảnh nào")
+                           + (f"; {len(st['code_drawn'])} ảnh tự vẽ bằng code đã chuyển vào {CODE_DRAWN}" if st.get("code_drawn") else ""))
+            if not got and st.get("status") == "completed":
+                st.update(status="limit", reset=qu)
+    if key and not use_api and not edit and not st.get("img_quota_until") and "exit_code" in st \
+            and st.get("status") in ("limit", "failed"):   # Antigravity hết lượt/lỗi -> thử Gemini API key (ngoại lệ duy nhất)
         st["agy_error"] = st.pop("error", "")[:300]
         api_worker(st, v, key, (v / "TASK.md").read_text(encoding="utf-8") if (v / "TASK.md").exists() else "", a)
-    if not os.environ.get("AIO_NOFALLBACK"):
-        worker_fallback(st, v, a, edit, want_img)
     st["files"] = sorted(str(f.relative_to(v)).replace("\\", "/") for f in v.rglob("*")
                          if f.is_file() and f.name not in ("TASK.md", "worker.log", "status.json", "result.md")
                          and "_backup" not in f.relative_to(v).parts)
@@ -667,18 +494,14 @@ def cmd_worker(argv):
         st["edited"] = changed_files(edit, v / "_backup", st.get("t0", 0))
     st.pop("t0", None)
     slot = st.pop("_slot", "")
-    rs = fail_reason(st, v, want_img)
-    if not os.environ.get("AIO_NOFALLBACK"):
-        export_products(st, v, out, proj, a.group)          # sau khi đã kiểm ảnh/làm thay xong mới chuyển ra thư mục kết quả
-    if rs:
-        st["reason"] = rs
-    judging = not os.environ.get("AIO_NOFALLBACK") and not os.environ.get("AIO_NOJUDGE") and want_img         and st.get("status") == "completed" and bool(st.get("export_dir")) and (proj / "tasks" / "criteria.md").is_file()
+    export_products(st, v, out, proj, a.group)          # chuyển file sản phẩm ra thư mục kết quả
+    judging = not os.environ.get("AIO_NOJUDGE") and want_img and st.get("status") == "completed" \
+        and bool(st.get("export_dir")) and (proj / "tasks" / "criteria.md").is_file()
     wjson(v / "status.json", {**st, "status": "running", "phase": "đang chấm"} if judging else st)   # người chờ (wait) đợi chấm xong
-    if not os.environ.get("AIO_NOFALLBACK"):
-        if slot:                                   # nhả chỗ trước khi chấm: việc sửa do giám khảo giao cần chỗ chạy (máy 1 chỗ)
-            Path(slot).unlink(missing_ok=True)
-        auto_judge(st, v, out, proj, want_img)     # chấm ngay việc này (không đợi cả lô), trượt thì app tự giao sửa
-        wjson(v / "status.json", st)
+    if slot:                                   # nhả chỗ trước khi chấm: việc sửa do giám khảo giao cần chỗ chạy (máy 1 chỗ)
+        Path(slot).unlink(missing_ok=True)
+    auto_judge(st, v, out, proj, want_img)     # chấm ngay việc này (không đợi cả lô), trượt thì app tự giao sửa
+    wjson(v / "status.json", st)
     print(json.dumps(st, ensure_ascii=False))
     sys.exit(0 if st["status"] == "completed" else 1)
 

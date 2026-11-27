@@ -30,6 +30,8 @@ CODE_EXT = (".py", ".js", ".ts", ".tsx", ".jsx", ".html", ".css", ".json", ".jav
 JUDGE_SKIP = {"TASK.md", "status.json", "worker.log", "result.md", "prompt.md", "last.txt"}   # sổ sách của worker, không chấm
 
 
+JUDGE_MODEL = "claude-opus-5-5"      # giám khảo: Opus 5.5, mức suy nghĩ low (CLI chưa biết tên này -> bí danh "opus")
+JUDGE_EFFORT = "low"
 JUDGE_PX = 768                       # cạnh dài ảnh đưa giám khảo (đủ thấy nhân vật, chữ, bố cục; đọc nhanh hơn nhiều)
 REF_NEED_RE = re.compile(r"mẫu|giống|reference|\bref\b|so với|đồng bộ|nhất quán|cùng phong cách|base", re.I)
 
@@ -60,21 +62,27 @@ def judge_once(files, refs, crit, brief, model, timeout, v):
     code = any(f.suffix.lower() in CODE_EXT for f in files)
     if refs and not code and not REF_NEED_RE.search(ctext + "\n" + brief):
         refs = []                                   # tiêu chí không cần so mẫu -> không mở ảnh mẫu (đỡ thời gian)
+    rviews = [judge_view(f, v / "xem_mau") for f in refs]           # thư mục riêng: mẫu trùng tên file đang chấm không ghi đè
     prompt = JUDGE_PROMPT.format(
         criteria=ctext, brief=brief,
         images="\n".join(f"- {x}" + (f"   (bản thu nhỏ của {o.name})" if x != o else "") for x, o in views.items()),
         ref_note=" và các MẪU ĐÃ DUYỆT (chuẩn để so sánh)" if refs else "",
-        refs=("\nMẪU ĐÃ DUYỆT (chỉ để so sánh, không chấm):\n" + "\n".join(f"- {judge_view(f, v / 'xem')}" for f in refs) + "\n") if refs else "")
+        refs=("\nMẪU ĐÃ DUYỆT (chỉ để so sánh, không chấm):\n" + "\n".join(f"- {x}" for x in rviews) + "\n") if refs else "")
     # ảnh/văn bản: chỉ cho Read + giới hạn số bước (mở file rồi trả lời ngay, không đi tìm hiểu thêm) -> nhanh
     cmd = [exe, "-p", prompt, "--output-format", "json", "--allowedTools", "Read,Glob,Grep,Bash" if code else "Read",
            "--model", model]
-    for d in dict.fromkeys([str(x.parent) for x in list(views) + refs]):
+    for d in dict.fromkeys([str(x.parent) for x in list(views) + rviews]):
         cmd += ["--add-dir", d]
     t0 = time.time()
     lim = [] if code else ["--max-turns", str(len(views) + len(refs) + 3)]
-    rc, so, se, to = run_limited(cmd + lim, v, timeout)
+    env = dict(os.environ, CLAUDE_CODE_EFFORT_LEVEL=JUDGE_EFFORT)
+    rc, so, se, to = run_limited(cmd + lim, v, timeout, env=env)
     if rc != 0 and lim and re.search(r"unknown option|unrecognized|max-turns", (se or "") + (so or ""), re.I) and "{" not in (so or ""):
-        rc, so, se, to = run_limited(cmd, v, timeout)      # CLI cũ không có --max-turns
+        rc, so, se, to = run_limited(cmd, v, timeout, env=env)      # CLI cũ không có --max-turns
+    if rc != 0 and not to and model == JUDGE_MODEL and re.search(r"model", (se or "") + (so or ""), re.I) and re.search(
+            r"not found|invalid|not available|does not exist|unknown|no access|not supported", (se or "") + (so or ""), re.I):
+        cmd[cmd.index("--model") + 1] = "opus"       # CLI cũ chưa biết tên đầy đủ -> bí danh Opus mới nhất
+        rc, so, se, to = run_limited(cmd + lim, v, timeout, env=env)
     with open(v / "worker.log", "a", encoding="utf-8") as fh:
         fh.write(f"--- stdout ---\n{so}\n--- stderr ---\n{se}\n")
     verdict = None
@@ -141,9 +149,7 @@ def fix_failed(verdict, files, rnd):
         nv = Path(ns.get("out_dir", ""))
         if ns.get("export_dir"):                         # bản sửa đã nằm ở thư mục kết quả
             nv = Path(ns["export_dir"])
-        elif ns.get("via") in ("gpt-fallback", "gemini-fallback"):
-            nv = nv / ("gpt" if ns["via"].startswith("gpt") else "gemini")
-        new = [nv / x for x in ns.get("files") or [] if (nv / x).is_file() and not x.startswith(("gpt/", "gemini/"))]
+        new = [nv / x for x in ns.get("files") or [] if (nv / x).is_file()]
         for f, _ in items:
             out[str(f)] = [x for x in new if x.name == f.name] or new
     for vd, items in groups.items():
@@ -184,7 +190,7 @@ def cmd_judge(argv):
     ap.add_argument("--files", "--images", dest="images", required=True, nargs="+",
                     help="thư mục hoặc file sản phẩm cần chấm (tối đa 12 file/lần)")
     ap.add_argument("--criteria", required=True, help="file .md tiêu chí nghiệm thu của task")
-    ap.add_argument("--refs", help="thư mục mẫu đã được người dùng duyệt (tùy chọn)")
+    ap.add_argument("--refs", nargs="+", help="ảnh mẫu / thư mục mẫu người dùng đã duyệt (tùy chọn, tối đa 5 file)")
     ap.add_argument("--brief", default="(không)", help="yêu cầu riêng của lần này: pose, số áo, kích thước...")
     ap.add_argument("--out", required=True, help="vd work/J1")
     ap.add_argument("--model")
@@ -197,7 +203,11 @@ def cmd_judge(argv):
         imgs += sorted(f for f in p.rglob("*") if f.is_file() and "xem" not in f.parts
                        and f.name not in JUDGE_SKIP and not f.name.startswith("fix_r")) if p.is_dir() else [p]
     imgs = [f for f in imgs if f.is_file()][:12]
-    refs = sorted(f for f in Path(a.refs).resolve().iterdir() if f.is_file())[:5] if a.refs and Path(a.refs).is_dir() else []
+    refs = []
+    for p in a.refs or []:
+        p = Path(p).resolve()
+        refs += sorted(f for f in p.iterdir() if f.is_file()) if p.is_dir() else [p] if p.is_file() else []
+    refs = list(dict.fromkeys(refs))[:5]
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     n = 1
@@ -207,8 +217,7 @@ def cmd_judge(argv):
     v.mkdir()
     (v / "TASK.md").write_text(f"Chấm độc lập {len(imgs)} file\n\n{a.brief}", encoding="utf-8")
     code = any(f.suffix.lower() in CODE_EXT for f in imgs)
-    # nhanh: không phải code thì dùng model nhỏ (Pro: sonnet); code giữ sonnet như cũ
-    model = a.model or ("sonnet" if code or os.environ.get("AIO_MODE") == "pro" else "haiku")
+    model = a.model or JUDGE_MODEL                    # mọi chế độ: Opus 5.5 mức low
     timeout = a.timeout or (600 if code else 300)
     st = {"worker": "judge", "model": model, "out_dir": str(v)}
     wjson(v / "status.json", {**st, "status": "running"})

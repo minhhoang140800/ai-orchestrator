@@ -280,7 +280,6 @@ main.withact .scroll,main.withact .compwrap,main.withact #decbar{margin-right:32
 .actp .ah{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff}
 .actp .as{padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px}.actp .ak{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mute);margin-bottom:6px}
 .asub{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center;padding:4px 0}.asub small{grid-column:1;color:var(--mute);font-size:11px}.asub .pill{grid-row:1/3;grid-column:2}
-.asub .arsn{grid-column:1/-1;font-size:11px;color:var(--mute)}.asub .arsn summary{cursor:pointer}.asub .arsn pre{white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;background:#f6f6f4;padding:6px 8px;border-radius:6px;margin:4px 0 0;font:11px/1.45 'Geist Mono',Consolas,monospace}
 .asteps{margin:6px 0 0;padding-left:18px;color:var(--mute);font-size:12px}.asteps li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:1px 0}
 .afile{display:flex;gap:6px;align-items:center;font-size:12px;padding:2px 0}.afile .i{width:14px;height:14px;flex:none}.afile span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #bAct.on{background:var(--acc2)}
@@ -2101,7 +2100,7 @@ function workBlock(m, i) {
     const narr = (m.steps || []).filter((s) => !TOOL_STEP.test(s));
     const cur = narr[narr.length - 1];
     if (cur) rows.push([`<span class="spin sm"></span>`, cur, "Claude"]);
-    subs.filter((s) => s.status === "running").forEach((s) => rows.push([`<span class="spin sm"></span>`, s.title || s.id, (s.now ? who(s.now, "") + " (thay " + who(s.worker, "") + ")" : who(s.worker, s.model))]));
+    subs.filter((s) => s.status === "running").forEach((s) => rows.push([`<span class="spin sm"></span>`, s.title || s.id, who(s.worker, s.model)]));
     if (!rows.length) rows.push([`<span class="spin sm"></span>`, (m.steps || []).length ? m.steps[m.steps.length - 1] : "Đang khởi động…", ""]);
   } else {
     subs.forEach((s) => rows.push([`<span class="wic ${s.status === "completed" ? "done" : s.status}">${lu(s.status === "completed" ? "check" : ["failed", "rejected", "timeout"].includes(s.status) ? "x" : "check")}</span>`, s.title || s.id, who(s.worker, s.model)]));
@@ -2167,7 +2166,7 @@ function actHtml(t) {
   return `<div class="ah"><b>Activity</b><button class="ghost icon" data-actx="1" aria-label="Đóng">×</button></div>
     <div class="as"><div class="ak">Trạng thái</div>${costTxt(t.cost)}<div>${ST[t.status] || t.status}${live && ws[0][0].phase ? ` · ${esc(ws[0][0].phase)}` : ""}</div></div>
     ${ws.map(([m], n) => `<div class="as"><div class="ak">${m.status === "running" ? "Đang làm" : "Lượt " + (ws.length - n)} · ${esc(m.started || "")}</div>${costTxt(m.cost, "Lượt này tốn")}
-      ${(m.subtasks || []).map((x) => `<div class="asub"><span>${esc(x.title || x.id)}</span><small>${esc((x.now ? (x.now === "codex" ? "ChatGPT" : "Gemini") + " (làm thay " + (x.worker === "codex" ? "ChatGPT" : "Gemini") + ")" : x.worker === "codex" ? "ChatGPT" : x.worker === "gemini" ? "Gemini" : x.worker) + (x.model ? " · " + x.model : ""))}${x.seconds ? " · " + dur(x.seconds) : ""}</small><span class="pill ${x.status}">${ST[x.status] || x.status}</span>${x.reason ? `<details class="arsn"><summary>Lý do</summary><pre>${esc(x.reason)}</pre></details>` : ""}${x.worker !== "judge" ? `<button class="lnk" data-subdir="${esc(x.id)}" title="Mở thư mục file của việc này (xem trước khi task xong)">Mở thư mục</button>` : ""}</div>`).join("")}
+      ${(m.subtasks || []).map((x) => `<div class="asub"><span>${esc(x.title || x.id)}</span><small>${esc((x.worker === "codex" ? "ChatGPT" : x.worker === "gemini" ? "Gemini" : x.worker) + (x.model ? " · " + x.model : ""))}${x.seconds ? " · " + dur(x.seconds) : ""}</small><span class="pill ${x.status}">${ST[x.status] || x.status}</span>${x.worker !== "judge" ? `<button class="lnk" data-subdir="${esc(x.id)}" title="Mở thư mục file của việc này (xem trước khi task xong)">Mở thư mục</button>` : ""}</div>`).join("")}
       ${(m.steps || []).length ? `<ol class="asteps">${m.steps.map((x) => `<li title="${esc(x)}">${esc(x)}</li>`).join("")}</ol>` : m.status === "running" ? `<ol class="asteps"><li>Đang khởi động…</li></ol>` : ""}</div>`).join("")}
     ${files.length ? `<div class="as"><div class="ak">File kết quả · ${files.length}</div>${files.slice(0, 40).map((f) => `<div class="afile" title="${esc(f)}">${ficon(f)}<span>${esc(f)}</span></div>`).join("")}</div>` : ""}`;
 }
@@ -2394,8 +2393,7 @@ async function openUsage(force) {
       ? `<div class="ur"><span>${k === "claude" ? "Extra usage" : "Credits"}</span><span>${k === "claude" ? "bật" : a.credits.unlimited ? "∞" : a.credits.balance}</span></div>` : "";
     const body = a.known ? leftRow("Phiên hiện tại", a.five_hour) + leftRow("Tuần này", a.week) + cr : `<div class="note">Chưa đọc được</div>`;
     const lim = a.limit_until ? `<div class="ur low"><span>Hết lượt</span><span>${new Date(a.limit_until * 1000).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</span></div>` : "";
-    const sw = "";                       // "chỉ dùng trong gói" luôn bật, không có công tắc
-    return `<div class="ua"><div class="un">${esc(name)}${plan(k)}<span style="flex:1"></span>${MANAGE[k] ? `<a href="${MANAGE[k]}" target="_blank" rel="noopener" title="Quản lý trên trang ${esc(name)}" aria-label="Quản lý">${lu("external-link")}</a>` : ""}</div>${body}${lim}${sw}</div>`;
+    return `<div class="ua"><div class="un">${esc(name)}${plan(k)}<span style="flex:1"></span>${MANAGE[k] ? `<a href="${MANAGE[k]}" target="_blank" rel="noopener" title="Quản lý trên trang ${esc(name)}" aria-label="Quản lý">${lu("external-link")}</a>` : ""}</div>${body}${lim}</div>`;
   };
   m.innerHTML = `<div class="uh"><b>Mức dùng</b><span style="flex:1"></span><button class="ghost icon" id="uRef" title="Kiểm tra lại · cập nhật ${new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}" aria-label="Kiểm tra lại">${I.refresh}</button></div>
     ${block("claude", "Claude")}${block("codex", "ChatGPT")}${block("gemini", "Gemini")}`;

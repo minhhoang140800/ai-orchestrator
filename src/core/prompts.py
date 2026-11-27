@@ -4,8 +4,7 @@
 
 MODE_RULES = {
     "code": "",          # Code mode có quy trình riêng (CODE_MD)
-    "pro": """- Ưu tiên chất lượng và thời gian. Song song nhiều worker cho phần độc lập (số lượng: mục "Số worker song song").
-- Giám khảo (khi Giám sát bật) được dùng model mạnh.""",
+    "pro": """- Ưu tiên chất lượng và thời gian. Song song nhiều worker cho phần độc lập (số lượng: mục "Số worker song song").""",
     "balanced": """- Cân bằng chất lượng, thời gian, hạn mức. Song song cho phần độc lập (số lượng: mục "Số worker song song"); tuần tự khi phụ thuộc.
 - Model nhỏ/nhanh cho việc đơn giản, mạnh cho việc khó.""",
     "turbo": """- TỐC ĐỘ TỐI ĐA: bắt tay làm ngay, kế hoạch vài dòng, không hỏi lại trừ khi thiếu dữ kiện bắt buộc. Song song tối đa theo mục "Số worker song song" (nghiêng về nhiều).
@@ -213,8 +212,8 @@ Giao việc: ghi yêu cầu đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu 
   --write: Gemini được tạo file/ảnh. --hard: việc khó. --edit <thư mục>: worker sửa thẳng file trong thư mục đó (app tự sao lưu).
   --drive: GPT sửa thẳng file Google Sheets/Docs/Slides qua kết nối Drive của nó.
 Nhiều việc: giao cả lô bằng --bg (trả về ngay), rồi chờ MỘT lần: "{py}" "{app}" wait work/S1 work/S2 work/S3
-App TỰ lo: chọn model (không truyền --model), giới hạn số worker chạy cùng lúc, thời gian chờ, giao bên kia làm lại khi
-worker lỗi/hết lượt/không vẽ ra ảnh (status via=gpt-fallback/gemini-fallback) — KHÔNG tự kiểm tra rồi giao lại.
+App TỰ lo: chọn model (không truyền --model), giới hạn số worker chạy cùng lúc, thời gian chờ. Chọn worker nào là việc của
+bạn; worker lỗi/hết lượt thì status báo lỗi, bạn quyết giao bên kia, chờ hay tự làm (app không tự chuyển).
 Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở export_dir trong status. Sửa lỗi: giao lại cùng --out. Worker lỗi/không chạy: coi như không có.
 
 {workers_md(t, py, app, on)}

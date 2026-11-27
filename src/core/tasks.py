@@ -142,8 +142,7 @@ def subtasks(t):
         out.append({"id": d.name, "title": title, "attempt": len(vs), "worker": st.get("worker") or "",
                     "model": st.get("model") or "", "status": st.get("status") or "running",
                     "seconds": st.get("seconds"), "error": (st.get("error") or "")[:200],
-                    "reason": (st.get("reason") or "")[:2000], "via": st.get("via") or "",
-                    "now": st.get("now_worker") if st.get("status") == "running" else "",
+                    "via": st.get("via") or "",
                     "ts": (v / "status.json").stat().st_mtime if (v / "status.json").exists() else v.stat().st_mtime})
     return out
 

@@ -14,6 +14,7 @@ Maestro = web app chạy trên máy người dùng (Windows chính, có bản Ma
 và Gemini (Antigravity CLI `agy`), dùng gói Claude Max / ChatGPT Plus / Google AI Pro sẵn có, không API key.
 Không có Claude trả phí: ChatGPT (Codex) làm PM (`pick_pm`, hướng dẫn ghi vào AGENTS.md). Không có gói trả phí nào: chế độ Free
 (`free_setup`, `FREE_RULES`) + Gemini API key tuỳ chọn (`api_worker`, key chỉ lưu trong `data/config.json`). Worker sửa file thẳng: `--edit`.
+Chỉ dùng trong gói: cố định trong code (`PLAN_ONLY_ENV` xoá biến API key, `usage_block`), không công tắc; ngoại lệ duy nhất: Gemini API key.
 Code mode (`kind=code`, `CODE_MD`, `code_checkpoint`/`code_restore`, cài phần mềm thiếu: `install_request.json` → `run_install`).
 Learning: task xong → `lessons.json` → `learn_queue` (lọc dữ liệu riêng: `scrub`) → Google Form (`src/learn_form.json`);
 tác vụ hẹn giờ Chủ nhật làm theo `learning/WEEKLY.md`, gộp vào `src/learnings.md` (mục "Đang áp dụng" nhúng vào app khi build).
@@ -28,7 +29,8 @@ tên (không import chéo): khi phát triển `app.py` nạp lần lượt theo 
   dọn nháp), `router` (lễ tân hỏi đáp/việc nhỏ/đầy đủ), `prompts` (`write_claude_md`, `CODE_MD`, `build_prompt`), `models`
   (`MODEL_PLAN`, `pick_model`), `usage` (hạn mức, `is_limit`, `usage_block`), `scheduler` (`sched_tick`, `start_run`, `watch`).
 - `providers/`: `accounts` (đăng nhập, trạng thái, `pick_pm`), `claude`, `codex`, `gemini` (agy + Gemini API key).
-- `workers/`: `worker` (`cmd_worker`, `cmd_wait`, chuyển worker 2 chiều, `fail_reason` lưu lý do lỗi), `check`, `judge`.
+- `workers/`: `worker` (`cmd_worker`, `cmd_wait`; worker do Claude chọn, lỗi/hết lượt thì status báo lại — app không tự
+  chọn/chuyển worker), `check`, `judge` (Opus 5.5 low `JUDGE_MODEL`, ảnh mẫu `judge_refs`).
 - `features/`: `brain` (dự án, template), `codemode`, `updater` (`fetch_update`, `apply_update`, `boot`), `diagnostics`
   (Export log, Clear cache), `system` (tự mở khi bật máy), `memory` (bộ nhớ người dùng tự ghi sau mỗi lượt), `remote` (điện thoại).
 - `web/`: `server.py` (class `H`, API, `task_detail`, `serve`), `ui.html` (toàn bộ giao diện, Porcelain 2.0, icon Lucide).

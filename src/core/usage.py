@@ -138,14 +138,10 @@ def usage_refresh(force=False, only=None):
         return d
 
 
-def in_plan_only(ai):
-    """Luôn chỉ dùng trong gói: không bao giờ để AI tràn sang credit / extra usage (mặc định, không tắt được)."""
-    return True
-
-
 def usage_block(ai, fresh=False):
-    """Đã dùng gần hết gói (cửa sổ 5 giờ hoặc tuần) và đang bật 'chỉ dùng trong gói' -> giờ dùng lại được (epoch), không thì 0."""
-    if ai not in ("claude", "codex") or not in_plan_only(ai):
+    """Chỉ dùng trong gói (cố định trong code, không có công tắc): đã dùng gần hết gói (cửa sổ 5 giờ hoặc tuần)
+    -> giờ dùng lại được (epoch), không thì 0. Không bao giờ để AI tràn sang credit / extra usage."""
+    if ai not in ("claude", "codex"):
         return 0
     u = (usage_refresh(force=True, only=[ai]) if fresh else (rjson(USAGE_F, {}) or {})).get(ai) or {}
     if not u.get("known"):
@@ -254,5 +250,4 @@ def usage_state(force=False):
     return {"claude": d.get("claude") or {}, "codex": d.get("codex") or {},
             "gemini": {"known": False, "note": "Gemini chưa cho đọc mức dùng — chỉ biết khi hết lượt",
                        **({"limit_until": lm["gemini"]["until"]} if "gemini" in lm else {})},
-            "plans": {k: CFG["ais"].get(k, {}).get("plan", "") for k in ("claude", "codex")},
-            "in_plan": {k: in_plan_only(k) for k in ("claude", "codex")}, "counts": usage_counts()}
+            "plans": {k: CFG["ais"].get(k, {}).get("plan", "") for k in ("claude", "codex")}, "counts": usage_counts()}
