@@ -185,17 +185,29 @@ class Prompts(unittest.TestCase):
                             r"C:\Users\Minh Hoang\AppData\Local\Programs\Python\python.exe", r"C:\Users\Minh Hoang\app.py")
         self.assertIn(r"C:\Users\Minh Hoang\Documents\proj", txt)
 
-    def test_memory_injected(self):
+    def test_memory_sent_in_prompt_not_in_md(self):
+        """K3: bộ nhớ đi kèm tin nhắn (lần đầu + khi đổi), KHÔNG nằm trong CLAUDE.md -> hướng dẫn không đổi mỗi lượt."""
         NS["mem_save"]("## Cách làm việc\n- Xưng hô tôi – bạn", None, "## Lịch sử\n- Dự án Alien")
         try:
-            _, md = self._md("balanced")
-            self.assertIn("Maestro tự ghi nhớ", md)
-            self.assertIn("Xưng hô tôi – bạn", md)
-            self.assertIn("Dự án Alien", md)              # lịch sử: chỉ của đúng dự án của task (task không dự án -> "_chung")
+            t, md = self._md("balanced")
+            self.assertNotIn("Maestro tự ghi nhớ", md)
+            p = NS["build_prompt"](t, {"kind": "start"})
+            self.assertIn("Maestro tự ghi nhớ", p)
+            self.assertIn("Xưng hô tôi – bạn", p)
+            self.assertIn("Dự án Alien", p)              # lịch sử: chỉ của đúng dự án của task (task không dự án -> "_chung")
+            t["session_started"] = True
+            p2 = NS["build_prompt"](t, {"kind": "followup", "text": "tiếp"})
+            self.assertNotIn("Maestro tự ghi nhớ", p2)  # không đổi -> không gửi lại
+            NS["mem_save"]("## Cách làm việc\n- Trả lời rất ngắn", None, None)
+            p3 = NS["build_prompt"](t, {"kind": "followup", "text": "tiếp"})
+            self.assertIn("Trả lời rất ngắn", p3)       # đổi -> gửi bản mới
+            h = t.get("md_hash")
+            t.pop("md_changed", None)
+            NS["write_claude_md"](t)
+            self.assertEqual(t.get("md_hash"), h)        # bộ nhớ đổi nhưng CLAUDE.md giữ nguyên -> không bắt đọc lại
+            self.assertFalse(t.get("md_changed"))
         finally:
             NS["mem_save"]("", None, "")
-        _, md = self._md("balanced")
-        self.assertNotIn("Maestro tự ghi nhớ", md)
 
 
 class Memory(unittest.TestCase):
@@ -317,6 +329,65 @@ class V119(unittest.TestCase):
             NS["mem_save"]("")
 
 
+class V123(unittest.TestCase):
+    def _t(self, tid):
+        t = {"id": tid, "text": "vẽ 3 icon", "mode": "balanced", "status": "running", "messages": [], "folder": "01 - " + tid}
+        NS["TASKS"][tid] = t
+        return t
+
+    def test_message_while_running_is_queued(self):
+        """K1: tin nhắn lúc đang chạy -> xếp hàng, KHÔNG ngắt; nút Gửi gấp mới ngắt."""
+        t = self._t("K1a")
+        killed = []
+        old = NS["kill_tree"]
+        NS["kill_tree"] = lambda p: killed.append(p)
+        try:
+            NS["act"]("K1a", "send", "thêm 1 icon nữa")
+            NS["act"]("K1a", "send", "nền xanh")
+            self.assertEqual(killed, [])
+            self.assertEqual(t["_queued"]["text"], "thêm 1 icon nữa\n\nnền xanh")
+            self.assertFalse(t.get("_redirect"))
+            NS["act"]("K1a", "send", "dừng, đổi sang 5 icon", urgent=True)
+            self.assertEqual(len(killed), 1)
+            self.assertEqual(t["_redirect"]["kind"], "urgent")
+            self.assertIn("nền xanh", t["_redirect"]["text"])          # tin đã xếp hàng được gộp vào tin gấp
+            self.assertNotIn("_queued", t)
+        finally:
+            NS["kill_tree"] = old
+            NS["TASKS"].pop("K1a", None)
+
+    def test_memory_every_5_turns(self):
+        """K6: bộ nhớ cập nhật ở lượt đầu, rồi sau mỗi 5 lượt."""
+        calls = []
+        old = NS["mem_update"]
+        NS["mem_update"] = lambda t: calls.append(1)
+        try:
+            t = {"id": "K6", "messages": [{"role": "user", "text": "a"}, {"role": "work"}, {"role": "claude", "text": "b"}]}
+            NS["mem_maybe"](t)
+            self.assertEqual(len(calls), 1)
+            for _ in range(4):
+                t["messages"] += [{"role": "user", "text": "c"}, {"role": "work"}, {"role": "claude", "text": "d"}]
+                NS["mem_maybe"](t)
+            self.assertEqual(len(calls), 1)                            # mới 4 lượt
+            t["messages"] += [{"role": "user", "text": "e"}, {"role": "work"}, {"role": "claude", "text": "f"}]
+            NS["mem_maybe"](t)
+            self.assertEqual(len(calls), 2)                            # đủ 5 lượt
+        finally:
+            NS["mem_update"] = old
+        x = NS["mem_turn"]({"messages": [{"role": "user", "text": "u1"}, {"role": "claude", "text": "a1"},
+                                         {"role": "user", "text": "u2"}, {"role": "claude", "text": "a2"}]}, 0)
+        self.assertIn("u1", x)
+        self.assertIn("a2", x)
+
+    def test_judge_no_final_batch(self):
+        """K5: file app đã chấm thì Claude không chấm lại cả lô ở cuối."""
+        t = {"id": "K5", "text": "vẽ 3 icon", "mode": "balanced", "judge": True, "folder": "01 - K5"}
+        NS["write_claude_md"](t)
+        md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("KHÔNG chấm cả lô ở cuối", md)
+        self.assertNotIn("cuối lô chỉ chấm nhanh", md)
+
+
 class FailReason(unittest.TestCase):
     def test_no_image(self):
         v = Path(tempfile.mkdtemp())
@@ -361,7 +432,7 @@ class Folders(unittest.TestCase):
         NS["write_claude_md"](t)
         md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("OUTPUT/<YYYYMMDD>-<nhóm>", md)
-        self.assertIn(time.strftime("%Y%m%d") + "-icons", md)
+        self.assertIn("<YYYYMMDD>-icons", md)                      # không chèn ngày thật (hướng dẫn khỏi đổi mỗi ngày)
 
 
 class Accounts(unittest.TestCase):
@@ -657,7 +728,13 @@ class AskUser(unittest.TestCase):
 
     def test_prompt_rule(self):
         t = {"id": "Q1", "text": "x", "mode": "balanced", "folder": "01 - Hỏi", "watch": False}
-        NS["write_claude_md"](t)
+        old_on, old_low = NS["workers_on"], NS["LOW_SPEC"]
+        NS["workers_on"] = lambda t: ["codex", "gemini"]          # như máy có đủ GPT + Gemini, cấu hình không thấp
+        NS["LOW_SPEC"] = False
+        try:
+            NS["write_claude_md"](t)
+        finally:
+            NS["workers_on"] = old_on
         md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertIn("TRƯỚC khi bắt tay", md)
         self.assertIn("ĐANG làm mà vướng", md)
@@ -665,7 +742,17 @@ class AskUser(unittest.TestCase):
         self.assertIn("chuyển THẲNG vào thư mục nhóm", md)
         self.assertIn("--group <nhóm>", md)
         self.assertIn("Số worker song song (BẠN tự quyết, trần", md)       # Claude tự chọn số worker theo hạn mức/giờ reset
-        self.assertIn("Hạn mức lúc bắt đầu lượt: ChatGPT", md)
+        self.assertIn("Hạn mức lúc bắt đầu lượt: app gửi kèm", md)
+        old = NS["workers_on"]
+        NS["workers_on"] = lambda t: ["codex", "gemini"]
+        try:
+            p = NS["build_prompt"](t, {"kind": "start"})
+            self.assertIn("## Hạn mức lúc bắt đầu lượt", p)       # hạn mức đi kèm tin nhắn mỗi lượt
+            self.assertIn("ChatGPT", p)
+            self.assertIn("## Chia việc — số liệu máy này", p)
+        finally:
+            NS["workers_on"] = old
+            NS["LOW_SPEC"] = old_low
         self.assertNotIn("Song song tối đa 3 worker", md)
         t2 = {"id": "Q2", "text": "x", "mode": "eco", "folder": "01 - Hỏi", "watch": False}
         NS["write_claude_md"](t2)

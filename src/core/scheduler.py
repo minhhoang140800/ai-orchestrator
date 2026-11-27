@@ -377,6 +377,9 @@ def watch(t, p, nxt):
             end_work(t, "done")
             t["status"] = "waiting"
             qt = q.read_text(encoding="utf-8").strip()
+            rt = ((result or {}).get("result") or "").strip() if p.returncode == 0 and not (result or {}).get("is_error") else ""
+            if rt and qt not in rt:              # có câu trả lời + câu hỏi: hiện CẢ HAI (trước đây chỉ hiện câu hỏi, mất kết quả)
+                qt = rt + "\n\n" + qt
             fs, fd = new_files(t, since, qt)
             tmsg(t, "claude", qt, kind="question", files=fs, dir=fd)
         elif p.returncode == 0 and result and not result.get("is_error"):
@@ -388,7 +391,7 @@ def watch(t, p, nxt):
             if asks_user(rt):                  # câu trả lời kết thúc bằng câu hỏi cho người dùng -> "Chờ bạn trả lời" + thông báo
                 t["status"] = "waiting"
                 tmsg(t, "claude", rt, kind="question", files=fs, dir=fd)
-                threading.Thread(target=mem_update, args=(t,), daemon=True).start()     # giữ nháp (task chưa xong), vẫn ghi nhớ
+                threading.Thread(target=mem_maybe, args=(t,), daemon=True).start()      # giữ nháp (task chưa xong); bộ nhớ: theo lượt
             else:
                 tmsg(t, "claude", rt, files=fs, dir=fd)
                 threading.Thread(target=after_turn, args=(t, t.get("wi")), daemon=True).start()   # dọn nháp + cập nhật bộ nhớ (nền)
@@ -406,6 +409,18 @@ def watch(t, p, nxt):
                 end_work(t, "failed")
                 t["status"] = "failed"
                 tmsg(t, "claude", msg, kind="error")
+        qd = t.get("_queued")                     # tin nhắn gửi trong lúc lượt này chạy (đã xếp hàng): chạy ngay sau
+        if qd and t["status"] in ("done", "waiting", "failed"):
+            t.pop("_queued", None)
+            t["next"] = {"kind": "answer" if t["status"] == "waiting" else "followup", "text": qd["text"], "files": qd["files"]}
+            t["status"] = "queued"
+        elif qd and t["status"] == "queued" and t.get("next"):   # bị dừng chờ hạn mức / ngắt: gộp vào lượt đang chờ
+            t.pop("_queued", None)
+            n = t["next"]
+            n["text"] = (n.get("text", "") + "\n\n" + qd["text"]).strip()
+            n["files"] = (n.get("files") or []) + qd["files"]
+            if n.get("kind") == "resume":
+                n["kind"] = "urgent"
         t["_redirect"] = None
         tsave(t)
     try:

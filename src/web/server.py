@@ -320,7 +320,8 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/task/submit":
             return submit_task(d.get("id", ""), d.get("files", []))
         if path == "/api/task/act":
-            return act(d.get("id", ""), d.get("action", ""), d.get("text", ""), d.get("files"), d.get("template", ""))
+            return act(d.get("id", ""), d.get("action", ""), d.get("text", ""), d.get("files"), d.get("template", ""),
+                       bool(d.get("urgent")))
         if path == "/api/task/file":
             return open_task_file(d.get("id", ""), d.get("path", ""))
         if path == "/api/task/subdir":

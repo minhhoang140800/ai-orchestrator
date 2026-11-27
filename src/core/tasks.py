@@ -148,7 +148,7 @@ def subtasks(t):
     return out
 
 
-def act(tid, action, text="", files=None, template=""):
+def act(tid, action, text="", files=None, template="", urgent=False):
     t = TASKS.get(tid)
     if not t:
         return {"error": "Không tìm thấy task"}
@@ -179,9 +179,15 @@ def act(tid, action, text="", files=None, template=""):
                 if wdir(t).exists():
                     write_claude_md(t)
             tmsg(t, "user", text, files=files)
-            if s == "running":                         # tin gấp: ngắt, Claude điều chỉnh rồi làm tiếp
-                t["_redirect"] = {"kind": "urgent", "text": text, "files": files}
+            if s == "running" and urgent:              # nút "Gửi gấp": ngắt, Claude điều chỉnh rồi làm tiếp
+                q = t.pop("_queued", None)             # tin đã xếp hàng trước đó: gộp vào tin gấp
+                t["_redirect"] = {"kind": "urgent", "text": ((q or {}).get("text", "") + "\n\n" + text).strip(),
+                                  "files": (q or {}).get("files", []) + files}
                 kill_tree(PROCS.get(tid))
+            elif s == "running":                       # mặc định: XẾP HÀNG, không ngắt lượt đang làm (khỏi mất việc);
+                q = t.setdefault("_queued", {"text": "", "files": []})   # chạy ngay khi lượt hiện tại xong
+                q["text"] = (q["text"] + "\n\n" + text).strip()
+                q["files"] = q["files"] + files
             elif s == "queued" and t.get("next"):      # chưa chạy: gộp vào yêu cầu đang chờ
                 n = t["next"]
                 n["text"] = (n.get("text", "") + "\n\n" + text).strip()

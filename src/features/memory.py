@@ -84,9 +84,19 @@ def mem_save(text, pid=None, hist=None):
             _atomic(mem_hist_file(pid), str(hist or "").replace("\r\n", "\n").strip()[:MEM_HIST_MAX + 300])
 
 
-def mem_turn(t):
-    """Lượt vừa xong: tin nhắn người dùng từ câu trả lời trước tới giờ + câu trả lời cuối."""
+MEM_EVERY = 5                        # cập nhật bộ nhớ: lượt đầu của task, rồi sau mỗi 5 lượt (không phải mỗi lượt)
+
+
+def mem_turn(t, since=None):
+    """Đoạn hội thoại để rút bộ nhớ. since=None: chỉ lượt vừa xong; since=i: mọi tin từ vị trí i (tối đa ~6.000 ký tự)."""
     ms = t.get("messages") or []
+    if since is not None:
+        seg = [m for m in ms[since:] if m.get("role") in ("user", "claude") and m.get("kind") != "error" and (m.get("text") or "").strip()]
+        if not any(m["role"] == "user" for m in seg):
+            return ""
+        out = "\n\n".join(("NGƯỜI DÙNG: " if m["role"] == "user" else "AI TRẢ LỜI: ") + m["text"][:1500 if m["role"] == "user" else 1200]
+                           for m in seg)
+        return out[-6000:]
     last = max((i for i, m in enumerate(ms) if m.get("role") == "claude" and m.get("kind") != "error"), default=-1)
     if last < 0:
         return ""
@@ -99,7 +109,7 @@ def mem_update(t):
     """Gọi sau khi lượt làm xong (luồng nền). Lỗi thì bỏ qua, giữ bộ nhớ cũ."""
     try:
         exe = find_bin("claude")
-        turn = mem_turn(t)
+        turn = mem_turn(t, t.get("mem_at", 0))
         if not exe or not turn or not claude_usable():   # không có Claude trả phí: không tốn hạn mức ChatGPT
             return
         pid = t.get("project")
@@ -125,7 +135,22 @@ def mem_update(t):
         dlog(f"mem_update {t.get('id')}: {e}")
 
 
-def after_turn(t, wi=None):
-    """Sau khi 1 lượt xong: dọn nháp trước, rồi mới cập nhật bộ nhớ (cả hai chạy nền)."""
-    finish_clean(t, wi)
+def mem_maybe(t):
+    """Chỉ cập nhật bộ nhớ ở lượt đầu của task và sau mỗi MEM_EVERY lượt (đỡ tốn lượt gọi, hướng dẫn ít đổi)."""
+    ms = t.get("messages") or []
+    at = t.get("mem_at")
+    turns = sum(1 for m in ms[at or 0:] if m.get("role") == "work")
+    if at is not None and turns < MEM_EVERY:
+        return
     mem_update(t)
+    t["mem_at"] = len(ms)
+    try:
+        tsave(t)
+    except Exception:
+        pass
+
+
+def after_turn(t, wi=None):
+    """Sau khi 1 lượt xong: dọn nháp trước, rồi mới (nếu tới lượt) cập nhật bộ nhớ (cả hai chạy nền)."""
+    finish_clean(t, wi)
+    mem_maybe(t)

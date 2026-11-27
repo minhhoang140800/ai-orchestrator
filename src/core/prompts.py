@@ -115,12 +115,8 @@ def workers_md(t, py, app, on):
         return ""
     if LOW_SPEC or norm_mode(t.get("mode")) == "eco":
         return "## Số worker song song" + chr(10) + "- 1 worker một lúc (" + ("máy cấu hình thấp" if LOW_SPEC else "chế độ Eco") + ")."
-    try:
-        q = quota_md()
-    except Exception as e:
-        q = f"chưa đọc được ({e})"
     return f"""## Số worker song song (BẠN tự quyết, trần {MAX_PER_TASK}/task; app tự xếp hàng khi cả máy hết chỗ)
-- Hạn mức lúc bắt đầu lượt: {q}
+- Hạn mức lúc bắt đầu lượt: app gửi kèm cuối tin nhắn mỗi lượt (mục "Thông tin app cập nhật").
   Lô dài / trước đợt giao mới: xem lại bằng "{py}" "{app}" quota
 - Chọn theo: số việc độc lập, độ nặng (vẽ/xử lý ảnh, file lớn, research dài = nặng), hạn mức còn lại và giờ reset của
   BÊN sẽ làm (vẽ ảnh: xem cả dòng "vẽ ảnh hết lượt"):
@@ -137,9 +133,7 @@ def write_claude_md(t):
     mode_rules = MODE_RULES[mode].format(n="1 (máy cấu hình thấp)" if LOW_SPEC else str(MAX_WORKERS))
     pm = t.get("pm") or "claude"
     agy_ok = bool(find_bin("agy")) and CFG["ais"].get("gemini", {}).get("ok") is not False
-    can = {"codex": bool(find_bin("codex")) and CFG["ais"].get("codex", {}).get("ok") is not False,
-           "gemini": agy_ok or bool(CFG.get("gemini_key"))}
-    on = [w for w in ("codex", "gemini") if w != pm and can[w]]
+    on = workers_on(t)
     desc = {"codex": "codex — ChatGPT/Codex: code, CSV/Excel/Word/PowerPoint, script, sửa file, tạo ảnh ($imagegen)",
             "gemini": "gemini — Gemini/Antigravity: research web, tổng hợp, ý tưởng; tạo/sửa ảnh, tạo/sửa file (--write / --edit)"
             + (" (hết lượt/lỗi thì app tự chuyển sang Gemini API key: chỉ trả lời chữ)" if CFG.get("gemini_key") else "")
@@ -179,18 +173,17 @@ Tiêu chí đã dùng:
         (rd / f"{k}.md").write_text(mods[k], encoding="utf-8")
     extra_md = ("## Hướng dẫn thêm — CHỈ đọc khi task cần tới\n" + "\n".join(
         f"- {MD_TITLES[k]}: ./rules/{k}.md" for k in extra) + "\n\n") if extra else ""
-    bm = briefs_md(["image"] if "image" in need else ["text"])
-    bm = bm + "\n" if bm else ""
     nghiem_thu_on = f"""- Worker "completed" chưa phải là xong: kiểm tra file thật. Đo được: "{py}" "{app}" check files|png ... (xem --help).
 - Giám sát bật + task có sản phẩm: trước khi làm, viết tasks/criteria.md ngắn, kiểm chứng được (đánh dấu BẮT BUỘC); đổi yêu cầu -> cập nhật.
-- Chấm chất lượng: {("GIÁM SÁT BẬT — giám khảo độc lập chấm CẢ LÔ ở cuối (sau check kỹ thuật); fail -> sửa đúng lỗi nêu, chấm lại "
-  "file đã sửa, lặp tới khi ĐẠT (tối đa 4 vòng; vẫn fail thì báo rõ còn lỗi gì):") if judge else
+- Chấm chất lượng: {("GIÁM SÁT BẬT — file worker làm: app TỰ chấm (xem dưới), bạn KHÔNG gọi giám khảo lại. Chỉ gọi giám khảo "
+  "cho sản phẩm bạn TỰ làm (không qua worker), 1 lần cho cả lô; fail -> sửa đúng lỗi nêu, chấm lại file đã sửa (tối đa 4 vòng; "
+  "vẫn fail thì báo rõ còn lỗi gì):") if judge else
   ("GIÁM SÁT BẬT — không có giám khảo Claude: giao gemini soát theo criteria.md, sửa và soát lại tới khi đạt (tối đa 4 vòng).")
   }
 {f"""    "{py}" "{app}" judge --files <thư mục/file> --criteria tasks/criteria.md [--refs "<mẫu đã duyệt>"] --brief "<yêu cầu>" --out work/J1
   Có criteria.md: app TỰ chấm từng việc vẽ NGAY khi việc đó xong và tự giao sửa file trượt (tối đa 2 vòng; bản sửa ra thư
-  mục nhóm, bản trước vào _ban_cu/) -> status.json có "judge" (overall, summary, issues, fixed). KHÔNG chấm lại file đã đạt; cuối lô chỉ chấm nhanh
-  tính đồng bộ cả bộ (--rounds 0) khi nhiều file cùng loại; bạn chỉ xử lý phần app không tự sửa được.
+  mục nhóm, bản trước vào _ban_cu/) -> status.json có "judge" (overall, summary, issues, fixed). KHÔNG chấm lại file app đã chấm (đạt hay
+  đã tự sửa), KHÔNG chấm cả lô ở cuối; bạn chỉ xử lý phần app không tự sửa được.
 """ if judge else ""}  Lô lớn (từ 5 sản phẩm cùng loại): làm 1 mẫu, tự xem rồi mới chạy cả lô. Lỗi: sửa tối đa 2 lần/sub-task, quá thì báo partial."""
     nghiem_thu_off = (f"""## Nghiệm thu (Giám sát TẮT — chỉ giao việc)
 - KHÔNG viết criteria.md, KHÔNG giám khảo, KHÔNG tự xem lại/so từng chi tiết. Nhận file xong là báo kết quả.
@@ -201,7 +194,7 @@ Tiêu chí đã dùng:
 ## Hướng dẫn của người dùng (ưu tiên áp dụng)
 {CFG.get('instructions', '').strip() or '(không)'}
 
-{mem_block(t)}## Vai trò
+## Vai trò
 Bạn là PM: lên kế hoạch, giao việc, kiểm tra, tổng hợp; tự viết/biên tập văn bản và TỰ xử lý phần cần tư duy (phân tích,
 quyết định hướng làm, chốt nội dung, đánh giá chất lượng). Việc thao tác/khối lượng (vẽ/xử lý ảnh, file hàng loạt, code/script,
 research web dài) ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật. Task là cuộc trò chuyện nhiều lượt.
@@ -209,7 +202,7 @@ research web dài) ưu tiên giao GPT/Gemini. Nghiệm thu trên file thật. Ta
 ## Đường dẫn
 - Thư mục hiện tại: nháp/brief/log, bị XÓA khi task xong -> không để sản phẩm ở đây. File người dùng gửi: {tdir(t) / "input"}
 - OUTPUT (sản phẩm giao người dùng): {out_dir(t)} — người dùng chỉ định nơi khác thì lưu đúng nơi đó, ghi đường dẫn đầy đủ.
-  Sản phẩm GOM THEO NHÓM, ít thư mục: OUTPUT/<YYYYMMDD>-<nhóm> (vd {datetime.date.today():%Y%m%d}-icons, ...-screenshots,
+  Sản phẩm GOM THEO NHÓM, ít thư mục: OUTPUT/<YYYYMMDD>-<nhóm> (vd <YYYYMMDD>-icons, ...-screenshots,
   ...-concept_boards); mọi việc cùng loại chung 1 thư mục, KHÔNG mỗi việc / mỗi lần sửa 1 thư mục.
   File worker làm ra được app chuyển THẲNG vào thư mục nhóm ngay khi việc xong: thêm --group <nhóm> khi giao (vd --group icons;
   không có thì app đoán theo tên --out), --out work/<tên việc> (vd work/SS1_blur). status.json: export_dir + files.
@@ -233,8 +226,9 @@ Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở expor
 ## Chia việc
 - Giao theo số liệu thật của máy này (app tự học sau mỗi việc: làm được không, mất bao lâu). Bên kia là dự phòng: app tự
   giao lại khi lỗi / hết lượt / không ra ảnh / chậm bất thường.
-{stats_md(on)}
-{bm}- Việc độc lập: chạy song song (mỗi worker --out riêng; không 2 worker --edit cùng thư mục).
+- Số liệu chọn worker từng loại việc, mẫu đề bài từng làm tốt, bộ nhớ về người dùng: app gửi kèm cuối tin nhắn (mục "Thông tin
+  app cập nhật") lần đầu và mỗi khi đổi — luôn dùng bản mới nhất.
+- Việc độc lập: chạy song song (mỗi worker --out riêng; không 2 worker --edit cùng thư mục).
 
 {workers_md(t, py, app, on)}
 
@@ -370,7 +364,46 @@ def small_imgs(t, files):
     return out
 
 
+def workers_on(t):
+    pm = t.get("pm") or "claude"
+    agy_ok = bool(find_bin("agy")) and CFG["ais"].get("gemini", {}).get("ok") is not False
+    can = {"codex": bool(find_bin("codex")) and CFG["ais"].get("codex", {}).get("ok") is not False,
+           "gemini": agy_ok or bool(CFG.get("gemini_key"))}
+    return [w for w in ("codex", "gemini") if w != pm and can[w]]
+
+
+def live_ctx(t, nxt):
+    """Thông tin hay thay đổi (KHÔNG để trong CLAUDE.md, nếu không mỗi lượt Claude phải đọc lại cả bản hướng dẫn):
+    bộ nhớ người dùng, số liệu chọn worker + mẫu đề bài (gửi lần đầu phiên và khi đổi), hạn mức (mỗi lượt, vài dòng)."""
+    try:
+        on = workers_on(t)
+        mem = mem_block(t)
+        need = md_needs(t)
+        bm = briefs_md(["image"] if "image" in need else ["text"]) if on else ""
+        st = (("## Chia việc — số liệu máy này (app tự học sau mỗi việc)\n" + stats_md(on) + ("\n" + bm if bm else "") + "\n")
+              if on else "")
+        stable = mem + st
+        import hashlib
+        h = hashlib.sha1(stable.encode()).hexdigest()
+        add = stable if stable and (not t.get("session_started") or t.get("live_hash") != h) else ""
+        t["live_hash"] = h
+        q = ""
+        if on and not (LOW_SPEC or norm_mode(t.get("mode")) == "eco") and route(t, nxt) != "ask":
+            try:
+                q = "## Hạn mức lúc bắt đầu lượt\n" + quota_md() + "\n"
+            except Exception as e:
+                q = f"## Hạn mức lúc bắt đầu lượt\nchưa đọc được ({e})\n"
+        return ("\n\n---\nThông tin app cập nhật (thay cho bản trước trong phiên):\n" + add + q) if (add or q) else ""
+    except Exception as e:
+        dlog(f"live_ctx {t.get('id')}: {e}")
+        return ""
+
+
 def build_prompt(t, nxt):
+    return _build_prompt(t, nxt) + live_ctx(t, nxt)
+
+
+def _build_prompt(t, nxt):
     kind = nxt.get("kind")
     files = nxt.get("files") or []
     fl = f"\nFile mới trong {tdir(t) / 'input'}: {', '.join(files)}." if files else ""
