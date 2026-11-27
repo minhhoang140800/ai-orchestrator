@@ -6,7 +6,8 @@
 # Chỉ nằm trên máy người dùng (thư mục _AI-Orchestrator cạnh lịch sử task), được nhúng vào hướng dẫn của mọi task sau.
 # Người dùng xem/sửa/xoá trong Cài đặt > Memory.
 
-ASK_FMT_RE = re.compile(r"\bA\s*/\s*B\b|A-B-C|A/B/C|còn tồn tại|đã thử.{0,30}chưa thử|\"?đã sửa\"?\s*(?:và|/)", re.I)   # khuôn hỏi / khuôn báo cáo
+ASK_FMT_RE = re.compile(r"\bA\s*/\s*B\b|A-B-C|A/B/C|còn tồn tại|đã thử.{0,30}chưa thử|\"?đã sửa\"?\s*(?:và|/)|\"đã kiểm tra\""
+                        r"|phương án\b.{0,40}\b(?:để|cho)\s+\w+\s+(?:chọn|duyệt)|liệt kê.{0,30}phương án", re.I)   # khuôn hỏi / khuôn báo cáo
 MEM_STYLE_MAX = 700                  # cách làm việc chung: ngắn, áp dụng cho MỌI task (không làm dài hướng dẫn)
 MEM_HIST_MAX = 800                   # lịch sử: riêng từng dự án, chỉ nhúng vào task của dự án đó
 _mlock = threading.Lock()
@@ -30,8 +31,8 @@ Viết lại cả 2 mục, giữ điều còn đúng, thêm điều mới học 
 ## Cách làm việc
 (dưới {smax} ký tự. CHỈ điều đúng với MỌI loại task: xưng hô, độ dài/kiểu trả lời, điều người dùng hay sửa/không thích.
 KHÔNG ghi quy trình riêng của 1 loại việc hay 1 dự án — vd phát hành, chạy test, đặt thư mục, cách vẽ asset — những thứ đó ghi ở Lịch sử.
-KHÔNG ghi quy định bắt buộc về cách đặt câu hỏi / lựa chọn A-B-C, KHÔNG ghi khuôn mẫu báo cáo ("Đã sửa", "Còn tồn tại",
-"đã thử / chưa thử"): app tự quyết theo từng task.)
+KHÔNG ghi quy định bắt buộc về cách đặt câu hỏi / lựa chọn A-B-C hay "đưa phương án để người dùng chọn" (mặc định AI tự
+chọn phương án tối ưu), KHÔNG ghi khuôn mẫu báo cáo ("Đã sửa", "Đã kiểm tra", "Còn tồn tại", "đã thử / chưa thử"): app tự quyết theo từng task.)
 ## Lịch sử
 (dưới {hmax} ký tự, tối đa 10 dòng, mới nhất ở đầu: việc đã làm/đang dở, quyết định đã chốt, quy trình riêng của dự án này)
 KHÔNG ghi mật khẩu, mã, key, token, số điện thoại, email, số tài khoản hay nội dung bí mật. Không có gì đáng nhớ thì trả lại như cũ.

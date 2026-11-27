@@ -9,7 +9,7 @@ MODE_RULES = {
 - Model nhỏ/nhanh cho việc đơn giản, mạnh cho việc khó.""",
     "turbo": """- TỐC ĐỘ TỐI ĐA: bắt tay làm ngay, kế hoạch vài dòng, không hỏi lại trừ khi thiếu dữ kiện bắt buộc. Song song tối đa theo mục "Số worker song song" (nghiêng về nhiều).
 - Không mẫu thử trước lô; Giám sát tắt thì không vòng sửa: chỉ check kỹ thuật, sai thì sửa đúng chỗ; tự xem sản phẩm tối đa 1 lần.
-- Không làm thêm ngoài yêu cầu (không preview/ghép so sánh). Trả kết quả ngay khi đủ dùng; ghi rõ phần chưa kiểm tra kỹ.""",
+- Không làm thêm ngoài yêu cầu (không preview/ghép so sánh). Trả kết quả ngay khi đủ dùng.""",
     "eco": """- TIẾT KIỆM HẠN MỨC: tuần tự, 1 worker một lúc; việc tự làm được bằng lệnh/script thì không gọi AI.
 - Giám sát tắt: tối đa 1 vòng sửa. Không làm thêm ngoài yêu cầu.""",
 }
@@ -213,7 +213,7 @@ Giao việc: ghi yêu cầu đủ ngữ cảnh vào tasks/<ID>.md (dòng đầu 
   --drive: GPT sửa thẳng file Google Sheets/Docs/Slides qua kết nối Drive của nó.
 Nhiều việc: giao cả lô bằng --bg (trả về ngay), rồi chờ MỘT lần: "{py}" "{app}" wait work/S1 work/S2 work/S3
 App TỰ lo: chọn model (không truyền --model), giới hạn số worker chạy cùng lúc, thời gian chờ. Chọn worker nào là việc của
-bạn; worker lỗi/hết lượt thì status báo lỗi, bạn quyết giao bên kia, chờ hay tự làm (app không tự chuyển).
+bạn; app không tự chuyển worker: worker lỗi (status báo lỗi) thì bạn quyết giao bên kia hay tự làm.
 Worker hết lượt: BẠN tự quyết chuyển hay chờ, dựa trên: còn bao lâu tới giờ reset, bên kia có làm được không (đăng nhập,
   hạn mức, loại việc), có cần đồng bộ phong cách với phần đã làm không. Chuyển: giao bên kia ngay, ghi 1 câu lý do trong trả lời.
   Chờ: KHÔNG viết vòng lặp sleep / chờ ngầm (làm task treo, người dùng không nhắn được). Ghi tasks/resume_at.txt (dòng 1: giờ
@@ -226,7 +226,7 @@ Kết quả: work/<ID>/vN/ (result.md, status.json); file sản phẩm ở expor
 
 {brain_md}{tpl_md}## Chế độ: {mode_name}
 {mode_rules}
-- Worker báo "limit": tự quyết chuyển bên / chờ (mục Giao việc) hoặc tự làm; không đảm bảo chất lượng thì hỏi người dùng.{" Bước QUÁ khó (đã thử không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if mode == 'pro' else ""}
+{"- Bước QUÁ khó (đã thử không ra): ghi xhigh vào tasks/effort.txt -> lượt sau chạy mức cao nhất." if mode == 'pro' else ""}
 
 
 ## Khi cần người dùng quyết định

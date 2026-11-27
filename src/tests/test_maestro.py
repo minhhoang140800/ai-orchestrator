@@ -730,6 +730,29 @@ class V125(unittest.TestCase):
         self.assertNotIn("via", st)
 
 
+class V129(unittest.TestCase):
+    """12.9: không còn luật ngược "mặc định tự quyết" / "báo kết quả ngắn"; bộ nhớ không học thói quen đưa phương án để chọn."""
+    def test_no_conflicting_rules(self):
+        for mode in ("turbo", "balanced", "pro"):
+            t = {"id": "C9" + mode, "text": "x", "mode": mode, "folder": "09 - " + mode}
+            NS["write_claude_md"](t)
+            md = (NS["wdir"](t) / "CLAUDE.md").read_text(encoding="utf-8")
+            self.assertNotIn("chưa kiểm tra kỹ", md)
+            self.assertNotIn("không đảm bảo chất lượng thì hỏi", md)
+            self.assertIn("app không tự chuyển worker", md)
+            self.assertEqual("xhigh vào tasks/effort.txt" in md, mode == "pro")
+
+    def test_memory_drops_choose_habit(self):
+        NS["mem_save"]("## Cách làm việc\n- Gọi Hoàng\n- Luôn đưa 2-3 phương án để Hoàng chọn trước khi làm.\n- Báo cáo có mục \"Đã kiểm tra\".")
+        try:
+            m = NS["mem_text"]()
+            self.assertIn("Gọi Hoàng", m)
+            self.assertNotIn("phương án", m)
+            self.assertNotIn("Đã kiểm tra", m)
+        finally:
+            NS["mem_save"]("")
+
+
 class NoConsole(unittest.TestCase):
     """Gemini CLI tự cập nhật nền bằng tiến trình mở console riêng (Windows Terminal hiện cửa sổ đen) -> app tắt cơ chế đó."""
     def test_agy_autoupdate_off(self):
