@@ -802,6 +802,18 @@ class AskOnlyMidway(unittest.TestCase):
         self.assertNotIn("không?", out)
         self.assertEqual(NS["strip_ask"]("Đã sửa xong 3 lỗi."), "Đã sửa xong 3 lỗi.")
 
+    def test_strip_options_with_sub_bullets(self):                 # 12.8: lựa chọn có dòng con + câu mời chọn không kết thúc bằng "?"
+        rt = ("**Đã kiểm tra:**\n- Plugin đang bật: GitHub, Notion.\n\n**Phương án đưa PWA lên mạng:**\n"
+              "- A - **GitHub Pages** (đề xuất):\n  - Không cần cài thêm gì.\n  - Codex tự đẩy lên nhánh `gh-pages`.\n"
+              "- B - **Cài plugin Vercel:**\n  - Bạn cần đăng nhập 1 lần.\n\n"
+              "Bạn muốn làm phương án nào? Tôi đề xuất A cho việc PWA. Nếu cần thêm công cụ thì làm B.")
+        out = NS["strip_ask"](rt)
+        self.assertIn("Plugin đang bật: GitHub, Notion.", out)
+        for x in ("GitHub Pages", "Không cần cài thêm gì", "đăng nhập 1 lần", "Phương án đưa PWA", "phương án nào"):
+            self.assertNotIn(x, out, x)                                # không để dòng con / tiêu đề / câu mời chọn mồ côi
+        self.assertEqual(NS["strip_ask"]("Kết quả:\n- Vì sao lỗi: do hết lượt.\n- File: a.png"),
+                         "Kết quả:\n- Vì sao lỗi: do hết lượt.\n- File: a.png")
+
     def test_prompt_decides_itself(self):
         t = {"id": "AQ1", "text": "x", "mode": "balanced", "folder": "04 - Hỏi", "watch": False}
         NS["write_claude_md"](t)

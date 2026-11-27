@@ -35,13 +35,37 @@ def asks_user(text):
 OPT_LINE = re.compile(r"^\s*(?:[-•*]\s*)?\**[A-F]\**\s*[-–.:)]\s+\S")
 
 
+ASK_TAIL = re.compile(r"\?.*(?:muốn|chọn|duyệt|làm|không|nào|hay\b)|(?:muốn|chọn|duyệt|làm|không|nào|hay\b).*\?"
+                      r"|(?:lựa\s+)?chọn\s*:?\s*$|đề xuất\s+(?:phương án\s+)?[A-F]\b", re.I)
+
+
 def strip_ask(text):
-    """Bỏ các dòng lựa chọn "A - ..." và đoạn hỏi cuối (đã có trong question.md) khỏi câu trả lời, giữ phần kết quả."""
-    lines = [x for x in (text or "").splitlines() if not OPT_LINE.match(re.sub(r"[`_]", "", x))]
-    while lines and (not lines[-1].strip() or asks_user(lines[-1])
-                     or re.search(r"(chọn|lựa chọn)\s*:?\s*\**$", lines[-1].strip(), re.I)):
-        lines.pop()
-    return "\n".join(lines).strip()
+    """Câu trả lời đi kèm question.md: bỏ khối lựa chọn "A - ..." (cả các dòng con thụt vào bên dưới mỗi lựa chọn và dòng
+    tiêu đề "Phương án ...:" ngay trên khối) và đoạn hỏi / mời chọn ở cuối — các thứ đó đã có trong question.md (hiện thành
+    nút bấm). Giữ phần kết quả."""
+    src, out, i, prev_opt = (text or "").splitlines(), [], 0, False
+    ind = lambda x: len(x) - len(x.lstrip())
+    while i < len(src):
+        x = src[i]
+        if OPT_LINE.match(re.sub(r"[`_]", "", x)):
+            if not prev_opt:                                   # đầu khối lựa chọn: bỏ dòng tiêu đề ngay trên (kết thúc bằng ":")
+                while out and not out[-1].strip():
+                    out.pop()
+                if out and re.sub(r"[*_`]", "", out[-1]).strip().endswith(":"):
+                    out.pop()
+            base, i, prev_opt = ind(x), i + 1, True
+            while i < len(src) and (not src[i].strip() or ind(src[i]) > base):   # dòng con của lựa chọn
+                if not src[i].strip() and (i + 1 >= len(src) or ind(src[i + 1]) <= base):
+                    break
+                i += 1
+            continue
+        if x.strip():
+            prev_opt = False
+        out.append(x)
+        i += 1
+    while out and (not out[-1].strip() or asks_user(out[-1]) or ASK_TAIL.search(re.sub(r"[*_`>#]+", "", out[-1]))):
+        out.pop()
+    return "\n".join(out).strip()
 
 
 FOLDER_NO = re.compile(r"^(\d{1,4}) - ")

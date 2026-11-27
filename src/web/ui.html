@@ -334,7 +334,7 @@ aside{padding:0 12px;background:var(--side)}
 .msg.user{align-self:flex-end;max-width:min(80%,640px);padding:12px 16px;border-radius:18px;background:#F3F3F3;border:0;font-size:15px;line-height:1.6;white-space:pre-wrap}
 .claude{border:0;background:transparent;padding:0;width:100%}
 .claude.error{background:var(--soft);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
-.qopts{display:flex;flex-direction:column;gap:6px;margin-top:12px;max-width:560px}.qopt{display:flex;gap:10px;align-items:flex-start;text-align:left;padding:9px 14px;border:1px solid var(--line);border-radius:12px;background:#fff;font-size:14px;line-height:1.45;cursor:pointer;height:auto}.qopt:hover{border-color:#bdbdbd;background:var(--soft)}.qopt b{flex:none;min-width:18px}.qopt.rec{border-color:#9a9a9a}.qopt small{color:var(--mute);margin-left:4px}.qother{font-size:12px;color:var(--mute);margin-top:2px}
+.qopts{display:flex;flex-direction:column;gap:6px;margin-top:12px;max-width:560px}.qopt{display:flex;gap:10px;align-items:flex-start;text-align:left;padding:9px 14px;border:1px solid var(--line);border-radius:12px;background:#fff;font-size:14px;line-height:1.45;cursor:pointer;height:auto}.qopt:hover{border-color:#bdbdbd;background:var(--soft)}.qopt b{flex:none;min-width:18px}.qopt.rec{border-color:#9a9a9a}.qopt small{color:var(--mute);margin-left:4px}.qopt .qdet{display:block;font-style:normal;font-size:12.5px;color:var(--mute);margin-top:2px}.qother{font-size:12px;color:var(--mute);margin-top:2px}
 /* chữ trong câu trả lời */
 .claude .txt{font-size:15.5px;line-height:1.65;color:var(--ink)}
 .claude .txt p{margin:0 0 14px}.claude .txt>:last-child{margin-bottom:0}
@@ -2124,10 +2124,14 @@ function artifact(m, i) {      // thẻ kết quả: tên thư mục, số file 
     ${!all && n > 3 ? `<button class="artm" data-fmore="${T.id}:${i}">+ ${n - 3} file</button>` : ""}</div></div>`;
 }
 function qOpts(text) {      // "A - ...", "**B.** ...", "- C: ..." -> lựa chọn; chỉ khi 2-6 lựa chọn, không trùng chữ cái
-  const opts = [], keep = [];
+  const opts = [], keep = [];        // dòng con thụt vào dưới 1 lựa chọn -> mô tả của lựa chọn đó (hiện trong nút, không lặp bên trên)
+  let last = null, base = 0;
   for (const l of (text || "").split("\n")) {
-    const m = l.replace(/[*_`]/g, "").match(/^\s*(?:[-•]\s*)?([A-F])\s*[-–.:)]\s+(.+)$/);
-    if (m) opts.push([m[1], m[2].trim()]); else keep.push(l);
+    const c = l.replace(/[*_`]/g, ""), ind = l.length - l.trimStart().length;
+    const m = c.match(/^\s*(?:[-•]\s*)?([A-F])\s*[-–.:)]\s+(.+)$/);
+    if (m) { last = [m[1], m[2].trim().replace(/:$/, ""), []]; base = ind; opts.push(last); }
+    else if (last && l.trim() && ind > base) last[2].push(c.trim().replace(/^[-•]\s*/, ""));
+    else { if (l.trim()) last = null; keep.push(l); }
   }
   const ks = opts.map((o) => o[0]);
   if (opts.length < 2 || opts.length > 6 || new Set(ks).size !== ks.length) return { opts: [], text };
@@ -2208,7 +2212,7 @@ function renderTask() {
     const inst = m.kind === "install" ? `<div class="inst">Cần cài: <ul>${(m.items || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${i === lastC && t.status === "waiting"
       ? (t.installing ? `<span class="spin"></span> Đang cài — xem cửa sổ cài đặt vừa mở` : `<button class="pri" data-act="install">Cài đặt</button> <small style="color:var(--mute)">Maestro tự chạy mọi thứ, xong tự làm tiếp</small>`) : ""}</div>` : "";
     const qo = m.kind === "question" && i === lastC && t.status === "waiting" ? qOpts(m.q || m.text) : null;   // câu hỏi ngắt giữa chừng (question.md): lựa chọn A/B bấm được
-    const qbox = qo && qo.opts.length ? `<div class="qopts">${qo.opts.map(([k, v]) => `<button class="qopt ${/\(đề xuất\)/i.test(v) ? "rec" : ""}" data-qopt="${esc(k + " - " + v.replace(/\s*\(đề xuất\)/i, ""))}"><b>${k}</b><span>${esc(v.replace(/\s*\(đề xuất\)/i, ""))}${/\(đề xuất\)/i.test(v) ? "<small>đề xuất</small>" : ""}</span></button>`).join("")}<div class="qother">Hoặc gõ câu trả lời khác ở ô bên dưới</div></div>` : "";
+    const qbox = qo && qo.opts.length ? `<div class="qopts">${qo.opts.map(([k, v, d]) => `<button class="qopt ${/\(đề xuất\)/i.test(v) ? "rec" : ""}" data-qopt="${esc(k + " - " + v.replace(/\s*\(đề xuất\)/i, ""))}"><b>${k}</b><span>${esc(v.replace(/\s*\(đề xuất\)/i, ""))}${/\(đề xuất\)/i.test(v) ? "<small>đề xuất</small>" : ""}${d && d.length ? `<em class="qdet">${esc(d.join(" · "))}</em>` : ""}</span></button>`).join("")}<div class="qother">Hoặc gõ câu trả lời khác ở ô bên dưới</div></div>` : "";
     return `<div class="mwrap c"><div class="claude ${m.kind === "install" ? "question" : m.kind || ""}"><div class="txt">${md(qbox ? (m.q && m.text.endsWith(m.q) ? (m.text.slice(0, -m.q.length).trim() + "\n\n" + qo.text).trim() : qo.text) : m.text)}</div>${qbox}${inst}${pv}${fl || sv ? `<div class="mfoot2">${fl}${sv}</div>` : ""}</div>${mActs(m, i, "claude")}</div>`;
   });
   const queued = t.status === "login" ? `<div class="claude question"><div class="txt">Chưa có AI quản lý (Claude gói trả phí hoặc ChatGPT). Đăng nhập trên tab trình duyệt vừa mở, task sẽ tự chạy. <button data-relogin="1" style="margin-left:6px">Mở lại trang đăng nhập</button></div></div>` : t.status === "queued" ? `<div class="work"><span class="whead"><span class="spin"></span>${esc(t.wait || "Đang chuẩn bị…")}</span></div>` : "";
